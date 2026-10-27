@@ -1,0 +1,14 @@
+name: Probe
+# Checks that Actions can run on this repo (private-repo billing) and that the Xcode runner is reachable.
+on:
+  workflow_dispatch:
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+  mac:
+    runs-on: xcode-27
+    timeout-minutes: 15
+    steps:
+      - run: ls /Applications | grep -i xcode; sw_vers
