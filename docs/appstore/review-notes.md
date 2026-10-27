@@ -1,6 +1,6 @@
 # Snapjaw: App Review notes (v1.0)
 
-*Written Tue 27 Oct 2026 by the launch lead from the design (`design/GAME-DESIGN.md` §3–§9, `design/ROUND-1.md`); the build doesn't exist yet. The block between the markers is what App Review reads. Apple limits the field to 4,000 bytes; the block is plain ASCII (no smart quotes, no degree sign, no multiplication sign), so bytes = characters: **3,962 bytes** (counted with Node; the ported `tools/appstore/build-metadata.js` fails over 4,000). Before submission, tick the "Check against the build" table at the end; if a line is false, change the block, never the build to match the words.*
+*Written Tue 27 Oct 2026 by the launch lead from the design (`design/GAME-DESIGN.md` §3–§9, `design/ROUND-1.md`); the build doesn't exist yet. The block between the markers is what App Review reads. Apple limits the field to 4,000 bytes; the block is plain ASCII (no smart quotes, no degree sign, no multiplication sign), so bytes = characters: **3,979 bytes** (counted with Node; the ported `tools/appstore/build-metadata.js` fails over 4,000). Before submission, tick the "Check against the build" table at the end; if a line is false, change the block, never the build to match the words.*
 
 ## Where this goes
 
@@ -26,7 +26,7 @@ You don't need a Duo. Everything works on any iPhone, on iPad (as an iPhone app)
 2. HOW THE HINGE IS USED (iPhone Duo)
 Snapjaw reads the hinge angle only through the public iOS 27.1 API (SwiftUI onHingeChange), behind an availability check. No private API. The angle works the trap while the game is on screen and is never sent anywhere.
 a) Hold the Duo open like a book (landscape, fold top to bottom), relaxed, anywhere from about 135 to 175 degrees. The game follows the player's own resting angle; there is no target angle.
-b) To snap, close the halves about 22 degrees from that resting angle, then open again. The bite is decided the moment the closure reaches 22 degrees, so going further gains nothing and nothing has to be held. Creeping closed very slowly lets twitchy bugs fly off, so the snap is a short, brisk stroke, like turning a page.
+b) To snap, close the halves about 22 degrees from that resting angle, then open again. The bite is decided the moment the closure reaches 22 degrees, so going further gains nothing and nothing has to be held. Creeping closed very slowly never bites, and lets twitchy bugs fly off, so the snap is a short, brisk stroke, like turning a page.
 c) The score, snaps and hints sit on the right half, which stays sharp when iOS briefly softens one half of the screen as a fold starts from flat. Settings > HUD on the left moves them.
 d) Folded below about 50 degrees for over half a second, the run pauses and a card asks to open it like a book; it carries on when reopened. Closed, the outer display shows a card to open it. Portrait shows a card: hold it open like a book.
 e) Nearly flat only shows a hint: "Bend it a little, like a book". No penalty.

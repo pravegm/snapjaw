@@ -262,13 +262,13 @@ Why each risky item is None:
 | Never close or lay flat; too flat only shows "Bend it a little, like a book"; deep close pauses; shut shows the cover card | GAME-DESIGN §3; `TrapHint.bendALittle`, `Tuning.closingAngle` 50 / `closingDwell` 0.6, `UI` pose cards | [ ] | [ ] |
 | Score = bugs' points × number of bugs × chain; chain +0.5 per clean productive bite up to ×4; dry snap or stinger resets it | GAME-DESIGN §5; `TrapSession` | [ ] | [ ] |
 | 10 snaps to start (max 12); every snap costs 1; Feast at ≥ 3 caught (+1), ≥ 5 (+2); bee +1 extra, wasp +2 extra | GAME-DESIGN §5; `Tuning.startSnaps` 10, `maxSnaps` 12 | [ ] | [ ] |
-| Sipping bugs react slower, flying ones faster; a slow close (creep) makes twitchy bugs leave | GAME-DESIGN §4 reaction formula and creep rule | [ ] | [ ] |
+| Sipping bugs react slower, flying ones faster; a slow close (creep) makes twitchy bugs leave and never bites (review notes, support page) | GAME-DESIGN §3 creep (`creepRef`, 3 s) and §4 reaction formula | [ ] | [ ] |
 | A bee in the bite is let go unharmed; "Your trap is tired" at 0 snaps | GAME-DESIGN §5; `RunPhase.tired`, `BugActivity.released` | [ ] | [ ] |
 | Morning → noon → dusk → night with the named bugs per phase; Golden Scarab rare | GAME-DESIGN §6 table; `WaveFactory`, `BugCatalog` | [ ] | [ ] |
 | Bug Book: 16 species, drawing + one-line joke + count; bees and wasps unlock when spared | GAME-DESIGN §7; `BugCatalog.all`, `UI` Bug Book | [ ] | [ ] |
 | 12 plant ranks, Sprout to Bog Monarch, by lifetime bugs caught | `PlantRanks` (contract), GAME-DESIGN §7 | [ ] | [ ] |
 | First Bite on the first go: fly, first snap, the bee, the triple; replay from Settings ("Replay First Bite") | GAME-DESIGN §8; ROUND-1 App engineer (skip after step 2) | [ ] | [ ] |
-| Daily Bog: same bugs for everyone, one scored try a day, then practice | `DailySeed`, `RunMode.daily(day:scored:)` | [ ] | [ ] |
+| Daily Bog: same bugs for everyone, one scored try a day, then practice; a new one at 00:00 UTC (support page) | `DailySeed` with a UTC calendar (§11 ask 3), `RunMode.daily(day:scored:)` | [ ] | [ ] |
 | Other iPhones: tap anywhere to snap; the trap reopens by itself | GAME-DESIGN §9; `TouchTrapSource` | [ ] | [ ] |
 | Score and snaps on the sharp (right) half; Settings "HUD on the left" | GAME-DESIGN §3; `ScreenLayout.hudOnLeft` | [ ] | [ ] |
 | All sound synthesised live; panned buzz per bug; landing tick haptic; frogs by day, crickets at night | GAME-DESIGN §10; `Feedback/` (no audio files in the bundle) | [ ] | [ ] |

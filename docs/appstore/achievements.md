@@ -21,7 +21,7 @@
 | Score submission | Best score | Best score (the app submits only the day's one scored try) |
 | Score range (optional) | 0 – 10,000,000 | 0 – 10,000,000 |
 | Recurring settings | — | Start **Mon 2 Nov 2026, 00:00 UTC**; duration **1 day**; repeats every **1 day** |
-| What the app submits | `RunResult.score` (the protein total) of every finished **Feed** run and every finished **Daily Bog** run, scored or practice | `RunResult.score` of the **first scored Daily Bog** of the (UTC) day (`RunMode.daily(day:, scored: true)`) |
+| What the app submits | `RunResult.score` (the protein total) of every finished **Feed** run (the Feed best, as Home shows it; Daily runs go to the Daily board only: `GameCenterManager.report`, 27 Oct) | `RunResult.score` of the **first scored Daily Bog** of the (UTC) day (`RunMode.daily(day:, scored: true)`) |
 
 **Why "protein":** it's the game's own word for the score (GAME-DESIGN §5, Results: "protein, a big counting number"), so the board reads "Best Feast · 12,480 protein". **Why the range goes to 10 million:** one 7-bug bite at ×4 can be worth several thousand, and GAME-DESIGN §5 says a perfect player's run lasts 6–8 minutes; 10 million leaves room. **Never submit** attract or lesson scores.
 
@@ -92,7 +92,7 @@ Twelve 1024 × 1024 PNGs, one per achievement, opaque (no alpha channel), in the
 - [ ] `earned(...)` returns only ids not in `alreadyEarned`, and only for `.feed` and `.daily` runs.
 - [ ] Authenticate once at launch; if the player declines, never show the sign-in sheet again uninvited. Silent when signed out.
 - [ ] Banners never appear mid-run: queue them until the Results card.
-- [ ] Daily: submit only the first scored run of the (UTC) day to `snap.daily`; every Feed and Daily run to `snap.best`.
+- [ ] Daily: submit only the first scored run of the (UTC) day to `snap.daily`; every finished Feed run to `snap.best` (matches `GameCenterManager.report` as first written, 27 Oct).
 - [ ] Tap play can earn every achievement (no hinge-only trigger).
 - [ ] `CoreTests`: one test per achievement with a hand-built `RunResult` just below and just at each threshold.
 
