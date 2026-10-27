@@ -76,7 +76,7 @@ enum AppRules {
     /// don't apply. Pure; tested.
     static func hintText(_ hint: TrapHint, touch: Bool) -> String? {
         switch hint {
-        case .bendALittle: return touch ? nil : "Bend it a little, like a book"
+        case .bendALittle: return touch ? nil : "Bend it, like a book"
         case .quick: return touch ? nil : "Snap it — quick!"
         case .openUp: return touch ? nil : "Open up to reset"
         case .beeInside: return "Bee! Wait…"
@@ -131,8 +131,15 @@ enum AppRules {
 
     // MARK: Daily dates
 
+    /// Daily days are UTC days (Core's `DailySeed.dayNumber` counts them in UTC), so their labels are too.
+    static var utcCalendar: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        return c
+    }
+
     /// The calendar day of a Daily day number (days since 2026-01-01, `DailySeed.dayNumber`).
-    static func date(day: Int, calendar: Calendar = .current) -> Date {
+    static func date(day: Int, calendar: Calendar = AppRules.utcCalendar) -> Date {
         var c = DateComponents()
         c.year = 2026
         c.month = 1
@@ -143,7 +150,7 @@ enum AppRules {
     }
 
     /// "27 Oct".
-    static func dailyDate(day: Int, calendar: Calendar = .current) -> String {
+    static func dailyDate(day: Int, calendar: Calendar = AppRules.utcCalendar) -> String {
         let f = DateFormatter()
         f.calendar = calendar
         f.locale = Locale(identifier: "en_GB")

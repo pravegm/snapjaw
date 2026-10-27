@@ -662,7 +662,7 @@ final class FeelSynth: @unchecked Sendable {
                 let swell: Float = 0.55 + 0.3 * sin(windLFO) + 0.15 * sin(windLFO2)
                 let gust = swell * swell
                 let reeds = reedFilter.process(nextNoise(), .highPass) * 0.18 * gust
-                let level = 0.03 * bed.wind * swell
+                let level = 0.08 * bed.wind * swell
                 l += (windFilterL.process(nextNoise(), .bandPass) + reeds) * level
                 r += (windFilterR.process(nextNoise(), .bandPass) + reeds) * level
             }
@@ -764,7 +764,7 @@ final class FeelSynth: @unchecked Sendable {
             groanJitter = 1 + 0.03 * (2 * unitNoise() - 1)
         }
         let saw = (2 * groanPhase - 1 - FeelSynth.polyBlep(groanPhase, dt)) * groanSlip
-        let body = groanFilter.process(saw, .lowPass) * 0.13
+        let body = groanFilter.process(saw, .lowPass) * 0.1
         let leaf = groanFormant.process(saw, .bandPass) * 0.05
         squeakPhase += twoPi * min(pitch * 7.2, sampleRate * 0.4) / sampleRate
         if squeakPhase > twoPi { squeakPhase -= twoPi }
@@ -880,7 +880,7 @@ final class FeelSynth: @unchecked Sendable {
             case 0: return step % 8 == 3 ? 7 : 12     // G5, C6
             case 1: return step % 8 == 3 ? 9 : 16     // A5, E6
             case 2: return step % 8 == 3 ? 14 : 9     // D6, A5
-            default: return step % 8 == 3 ? 11 + 3 : 7 // D6, G5
+            default: return step % 8 == 3 ? 14 : 7    // D6, G5
             }
         case 3:
             // The sparkle: a glassy tick on every odd eighth, two octaves up.
@@ -1060,7 +1060,7 @@ final class FeelSynth: @unchecked Sendable {
                 s.burst = 0.5 + 0.5 * unitNoise()
             }
             s.burst *= hopperDecay
-            return s.filter.process(nextNoise() * s.burst, .bandPass) * 0.06
+            return s.filter.process(nextNoise() * s.burst, .bandPass) * 0.15
         case .cricket:
             // Chirps: three 24 ms pulses of a 4.4 kHz tone every ~0.62 s.
             let period: Float = 0.62 / pitch
@@ -1396,14 +1396,14 @@ final class FeelSynth: @unchecked Sendable {
             if voice.phase > twoPi { voice.phase -= twoPi }
             var value: Float = 0
             let limit = sampleRate * 0.45
-            let stride = voice.odd ? 2 : 1
+            let harmonicStep = voice.odd ? 2 : 1
             var harmonic = 1
             var count = 0
             while count < voice.harmonics {
                 if frequency * Float(harmonic) < limit {
                     value += sin(voice.phase * Float(harmonic)) / Float(harmonic)
                 }
-                harmonic += stride
+                harmonic += harmonicStep
                 count += 1
             }
             return value * envelope * voice.gain * release
