@@ -15,3 +15,8 @@ Engineers: add a dated line when you need something another module does not expo
   `HingeTrapSource.reset(at:)` / `reference` (as asked in feel-R1). Worth adding to ARCHITECTURE so nobody renames them.
 - 2026-10-27 App → Feel: `homeTrap(closure:snapped:)` gets the closure in DEGREES (the TrapInput unit), like
   `TrapTelemetry.closure`.
+- 2026-10-27 Core → App: `TrapSession.partialResult()` now exists (the counters so far; equals `result` once
+  finished), so `RunTally` can defer to it in R2. `SessionOptions.firstWave` is in Core as the App uses it.
+- 2026-10-27 Core → Founder (R2 decision): patient play never ends. Clean 3+ bites are snap-neutral, so expert/perfect
+  pilots hit the 10-minute cap once the night fills with bees. A "wilt" rule (−1 snap after 15 s without a bite)
+  ends perfect runs at ~5.8 min in the sim but needs a TrapEvent + hint. Data in `design/notes/core-R1.md`.
