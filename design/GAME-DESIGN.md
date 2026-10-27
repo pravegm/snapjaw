@@ -50,8 +50,11 @@ Store line: **"Snap shut. Spare the bees."**
   - **Snap start** `ts`: the moment c passes 4° while armed.
   - **Snap** `tc`: the moment c passes **22°** (`Tuning.snapDepth`). The bite is decided here, at once: no need to go
     further, no need to hold. Snap time `d = tc − ts`.
-  - **Creep:** if c grows past 6° but the snap hasn't fired within 0.45 s, the trap is "creeping". Twitchy bugs notice
-    and leave. The hint says "Snap it — quick!".
+  - **Creep:** a slow close never snaps (the 0.6 s reference follows it down), so it is measured against a slower
+    reference: `creepRef` = the highest θ over the last 3 s (falling at most 6°/s, reset on re-arm). If
+    `creepRef − θ` stays past 6° for 0.45 s without a snap, the trap is "creeping". While creeping the reported
+    closure is that creep depth, so the jaws visibly close and twitchy bugs (nerve ≤ depth) notice and leave. The hint
+    says "Snap it — quick!".
   - **Closing pause:** θ < 50° for 0.6 s pauses ("Open it like a book to carry on"). Fully shut shows the cover card.
     Never pause near 90°: a hard snap often reaches 90–100° (Swoop's real-Duo lesson).
 - **Too flat:** θ ≥ 174° at the start of play shows "Bend it a little, like a book". There is no penalty. Starting a

@@ -1,0 +1,21 @@
+# iPhone Duo frames (ci/duo.sh "store" pass): the Duo simulator in book pose with a real fold, the hinge held at 150°
+# (open, so closing never pauses these). The pilot drives the trap, so the hinge doesn't. These are the candidates for
+# the App Store Duo set (truthful frames: nothing here that the app doesn't do).
+# name|demo args (-snapDemo, keys in design/ROUND-1.md)|seconds before capture|caption|expect
+# A freezeOn=<x> line waits for "SNAP-T freeze <x>" (at least 20 s, at least `wait`); freezeAfter= for any "SNAP-T freeze".
+01-title|screen=home;progress=mid|5|Home on the Duo: the title trap across both halves, the buttons on the right half|SNAP-T canvas
+02-landed|screen=play;seed=7;pilot=expert;freezeOn=landed|30|A fly sipping on a nectar drop inside the lobes|SNAP-T freeze landed
+03-crowd|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd|60|A crowd sipping across the fold, "Now!"|SNAP-T freeze crowd
+04-snap|screen=play;seed=7;pilot=perfect;freezeOn=snap|45|The bite: teeth interlocked, juice, the score pop|SNAP-T event snapped
+05-feast|screen=play;seed=7;wave=8;pilot=perfect;freezeOn=feast|90|"Feast! +1 snap" and the multiplier callout|SNAP-T event feast
+06-bee|screen=play;seed=7;wave=15;pilot=perfect;freezeOn=bee|60|A bee in the trap with its protected halo, "Bee! Wait…"|SNAP-T freeze bee
+07-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=sting|90|"Bzzt!": the bee let go, cross|SNAP-T event stung
+08-dusk|screen=play;seed=7;wave=14;pilot=expert;freezeOn=dusk|60|Dusk light, moths at the fold|SNAP-T event dayPhaseChanged
+09-night|screen=play;seed=7;wave=22;pilot=expert;freezeOn=night|60|Night: fireflies glowing in the blue|SNAP-T event dayPhaseChanged
+10-hud-left|screen=play;seed=7;pilot=casual;hudLeft=1;freezeAfter=8|16|The HUD mirrored to the left half|hudLeft=1
+11-daily|screen=play;mode=daily;seed=7;progress=mid;pilot=expert;freezeAfter=10|18|Daily Bog in play|SNAP-T input pilot
+12-results|screen=results;seed=7;progress=mid;pilot=casual|8|Results on the Duo|SNAP-T canvas
+13-book|screen=book;progress=late|5|The Bug Book, all 16|SNAP-T canvas
+14-lesson-2|screen=lesson;lessonStep=2|7|First Bite step 2 with the Duo text ("snap shut!")|SNAP-T canvas
+15-lesson-5-bee|screen=lesson;lessonStep=5|8|First Bite step 5: the bee, "Never eat a bee. Wait…"|SNAP-T canvas
+16-settings|screen=settings|4|Settings on the Duo|SNAP-T canvas

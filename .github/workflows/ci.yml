@@ -1,0 +1,211 @@
+name: CI
+
+# Our only compiler: builds Snapjaw (target Snap) with Xcode 27.1, runs the unit tests (SnapTests) on an iPhone 18 Pro
+# simulator, then captures landscape demo-mode screenshots (ci/scenarios.txt via ci/screenshots.sh) and renders the app
+# icon (`-snapDemo "screen=icon"`). Adapted from the sister projects' ci.yml (proven on these runners).
+# Artifacts: `logs` (build.log, errors.txt) and `screenshots` (ci-screens/: <scenario>.png, logs/, captures.tsv,
+# device.txt, app-icon-1024.png). Only the build and the tests fail the job; frames and the icon never do.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Snap/**"
+      - "SnapTests/**"
+      - "project.yml"
+      - "ci/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: "Regex of scenario names to capture (ci/scenarios.txt), e.g. '^1[0-9]-' or 'play'"
+        type: string
+        default: "."
+      device:
+        description: "Capture simulator (empty = iPhone 18 Pro; ci/screenshots.sh syntax), e.g. screen:750x1334 for the smallest iPhone"
+        type: string
+        default: ""
+
+concurrency:
+  # A run on another device never cancels (or is cancelled by) the main iPhone 18 Pro runs.
+  group: ci-${{ github.ref }}-${{ inputs.device }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: xcode-27
+    timeout-minutes: 120
+    env:
+      DEVICE: "iPhone 18 Pro"
+      # Balance harness seeds per skill (SnapTests/BalanceTests.swift); xcodebuild passes TEST_RUNNER_* to the test
+      # process with the prefix stripped (the test reads SNAP_BAL_SEEDS).
+      TEST_RUNNER_SNAP_BAL_SEEDS: "8"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy says snap, not smash (warning only)
+        # CLAUDE.md bar 3: never "smash" or "Fold to …" in copy (Fold Smasher owns smashing). Like the tabletop sister's candle/torch
+        # check: a hit is a warning annotated at its line, never a failure. Store/site text, plus Swift lines that carry a
+        # string literal (a heuristic: lines with a double quote). Whole words, any case, so "Smasher" doesn't count.
+        # Runs first, so a failed build still reports it.
+        if: always()
+        continue-on-error: true
+        run: |
+          set +e
+          shopt -s nullglob
+          store=(docs/appstore/*.md docs/*.html docs/appstore/*.json)
+          # `find`, not globstar: the runner's bash may be macOS's 3.2 (no globstar, no mapfile).
+          swift=()
+          while IFS= read -r f; do swift+=("$f"); done < <(find Snap -name '*.swift' 2>/dev/null)
+          files=(${store[@]+"${store[@]}"} ${swift[@]+"${swift[@]}"})
+          if (( ${#files[@]} == 0 )); then echo "no copy files found"; exit 0; fi
+          re="smash(es|ed|ing)?|fold to"
+          hits=$( { (( ${#store[@]} )) && grep -H -n -i -w -E "$re" "${store[@]}"
+                    (( ${#swift[@]} )) && grep -H -n -i -w -E "$re" "${swift[@]}" | grep '"'; } 2>/dev/null )
+          if [ -z "$hits" ]; then
+            echo "No \"smash\" / \"Fold to\" in ${#files[@]} files."
+            echo "Copy check: no \"smash\" / \"Fold to\" in ${#files[@]} files." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          n=$(printf '%s\n' "$hits" | wc -l | tr -d ' ')
+          printf '%s\n' "$hits" | head -50 | while IFS=: read -r f l text; do
+            echo "::warning file=$f,line=$l::\"smash\" / \"Fold to\" in copy (CLAUDE.md bar 3): $(printf '%s' "$text" | cut -c1-160)"
+          done
+          {
+            echo "### Copy check: $n line(s) say \"smash\" or \"Fold to\" (CLAUDE.md bar 3)"
+            echo '```'
+            printf '%s\n' "$hits" | cut -c1-200 | head -50
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      - name: Select Xcode 27.1
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.1.app
+          xcodebuild -version
+
+      - name: Generate project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build and test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Snap.xcodeproj -scheme Snap \
+            -destination "platform=iOS Simulator,name=$DEVICE" \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build.log | grep -E "error:|warning: .*Snap/|Test run|Suite .* (passed|failed)|✘|SNAP-BAL|\*\* " || true
+          grep -q "\*\* TEST SUCCEEDED \*\*" build.log
+
+      - name: Summarise errors
+        if: failure()
+        run: |
+          grep -E "error:|✘|failed" build.log | sort -u | head -300 > errors.txt || true
+          cat errors.txt
+
+      - name: Balance table
+        if: always()
+        continue-on-error: true
+        run: |
+          [ -f build.log ] || exit 0
+          if grep -q "SNAP-BAL" build.log; then
+            {
+              echo "### Balance (SNAP-BAL, $TEST_RUNNER_SNAP_BAL_SEEDS seeds per skill)"
+              echo '```'
+              grep -oE "SNAP-BAL.*" build.log | awk '!seen[$0]++' | head -80
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Demo-guard positive control
+        # testflight.yml fails a Release binary that contains "SNAP-T paused closing" (a DEBUG-only log literal) or the
+        # key "freezeAfter". That guard only means something if the literal is visible to `strings` in a Debug build
+        # (Xcode puts Debug code in Snap.debug.dylib), so check it here (sister R1). Non-fatal.
+        if: success()
+        continue-on-error: true
+        run: |
+          APP=build/Build/Products/Debug-iphonesimulator/Snap.app
+          if strings "$APP/Snap" "$APP"/*.debug.dylib 2>/dev/null | grep -q "SNAP-T paused closing"; then
+            echo "The Debug binary carries the SNAP-T paused closing literal: the Release demo guard is live."
+          else
+            echo "::warning::No SNAP-T paused closing literal in the Debug build, so the demo-strings guard in testflight.yml cannot fire. Print that line as one literal, or pick another long DEBUG-only literal for the guard."
+          fi
+          if strings "$APP/Snap" "$APP"/*.debug.dylib 2>/dev/null | grep -qx "freezeAfter"; then echo "freezeAfter is visible to strings in Debug."; else echo "freezeAfter is not visible to strings (Swift small string): expected."; fi
+
+      - name: Capture screenshots
+        if: success()
+        timeout-minutes: 100
+        env:
+          SCENARIO_FILTER: ${{ inputs.filter || '.' }}
+          # Tests always run on the iPhone 18 Pro; `device` picks the capture simulator (ci/screenshots.sh syntax:
+          # an exact name, auto:<suffix> or screen:<WxH>), e.g. screen:750x1334 for the smallest iPhone.
+          DEVICE: ${{ inputs.device || 'iPhone 18 Pro' }}
+        run: bash ci/screenshots.sh
+
+      - name: Render the app icon
+        # Non-fatal. The App engineer's `-snapDemo "screen=icon"` renders UI/AppIconArt.swift to a 1024 PNG and prints
+        # `SNAP-ICON <absolute path>` (a path in the sim's data container, which is a host path, so it is copied
+        # directly; the tabletop sister's route). SNAP_ICON=1 is also passed (SIMCTL_CHILD_ → the app's environment) for an app that
+        # keys off it. Fallbacks: the book-pose sister's Documents/AppIcon-1024.png, then any *icon*.png in the app's Documents.
+        # Commit the result as Snap/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png (CI never commits).
+        if: success()
+        continue-on-error: true
+        timeout-minutes: 6
+        run: |
+          set +e   # the default step shell is bash -e; every miss here is a warning, not a stop
+          set -uo pipefail
+          OUT="$PWD/ci-screens"; mkdir -p "$OUT/logs"
+          UDID=$(awk -F= '$1=="udid" {print $2}' "$OUT/device.txt" 2>/dev/null)
+          UDID="${UDID:-booted}"
+          LOG="$OUT/logs/icon.txt"; : > "$LOG"
+          to() { local s="$1"; shift; if command -v gtimeout >/dev/null 2>&1; then gtimeout -k 5 "$s" "$@"; elif command -v timeout >/dev/null 2>&1; then timeout -k 5 "$s" "$@"; else "$@"; fi; }
+          export SIMCTL_CHILD_SNAP_ICON=1
+          to 30 xcrun simctl terminate "$UDID" com.pravegm.snapjaw 2>/dev/null || true
+          to 90 xcrun simctl launch --terminate-running-process \
+            --stdout="$LOG" --stderr="$LOG" "$UDID" com.pravegm.snapjaw -snapDemo "screen=icon" >/dev/null \
+            || echo "::warning::icon launch failed"
+          src=""
+          for i in $(seq 1 40); do
+            src=$(grep -m1 -oE "SNAP-ICON .+" "$LOG" 2>/dev/null | sed -E 's/^SNAP-ICON +//; s/[[:space:]]+$//')
+            [ -n "$src" ] && [ -f "$src" ] && break
+            sleep 1
+          done
+          if [ -z "$src" ] || [ ! -f "$src" ]; then
+            data=$(to 30 xcrun simctl get_app_container "$UDID" com.pravegm.snapjaw data 2>/dev/null || true)
+            if [ -n "$data" ] && [ -f "$data/Documents/AppIcon-1024.png" ]; then src="$data/Documents/AppIcon-1024.png"
+            elif [ -n "$data" ]; then src=$(ls "$data"/Documents/*[Ii]con*.png 2>/dev/null | head -1); fi
+          fi
+          to 30 xcrun simctl terminate "$UDID" com.pravegm.snapjaw 2>/dev/null || true
+          grep -E "SNAP-" "$LOG" | tail -5 || true
+          if [ -n "$src" ] && [ -f "$src" ]; then
+            cp "$src" "$OUT/app-icon-1024.png"
+            dims=$(sips -g pixelWidth -g pixelHeight "$OUT/app-icon-1024.png" 2>/dev/null | awk '/pixel/ {printf "%s ", $2}')
+            alpha=$(sips -g hasAlpha "$OUT/app-icon-1024.png" 2>/dev/null | awk '/hasAlpha/ {print $2}')
+            echo "app icon: $src -> app-icon-1024.png ($dims, hasAlpha=$alpha)"
+            [ "$dims" = "1024 1024 " ] || echo "::warning::app icon is $dims, not 1024 x 1024"
+            [ "$alpha" = "no" ] || echo "::warning::app icon has an alpha channel (App Store icons must not; testflight.yml flattens the committed one)"
+            echo "App icon rendered: \`app-icon-1024.png\` ($dims, hasAlpha=$alpha) in the screenshots artifact." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::no app icon PNG (no SNAP-ICON line and nothing in Documents)"
+            echo "App icon: **not rendered** (no \`SNAP-ICON\` line; see ci-screens/logs/icon.txt)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: |
+            build.log
+            errors.txt
+          if-no-files-found: ignore
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: ci-screens/
+          if-no-files-found: ignore

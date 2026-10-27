@@ -1,0 +1,80 @@
+# XcodeGen spec. Generate the Xcode project on a Mac with:
+#   brew install xcodegen && xcodegen generate
+# Adapted from the book-pose sister's project.yml (C:\Users\59527\Wing; landscape, proven on the xcode-27 runners and
+# on a real Duo).
+# The project is Snap.xcodeproj, the scheme `Snap`, the app Snap.app (binary `Snap`). The player sees CFBundleDisplayName
+# (Swift reads it through AppBrand.name, never a literal).
+name: Snap
+options:
+  bundleIdPrefix: com.pravegm
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""   # set in Xcode > Signing & Capabilities, or by testflight.yml
+targets:
+  Snap:
+    type: application
+    platform: iOS
+    sources:
+      - path: Snap
+    info:
+      path: Snap/Info.plist
+      properties:
+        CFBundleDisplayName: Snapjaw
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        # Play is landscape (the Duo held open like a book, the halves are the lobes). All four orientations are listed
+        # (the book-pose sister's set) so a Duo held in tabletop (portrait inner canvas) is never letterboxed (Brim run
+        # 40203342285); portrait shows the pose card "Hold it open like a book". OrientationLock (copied) narrows the mask
+        # at run time; full-screen apps are refused upside down on hardware anyway (Brim real-Duo build 11).
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+        UIStatusBarHidden: true
+        UIRequiresFullScreen: true
+        UIUserInterfaceStyle: Dark
+        UIViewControllerBasedStatusBarAppearance: false
+        CADisableMinimumFrameDurationOnPhone: true
+        ITSAppUsesNonExemptEncryption: false
+        GKGameCenterBadgingDisabled: true
+    entitlements:
+      path: Snap/Snap.entitlements
+      properties:
+        com.apple.developer.game-center: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pravegm.snapjaw
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1"
+        ENABLE_PREVIEWS: YES
+  SnapTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: SnapTests
+    dependencies:
+      - target: Snap
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Snap:
+    build:
+      targets:
+        Snap: all
+        SnapTests: [test]
+    test:
+      targets:
+        - SnapTests

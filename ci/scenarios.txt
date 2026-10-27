@@ -1,0 +1,50 @@
+# CI screenshot scenarios (ci/screenshots.sh on the "iPhone 18 Pro" simulator: no hinge, so the UI turns landscape by
+# itself and the trap is tap-to-snap unless a pilot= drives it or closure= holds it).
+# name|demo args (-snapDemo, keys in design/ROUND-1.md "Demo mode")|wait s|caption (what the frame should show)|expect
+#  - wait: a freezeOn=<tag> scenario waits for the app's "SNAP-T freeze <tag>" line instead (up to max(wait, 60) s),
+#    then 2 s; a freezeAfter=<s> one waits for any "SNAP-T freeze" line the same way. It is captured anyway (and
+#    flagged no-freeze in captures.tsv) if the line never comes.
+#  - expect: optional extended regex the app log must contain at capture time (reported, never fatal).
+#  - No "|" inside a field, the expect regex included (it would split into a bogus extra column).
+#  - Names are zero-padded so the artifact sorts in reading order.
+#  - The app icon is not a scenario: ci.yml renders it in its own step (screen=icon → app-icon-1024.png).
+#  - The Duo's real-hinge frames, the cover display and the book-pose card live in ci/duo.sh (duo.yml).
+#  - Long waits (lastSnap, tired, results) are for a novice pilot spending 10 snaps; a missed freeze is captured anyway.
+#
+# Home
+01-home-fresh|screen=home;progress=fresh|6|Home, first launch: the title over a live trap, a bee bumbling across; Feed / Daily Bog / Bug Book / Settings; rank Sprout, no best yet|SNAP-T canvas
+02-home-mid|screen=home;progress=mid|6|Home, returning: rank 4, best 3,200, the daily status, 9 species found|SNAP-T canvas
+03-home-duo-layout|screen=home;progress=mid;fold=1|6|Home laid out as on a Duo (fold=1): the midrib on the fold band, the buttons on the right (HUD) half|SNAP-T canvas [0-9]+x[0-9]+ fold=1
+# First Bite (GAME-DESIGN §8), phone texts ("Tap to snap"; the pose step is skipped on a phone)
+04-lesson-2-first-snap|screen=lesson;lessonStep=2|7|Lesson step 2: one fat housefly sipping on a nectar drop, "When it's sipping… tap to snap!"|SNAP-T canvas
+05-lesson-3-open-again|screen=lesson;lessonStep=3|7|Lesson step 3: "Open up to reset the trap."|SNAP-T canvas
+06-lesson-4-too-slow|screen=lesson;lessonStep=4|7|Lesson step 4: two flies land, "Quick snaps catch more."|SNAP-T canvas
+07-lesson-5-bee|screen=lesson;lessonStep=5|8|Lesson step 5: a bee sipping with its white protected halo, "Never eat a bee. Wait…"|SNAP-T canvas
+08-lesson-6-triple|screen=lesson;lessonStep=6|8|Lesson step 6: three flies landing together, "Wait for a crowd… now!"|SNAP-T canvas
+09-lesson-7-card|screen=lesson;lessonStep=7|6|Lesson step 7 card: "Snaps run out. Big bites earn them back."|SNAP-T canvas
+# Play (Feed), a pilot drives the trap, frozen on a moment (the scene keeps drawing)
+10-play-landed|screen=play;seed=7;pilot=expert;freezeOn=landed|30|First bug sipping inside the trap: gold sip ring, the HUD on the right half (score, 10 snap icons)|SNAP-T input pilot
+11-play-crowd|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd|60|Three or more bugs sipping at once, the "Now!" hint|SNAP-T freeze crowd
+12-play-bee|screen=play;seed=7;wave=15;pilot=perfect;freezeOn=bee|60|A bee sipping in the trap: yellow-black bands, the white protected halo, the "Bee! Wait…" hint|SNAP-T freeze bee
+13-play-snap|screen=play;seed=7;pilot=casual;freezeOn=snap|45|0.12 s after a bite: teeth interlocked at both outer edges, the dark vignette, juice splats, the "+N" score pop|SNAP-T event snapped
+14-play-feast|screen=play;seed=7;wave=8;pilot=perfect;freezeOn=feast|90|A Feast: 3+ caught in one bite, "TRIPLE ×3" and "Feast! +1 snap"|SNAP-T event feast
+15-play-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=sting|90|A bee or wasp in the bite: "Bzzt!", the stinger let go, snaps down by the cost|SNAP-T event stung
+16-play-dusk|screen=play;seed=7;wave=14;pilot=expert;freezeOn=dusk|60|Dusk: the peach tint, moths drawn to the fold|SNAP-T event dayPhaseChanged
+17-play-night|screen=play;seed=7;wave=22;pilot=expert;freezeOn=night|60|Night: the blue tint, fireflies glowing with blooms, other bugs dimmed|SNAP-T event dayPhaseChanged
+18-play-last-snap|screen=play;seed=7;pilot=novice;freezeOn=lastSnap|150|One snap left: "Last snap — make it count"|SNAP-T event lastSnap
+19-play-tired|screen=play;seed=7;pilot=novice;freezeOn=tired|180|Snaps at 0: "Your trap is tired.", the bugs leaving|SNAP-T event tired
+20-play-results|screen=play;seed=7;pilot=novice;freezeOn=results|200|The run's end handing over to Results|SNAP-T freeze results
+# Layout variants (the wide phone, the Duo layout on a phone, the HUD mirrored)
+21-play-wide-fold0|screen=play;seed=7;pilot=casual;fold=0;freezeAfter=8|16|A wide phone (fold=0): the trap and bog drawn flat, the midrib only (no fold band shadow), the bog extension at the sides|SNAP-T canvas [0-9]+x[0-9]+ fold=0
+22-play-duo-fold1|screen=play;seed=7;pilot=casual;fold=1;freezeAfter=8|16|The Duo layout (fold=1): the lobes split by the midrib on the fold band, the HUD on the right (sharp) half|SNAP-T canvas [0-9]+x[0-9]+ fold=1
+23-play-hud-left|screen=play;seed=7;pilot=casual;fold=1;hudLeft=1;freezeAfter=8|16|Settings "HUD on the left": the score, snaps and chain chip mirrored to the left half|hudLeft=1
+24-play-jaws-half|screen=play;mode=attract;seed=7;closure=11|8|The jaws held half shut (11°): teeth leaning in, the shadow growing in from the outer edges|SNAP-T trap closure 1[01]
+25-daily|screen=play;mode=daily;seed=7;progress=mid;pilot=expert;freezeAfter=10|18|Daily Bog in play: the daily badge in the HUD, today's seed|SNAP-T input pilot
+# Results, Bug Book, Settings, pose and cover cards
+26-results-mid|screen=results;seed=7;progress=mid;pilot=casual|8|Results: protein counting up, bugs caught, best bite, longest chain, bees spared, the rank bar, the best-moment sentence; Again / Home|SNAP-T canvas
+27-results-fresh|screen=results;seed=7;progress=fresh;pilot=novice|8|Results after a first run: new Bug Book entries drawn, "New best"|SNAP-T canvas
+28-book-mid|screen=book;progress=mid|6|Bug Book: 9 of 16 drawn with name, joke and count; the rest silhouettes|SNAP-T canvas
+29-book-late|screen=book;progress=late|6|Bug Book, all 16 found (bees show "spared")|SNAP-T canvas
+30-settings|screen=settings|5|Settings: Sound, Haptics, Respect silent switch, HUD on the left, Reduce motion, Replay First Bite, About, Credits|SNAP-T canvas
+31-pose|screen=pose|5|The pose card: "Hold it open like a book" with its diagram|SNAP-T canvas
+32-cover|screen=cover|5|The cover-display card: "Open to carry on"|SNAP-T canvas

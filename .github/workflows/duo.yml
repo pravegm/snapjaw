@@ -1,0 +1,138 @@
+name: Duo
+
+# Runs Snapjaw on a real iPhone Duo simulator (iOS 27.1 runtime, ~7.85 GB download; the runner image ships only 27.0,
+# which has no Duo) and drives the hinge with the community `hinge` CLI (artemnovichkov/hinge, Device Hub's private
+# HID event posted inside the simulator). The Duo sim boots in book pose, which is Snapjaw's play pose, so no
+# orientation request is needed. Script: ci/duo.sh. Hinge checks (design/ROUND-1.md "CI engineer"): SNAP, CREEP,
+# REARM, CLOSE-PAUSE, printed as "<CHECK> PASS|FAIL (…)" in logs/run.txt and as a table in the job summary. Frames: open
+# 165, half closed 150, snapped 130, cover shut, reopened 165, the pose card, UI frames, and the Duo store set
+# (ci/duo-scenarios.txt). Manual only (expensive: ~45–75 macOS minutes).
+on:
+  workflow_dispatch:
+    inputs:
+      passes:
+        description: "Passes: hinge (the checks), frames (165/150/130/cover/pose), ui (home, lesson, results, book, settings, too flat, cover), store (ci/duo-scenarios.txt)"
+        type: string
+        default: "hinge frames ui store"
+      store_filter:
+        description: "Regex of store scenario names to capture (default: all)"
+        type: string
+        default: "."
+      strict:
+        description: "Fail the job when a hinge check FAILs (default: report only)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: duo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  duo:
+    runs-on: xcode-27
+    timeout-minutes: 200
+    env:
+      XCODE_APP: /Applications/Xcode_27.1.app
+      RUNTIME_ID: com.apple.CoreSimulator.SimRuntime.iOS-27-1
+      DUO_TYPE_FALLBACK: com.apple.CoreSimulator.SimDeviceType.iPhone-Duo
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 27.1
+        timeout-minutes: 8
+        run: |
+          sudo xcode-select -s "$XCODE_APP"
+          xcodebuild -version
+          xcrun simctl list runtimes
+          command -v gtimeout >/dev/null || brew install coreutils
+
+      - name: Install the iOS 27.1 runtime
+        timeout-minutes: 30
+        run: |
+          installed() {
+            xcrun simctl list runtimes -j | python3 -c "import json,sys,os; sys.exit(0 if any(r['identifier']==os.environ['RUNTIME_ID'] and r.get('isAvailable') for r in json.load(sys.stdin)['runtimes']) else 1)"
+          }
+          if installed; then echo "already installed"; exit 0; fi
+          # The first download can fail with DVTDownloadableErrorDomain Code=41; a retry works (sister DUO-CI notes).
+          for attempt in 1 2 3; do
+            gtimeout 1500 xcodebuild -downloadPlatform iOS 2>&1 | grep -v "Downloading iOS" | tail -20 || true
+            installed && break
+            sleep 15
+          done
+          installed || { echo "::error::iOS 27.1 runtime not installed"; exit 1; }
+
+      - name: Create and boot the iPhone Duo
+        id: sim
+        timeout-minutes: 10
+        run: |
+          type=$(xcrun simctl list devicetypes -j | python3 -c "import json,sys; print(next((d['identifier'] for d in json.load(sys.stdin)['devicetypes'] if d['name']=='iPhone Duo'), ''))")
+          type="${type:-$DUO_TYPE_FALLBACK}"
+          udid=$(xcrun simctl create "Snapjaw Duo" "$type" "$RUNTIME_ID")
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          # Boot now so the (slow) first boot overlaps the hinge install and the build.
+          xcrun simctl boot "$udid"
+
+      - name: Install the hinge tool
+        timeout-minutes: 25
+        run: |
+          # Sister store run 40268420280: one brew install timed out, the Duo stayed shut and every frame was the cover
+          # display. Retry, and stop here if it never installs (nothing below means anything without it).
+          for attempt in 1 2 3; do
+            gtimeout 420 brew install artemnovichkov/tap/hinge && break
+            echo "::warning::hinge install attempt $attempt failed"; sleep 10
+          done
+          command -v hinge >/dev/null || { echo "::error::hinge tool unavailable: the Duo cannot be opened"; exit 1; }
+
+      - name: Generate project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build for the Duo
+        timeout-minutes: 30
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          set -o pipefail
+          gtimeout 1700 xcodebuild build -project Snap.xcodeproj -scheme Snap -destination "id=$UDID" \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build.log | grep -E "error:|\*\* " || true
+          grep -q "\*\* BUILD SUCCEEDED \*\*" build.log
+
+      - name: Wait for boot, warm up the hinge helper
+        timeout-minutes: 15
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          gtimeout 840 xcrun simctl bootstatus "$UDID" -b
+          # The first `hinge` call compiles and installs its in-simulator helper; do it here, outside the timed checks.
+          if command -v hinge >/dev/null; then gtimeout 120 hinge -d "$UDID" get || true; fi
+          # The display names (LCD/LCD-1 or primary/primary-1) for the record; ci/duo.sh probes them itself.
+          gtimeout 30 xcrun simctl io "$UDID" enumerate || true
+
+      - name: Capture
+        timeout-minutes: 120
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+          PASSES: ${{ inputs.passes }}
+          STORE_FILTER: ${{ inputs.store_filter || '.' }}
+          STRICT: ${{ inputs.strict && '1' || '0' }}
+          OUT: duo-screens
+        run: bash ci/duo.sh
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: duo-screens
+          path: |
+            duo-screens/
+            build.log
+          if-no-files-found: ignore
+
+      - name: Shut down
+        if: always()
+        continue-on-error: true
+        run: xcrun simctl shutdown all || true

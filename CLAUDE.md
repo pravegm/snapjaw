@@ -31,6 +31,10 @@ and Hush (`C:\Users\59527\Lid`). Never modify them. Reuse their lessons and code
 ## Working rules
 - Push straight to `main` (the founder's standing rule; solo project). No PRs.
 - **No Mac on the Claude side. CI is the compiler.** A Swift change is unverified until a GitHub Actions run passes.
+- **Repo:** https://github.com/pravegm/snapjaw. It was created **private** on 27 Oct 2026, because the permission
+  guard blocks creating public repos. Actions on private repos are blocked by this account's billing (probe run
+  40595444902: "recent account payments have failed"). Making it public is the founder's one click
+  (Settings → General → Danger Zone → Change visibility); until then nothing compiles.
 - On this Windows host Bash ignores `cd`. Use absolute paths and `git -C`. There is no Python; use Node.
 
 ## Build
