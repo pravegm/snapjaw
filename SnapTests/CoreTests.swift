@@ -558,6 +558,7 @@ struct CoreTests {
         var o = SessionOptions(snapsRunOut: true, waves: false, stingCosts: true)
         o.freeFirstSting = true
         let s = TrapSession(mode: .feed, seed: 7, best: 0, geometry: geo, options: o)
+        let start = s.snapshot.snapsLeft
         sippers(s, [.housefly, .bee])
         let first: [TrapEvent] = snap(s, 0.1)
         #expect(report(first)?.stingers == [.bee])
@@ -568,12 +569,12 @@ struct CoreTests {
             return false
         }
         #expect(waived == 1)
-        #expect(s.snapshot.snapsLeft == 9, "10 − 1 only")
+        #expect(s.snapshot.snapsLeft == start - 1, "− 1 only")
         run(s, 1)
         sippers(s, [.housefly, .bee])
         let second: [TrapEvent] = snap(s, 0.1)
         #expect(report(second)?.snapsLost == 1)
-        #expect(s.snapshot.snapsLeft == 7, "9 − 1 − 1")
+        #expect(s.snapshot.snapsLeft == start - 3, "− 1, then − 1 − 1")
         #expect(SessionOptions().freeFirstSting == false)
         // Without the option the first bee costs 1.
         let n: TrapSession = quiet()
