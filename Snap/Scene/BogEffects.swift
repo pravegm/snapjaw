@@ -193,15 +193,17 @@ final class BogEffects {
         }
     }
 
-    /// The "slurp" spray: pale green-gold nectar (never red: the game is 4+).
-    static let juiceColor = RGBA(hex: 0xE2F59A)
+    /// The "slurp" spray. R6: nectar gold everywhere (never beige, never red: the game is 4+).
+    static let juiceColor = RGBA(hex: 0xFFC83D)
+    /// R6: the spray's bright core (the FEAST burst's sparkle).
+    static let juiceGlint = RGBA(hex: 0xFFF2B0)
 
     init() {
         decalRoot = SKNode()
         groundRoot = SKNode()
         fxRoot = SKNode()
-        juice = BogParticlePool(capacity: 48, texture: BogTextures.dot, blend: .alpha)
-        sparks = BogParticlePool(capacity: 36, texture: BogTextures.sparkle, blend: .add)
+        juice = BogParticlePool(capacity: 80, texture: BogTextures.dot, blend: .alpha)
+        sparks = BogParticlePool(capacity: 72, texture: BogTextures.sparkle, blend: .add)
         dust = BogParticlePool(capacity: 16, texture: BogTextures.soft, blend: .alpha)
         splats = BogFlashPool(capacity: 10, texture: BogTextures.splat(0), blend: .alpha)
         whiffs = BogFlashPool(capacity: 8, texture: BogTextures.whiff, blend: .add)
@@ -274,9 +276,45 @@ final class BogEffects {
         // (No colour blend: the glisten keeps its own pale colours.)
         s.colorBlendFactor = 0
         s.isHidden = false
-        sparkBurst(at: p, count: 4, color: BogPaint.ui(TrapArt.sipRing), speed: 140, size: 18)
+        sparkBurst(at: p, count: 4, color: BogPaint.ui(TrapArt.palette.gold), speed: 140, size: 18)
         puff(from: CGPoint(x: p.x - r * 0.5, y: p.y), to: CGPoint(x: p.x + r * 0.5, y: p.y), count: 3,
              color: UIColor(white: 1, alpha: 1), size: max(r * 1.4, 18))
+    }
+
+    /// R6: the FEAST event's gold juice burst: a big ring of nectar gold thrown out from the bite and a shower of gold
+    /// sparkles (the 3–4 bug Feast keeps the R5 treatment).
+    func feastBurst(at p: CGPoint, tint: RGBA) {
+        let col = BogPaint.ui(BogPaint.multiply(BogEffects.juiceColor, tint))
+        let glint = BogPaint.ui(BogEffects.juiceGlint)
+        for i in 0..<count(26, juice) {
+            let a = CGFloat(i) / 26 * 2 * .pi + rng.range(-0.12, 0.12)
+            let v = rng.range(260, 520)
+            var q = BogParticle()
+            q.position = p
+            q.velocity = CGVector(dx: cos(a) * v, dy: sin(a) * v)
+            q.life = rng.range(0.45, 0.8)
+            q.drag = 4.2
+            q.gravity = 120
+            q.alphaScale = 1
+            juice.spawn(q, size: rng.range(8, 16), color: i % 4 == 0 ? glint : col)
+        }
+        sparkBurst(at: p, count: 18, color: BogPaint.ui(TrapArt.palette.gold), speed: 420, size: 30)
+        sparkBurst(at: p, count: 8, color: glint, speed: 200, size: 22)
+    }
+
+    /// R6: a little gold gulp where a caught bug vanishes into the midrib (the FEAST's one-after-another gulps).
+    func gulp(at p: CGPoint) {
+        sparkBurst(at: p, count: 3, color: BogPaint.ui(TrapArt.palette.gold), speed: 110, size: 16)
+    }
+
+    /// R6: sparkles round the FEAST banner (`box`, scene space).
+    func bannerSparkles(around box: CGRect) {
+        let pts = [CGPoint(x: box.minX, y: box.maxY), CGPoint(x: box.maxX, y: box.maxY),
+                   CGPoint(x: box.minX, y: box.minY), CGPoint(x: box.maxX, y: box.minY),
+                   CGPoint(x: box.midX, y: box.maxY + 6)]
+        for c in pts {
+            sparkBurst(at: c, count: 3, color: BogPaint.ui(TrapArt.palette.gold), speed: 120, size: 26)
+        }
     }
 
     /// The bite's impact on the trap: a soft white flash along the midrib (the jaws meeting).
@@ -410,6 +448,9 @@ final class BogPops {
     private var texts: [String] = []
     private var boxes: [CGSize] = []
     private var heroes: [Bool] = []
+    /// Each slot's pop-in overshoot (R6: the FEAST banner's is bigger) and whether it is a banner.
+    private var overs: [CGFloat] = []
+    private var banners: [Bool] = []
     private var cursor = 0
     private static var fonts: [Int: UIFont] = [:]
 
@@ -439,6 +480,8 @@ final class BogPops {
             texts.append("")
             boxes.append(.zero)
             heroes.append(false)
+            overs.append(BogPops.overshoot(hero: false))
+            banners.append(false)
         }
     }
 
@@ -468,6 +511,16 @@ final class BogPops {
 
     /// How far a pop overshoots its size as it pops in (the crease clamp leaves room for it).
     nonisolated static func overshoot(hero: Bool) -> CGFloat { hero ? 0.22 : 0.18 }
+    /// R6: the FEAST banner's overshoot (a big, bouncy scale-in) and the scale it pops in from.
+    static let bannerOvershoot: CGFloat = 0.42
+    static let bannerFrom: CGFloat = 0.35
+
+    /// R6 (tests): the banners on screen now.
+    var activeBanners: [String] {
+        var out: [String] = []
+        for i in 0..<ages.count where ages[i] >= 0 && banners[i] { out.append(texts[i]) }
+        return out
+    }
 
     /// R3 (#25): a pop leaves by shrinking as it lifts, still opaque, and only fades at the very end (never a
     /// half-transparent smear mid-fade). `f` is its life fraction (0…1).
@@ -511,7 +564,7 @@ final class BogPops {
             let ease = 1 - (1 - f) * (1 - f)
             let y0 = starts[i].y + rises[i] * ease
             let y1 = starts[i].y + rises[i]
-            let over = 1 + BogPops.overshoot(hero: heroes[i])
+            let over = 1 + overs[i]
             let b = boxes[i]
             let w = b.width * over, h = b.height * over
             let lo = min(y0, y1) - h / 2 - 3, hi = max(y0, y1) + h / 2
@@ -531,7 +584,7 @@ final class BogPops {
 
     /// Shows `text` centred at `p`. `hero`: the bite's one big callout (a bigger overshoot, a longer hold).
     func pop(_ text: String, at p: CGPoint, size: CGFloat, fill: UIColor, stroke: UIColor, rise: CGFloat = 46,
-             delay: Double = 0, life: Double = 1.15, hero: Bool = false) {
+             delay: Double = 0, life: Double = 1.15, hero: Bool = false, banner: Bool = false) {
         let n = labels.count
         var slot = -1
         for k in 0..<n {
@@ -562,7 +615,9 @@ final class BogPops {
         rises[slot] = rise
         texts[slot] = text
         boxes[slot] = BogPops.measure(text, size: size)
-        heroes[slot] = hero
+        heroes[slot] = hero || banner
+        banners[slot] = banner
+        overs[slot] = banner ? BogPops.bannerOvershoot : BogPops.overshoot(hero: hero)
         labels[slot].isHidden = true
         shadows[slot].isHidden = true
     }
@@ -585,11 +640,13 @@ final class BogPops {
             }
             l.isHidden = false
             sh.isHidden = false
-            let over = BogPops.overshoot(hero: heroes[i])
+            let over = overs[i]
+            let from: CGFloat = banners[i] ? BogPops.bannerFrom : 0.72
             var k: CGFloat
             // R3 (#15): it pops in from 0.72 (readable even on the hit-stop's frozen first frame), overshoots, settles.
+            // R6: the FEAST banner springs in from 0.35 to a 1.42 overshoot.
             if u < 0.09 {
-                k = 0.72 + (0.28 + over) * CGFloat(u / 0.09)
+                k = from + (1 - from + over) * CGFloat(u / 0.09)
             } else if u < 0.22 {
                 k = 1 + over - over * BogMath.smoothstep(0.09, 0.22, CGFloat(u))
             } else {

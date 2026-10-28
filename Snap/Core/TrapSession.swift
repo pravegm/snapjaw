@@ -64,7 +64,7 @@ struct SessionOptions: Equatable {
     func sproutPerks(for mode: RunMode) -> SproutPerks? {
         switch mode {
         case .feed: return SproutPerks.forFeedRun(sproutRun)
-        case .daily, .attract, .lesson: return nil
+        case .daily, .attract, .lesson, .zen: return nil
         }
     }
 
@@ -76,6 +76,12 @@ struct SessionOptions: Equatable {
             return SessionOptions(snapsRunOut: false, waves: true, stingCosts: true)
         case .lesson:
             return SessionOptions(snapsRunOut: false, waves: false, stingCosts: false)
+        case .zen:
+            // R6 Zen Bog: snaps never run out, no hunger (so no wilts), and a stinger costs no snap (the chain still
+            // breaks). The day loops every Tuning.zenDayWaves waves and the late-night ramp never starts (paceWave).
+            var o = SessionOptions(snapsRunOut: false, waves: true, stingCosts: false)
+            o.hunger = false
+            return o
         }
     }
 
@@ -84,7 +90,7 @@ struct SessionOptions: Equatable {
         guard firstRun else { return false }
         switch mode {
         case .feed: return true
-        case .daily, .attract, .lesson: return false
+        case .daily, .attract, .lesson, .zen: return false
         }
     }
 }
@@ -145,6 +151,10 @@ struct SproutPerks: Equatable {
 // side, so nothing walks, rests or hovers low within creaseHalfWidth + radius of the midrib (Tuning.creaseAirHeight).
 // R5 (design/notes/core-R5.md): a protected bug pauses the hunger clock from its final approach (in the zone and below
 // creaseAirHeight); the Sprout taper (SessionOptions.sproutRun / sprout(feedRun:), SproutPerks: runs 1–3).
+// R6 (design/notes/core-R6.md): the Zen Bog (SessionOptions.for(.zen); its day loops and never speeds up), the late
+// night telegraphed (TrapRules.nightCue) and the last light (Feed and the Daily: from Tuning.lastLightWave the hunger clock ticks
+// even with an empty or bee-held trap, so every run whose snaps run out ends), no newBest in Zen, and no "hungry" hint while a
+// protected bug's halo touches the trap.
 // Mirrored by Session in tools/balance-sim.js (minus events, hints, telemetry and results).
 
 final class TrapSession {
@@ -328,6 +338,17 @@ final class TrapSession {
         return options.freeFirstSting || (sproutPerks?.freeSting ?? false)
     }
 
+    /// R6 (#19, REVIEW-5 P2-5): the last light applies to this run (Feed or the Daily with wilting on; never Zen,
+    /// attract or the lesson).
+    private var lastLightApplies: Bool {
+        return wilts && TrapRules.lastLightApplies(to: mode)
+    }
+
+    /// R6: the run is in the last light (wave ≥ Tuning.lastLightWave): the hunger clock ticks whatever is in the trap.
+    var inLastLight: Bool {
+        return lastLightApplies && wave >= Tuning.lastLightWave
+    }
+
     /// R4/R5: the calm morning (Sprout runs 1–3).
     private var calmMorning: Bool {
         return sproutPerks?.calmMorning ?? false
@@ -475,8 +496,9 @@ final class TrapSession {
         }
         for b in bugs { updateBug(b, h) }
         bugs.removeAll { (b: Bug) -> Bool in b.gone }
-        // R4 (QA-2 #1): the clock ticks only while there is food in the trap and no bee in it.
-        hungerLive = isPlaying && wilts && hungerTicks()
+        // R4 (QA-2 #1): the clock ticks only while there is food in the trap and no bee in it. R6 (#19): in the last
+        // light it ticks whatever is in the trap, so a patient hand's run ends too.
+        hungerLive = isPlaying && wilts && (inLastLight || hungerTicks())
         if hungerLive { tickHunger(h) }
         if case .tired(let e) = phase {
             let ne: Double = e + h
@@ -550,8 +572,12 @@ final class TrapSession {
     }
 
     private func recipeIndex(_ idx: Int) -> Int {
-        if case .attract = mode { return ((idx - 1) % Tuning.attractDayWaves) + 1 }
-        return idx
+        switch mode {
+        case .attract: return ((idx - 1) % Tuning.attractDayWaves) + 1
+        // R6: the Zen Bog's day loops too (morning … night, then morning again).
+        case .zen: return ((idx - 1) % Tuning.zenDayWaves) + 1
+        case .feed, .daily, .lesson: return idx
+        }
     }
 
     private func startWave() {
@@ -1120,7 +1146,7 @@ final class TrapSession {
             if case .sipping = a { sipping = true }
             let r: Double = TrapRules.reaction(b.info, sipping: sipping, flying: TrapRules.isFlying(a),
                                                onRim: TrapRules.onRim(geometry, b.point, radius: b.info.radius),
-                                               wave: wave)
+                                               wave: TrapRules.paceWave(wave, mode: mode))
             if d <= r {
                 if b.species.isProtected {
                     stingers.append(b.species)
@@ -1230,7 +1256,8 @@ final class TrapSession {
             if snapsLeft == 1 && before != 1 { out.append(.lastSnap) }
             if snapsLeft == 0 { becomeTired() }
         }
-        if !newBestSent && best > 0 && score > best {
+        // R6: the Zen Bog has no best and no leaderboard, so it never fires newBest.
+        if !newBestSent && best > 0 && score > best && TrapRules.keepsBest(mode) {
             newBestSent = true
             out.append(.newBest)
         }
@@ -1242,8 +1269,9 @@ final class TrapSession {
         guard isPlaying else { return nil }
         if lastInput.tooFlat { return .bendALittle }
         if lastInput.creeping { return .quick }
-        // R4: only while the clock is ticking (a paused clock is not about to wilt a snap).
-        if wilts && hungrySent && hungerLive { return .hungry }
+        // R4: only while the clock is ticking (a paused clock is not about to wilt a snap). R6 (#15, REVIEW-5 P2-1):
+        // never while a protected bug's halo touches the trap ("Hungry… bite!" next to a haloed bee reads as "bite it").
+        if wilts && hungrySent && hungerLive && !protectedHaloOnTrap() { return .hungry }
         if !lastInput.armed && snapsMade > 0 && time - lastBiteTime > Tuning.openUpDelay { return .openUp }
         var beeLanded: Bool = false
         var beeAny: Bool = false
@@ -1266,11 +1294,97 @@ final class TrapSession {
         return nil
     }
 
+    /// R6 (#15, REVIEW-5 P2-1): a protected bug sits or hovers low just outside the trap (its centre outside the zone,
+    /// landed or below Tuning.creaseAirHeight, not leaving) with its halo (Tuning.haloScale × radius + Tuning.haloPad,
+    /// as the Scene draws it) reaching into the zone. Bees inside the zone keep R5's rule (the clock decides), so a
+    /// high arrival over the trap still shows "Hungry… bite!".
+    private func protectedHaloOnTrap() -> Bool {
+        for b in bugs where b.species.isProtected {
+            switch b.mode {
+            case .leave, .escape, .release, .caught, .cross: continue
+            case .approach, .hover, .sip, .pause, .dash, .hop: break
+            }
+            if geometry.contains(b.point) { continue }
+            if !TrapSession.protectedCountsAsIn(landed: b.landed, height: b.height) { continue }
+            if TrapRules.haloTouchesTrap(geometry, b.point, radius: b.info.radius) { return true }
+        }
+        return false
+    }
+
     private func makeResult(seconds: Double) -> RunResult {
         return RunResult(mode: mode, seed: seed, score: score, seconds: seconds, snaps: snapsMade,
                          bugsCaught: bugsCaught, caughtBySpecies: caughtBySpecies, sparedBySpecies: sparedBySpecies,
                          bestBitePoints: bestBitePoints, biggestBite: biggestBite, longestChain: longestChain,
                          beesSpared: beesSpared, stings: stings, feasts: feasts, waves: wave, drySnaps: drySnaps,
                          fastestSnap: fastestSnap)
+    }
+}
+
+// MARK: - R6: modes, the late night's telegraph, the last light and the halo rule
+
+/// R6 (#19, REVIEW-5 P2-5): what the HUD says as the late night closes in. Core picks the wave; the UI owns the words
+/// (suggested: "The night gets fast…" and "Last light…"). The App shows it on the `.waveStarted(index:)` whose index
+/// `TrapRules.nightCue(wave:mode:)` maps to a cue (see design/NEEDS.md: a contract event would be tidier).
+enum NightCue: String, Equatable, Sendable {
+    /// The first wave whose bugs react faster (Tuning.lateWaveStart + 1): Feed and the Daily.
+    case nightGetsFast
+    /// Tuning.lastLightWave: from here the trap gets hungry even when it is empty (Feed and the Daily).
+    case lastLight
+}
+
+extension TrapRules {
+
+    /// R6: the wave the bite rule's late factor uses. The Zen Bog's loops never reach the late night (its recipe wave,
+    /// 1…Tuning.zenDayWaves); every other mode uses the real wave, as before.
+    static func paceWave(_ wave: Int, mode: RunMode) -> Int {
+        switch mode {
+        case .zen: return ((max(wave, 1) - 1) % Tuning.zenDayWaves) + 1
+        case .feed, .daily, .attract, .lesson: return wave
+        }
+    }
+
+    /// R6: does a run of this mode keep a personal best (and fire `newBest`)? Not the Zen Bog (no best, no
+    /// leaderboard); attract and the lesson are given best 0 by the App anyway.
+    static func keepsBest(_ mode: RunMode) -> Bool {
+        switch mode {
+        case .feed, .daily, .attract, .lesson: return true
+        case .zen: return false
+        }
+    }
+
+    /// R6 (#19, founder call): the last light is a Feed-rules rule, so Feed and the Daily (Zen, attract and the lesson
+    /// never wilt). TrapSession also needs wilting on (no Sprout run 1, no `hunger = false`).
+    static func lastLightApplies(to mode: RunMode) -> Bool {
+        switch mode {
+        case .feed, .daily: return true
+        case .attract, .lesson, .zen: return false
+        }
+    }
+
+    /// R6 (#19): the cue for the wave that just started (`.waveStarted(index:)`), if any. Nil in Zen, attract and the
+    /// lesson; `.lastLight` where the last light applies (Feed and the Daily).
+    static func nightCue(wave: Int, mode: RunMode) -> NightCue? {
+        switch mode {
+        case .zen, .attract, .lesson: return nil
+        case .feed, .daily: break
+        }
+        if wave == Tuning.lateWaveStart + 1 { return .nightGetsFast }
+        if wave == Tuning.lastLightWave && lastLightApplies(to: mode) { return .lastLight }
+        return nil
+    }
+
+    /// R6 (#15, REVIEW-5 P2-1): the halo the Scene draws round a protected bug (radius × Tuning.haloScale +
+    /// Tuning.haloPad, TrapArt.protectedRingScale) reaches into the trap zone: the halo's nearest point to the trap's
+    /// centre is inside it. A bug whose centre is inside always counts.
+    static func haloTouchesTrap(_ g: TrapGeometry, _ p: CGPoint, radius: CGFloat) -> Bool {
+        if g.contains(p) { return true }
+        let dx: Double = Double(p.x - g.center.x)
+        let dy: Double = Double(p.y - g.center.y)
+        let len: Double = hypot(dx, dy)
+        if len < 1e-6 { return true }
+        let halo: Double = Double(radius) * Tuning.haloScale + Tuning.haloPad
+        let k: Double = max(0, len - halo) / len
+        let q = CGPoint(x: Double(g.center.x) + dx * k, y: Double(g.center.y) + dy * k)
+        return g.contains(q)
     }
 }

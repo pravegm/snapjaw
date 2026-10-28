@@ -25,6 +25,18 @@ enum PlantRanks {
         return r
     }
 
+    /// R6 (founder call): the lifetime-bug growth a run adds to the rank: every bug in Feed and the Daily, the Zen
+    /// Bog's bugs × Tuning.zenRankShare rounded down (per run), nothing for attract and the lesson. (Goal growth,
+    /// GoalBookUpdate.growth, is added on top by the App.)
+    static func growth(from run: RunResult) -> Int {
+        let bugs: Int = max(run.bugsCaught, 0)
+        switch run.mode {
+        case .feed, .daily: return bugs
+        case .zen: return Int((Double(bugs) * Tuning.zenRankShare + 1e-9).rounded(.down))
+        case .attract, .lesson: return 0
+        }
+    }
+
     /// "Sprout" … "Bog Monarch" (clamped).
     static func title(_ rank: Int) -> String {
         return titles[min(max(rank, 0), count - 1)]
@@ -78,18 +90,27 @@ enum Achievements {
         return TrapRules.chainSteps(toReach: Tuning.chainMaxMultiplier) + 1
     }
 
+    /// R6: what a Zen Bog run can never earn: the feats that only mean something when snaps run out, hunger bites
+    /// and stingers cost (a long chain, lasting to night, a 10,000 score, 30 bugs without a bee). Zen still earns the
+    /// catching feats (Feast, Mouthful, the scarab, the dragonfly) and the lifetime ones (bees spared, the Bug Book,
+    /// Bog Monarch), from whatever lifetime totals the App passes.
+    static let zenSkips: Set<String> = [chain4.id, night.id, score10k.id, nobees.id]
+
     /// Newly earned after `run`, given lifetime totals that already include the run and what's already earned.
-    /// Attract and lesson runs earn nothing.
+    /// Attract and lesson runs earn nothing. R6: a Zen run earns nothing in `zenSkips` (and never "Daily Diner").
     static func earned(after run: RunResult, lifetimeBugs: Int, lifetimeSpared: Int, speciesFound: Int,
                        alreadyEarned: Set<String>) -> [AchievementDef] {
         var scoredDaily: Bool = false
+        var zen: Bool = false
         switch run.mode {
         case .attract, .lesson: return []
         case .feed: break
         case .daily(day: _, scored: let scored): scoredDaily = scored
+        case .zen: zen = true
         }
         var out: [AchievementDef] = []
         func check(_ a: AchievementDef, _ met: Bool) {
+            if zen && zenSkips.contains(a.id) { return }
             if met && !alreadyEarned.contains(a.id) { out.append(a) }
         }
         check(feast, run.feasts >= 1)

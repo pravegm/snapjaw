@@ -189,6 +189,48 @@ enum FeelHapticBook {
         return FeelHapticCue(notes: notes)
     }
 
+    /// R6: the FEAST CHOMP's rumble (after the hit-stop), in four fading steps.
+    static let feastRumbleLength: Double = 0.32
+
+    /// R6 (ROUND-6 decision 5, SCORE-R5 D4 #1 "a stronger double haptic"): the FEAST CHOMP, heavier and longer than
+    /// any plain CHOMP. In order:
+    /// - the strongest slam (1.0) and a deep held **clamp** at full strength through the 80 ms FEAST hit-stop;
+    /// - the teeth's tap on the sound's clack;
+    /// - a **second slam** (1.0, rounder) as the world restarts: the double;
+    /// - a full-strength rumble fading over `feastRumbleLength` in four steps;
+    /// - one keen tap per caught bug on the crunch cascade (up to 8);
+    /// - three rising sparkle taps on the sting's marimba run, then a round low thud on the burp and a light tap on
+    ///   its "pop".
+    static func feastChomp(caught: Int) -> FeelHapticCue {
+        let n = min(max(caught, 1), 8)
+        let hold = Double(FeelSoundBook.feastHitStop)
+        let clack = Double(FeelSoundBook.clackAt + FeelSoundBook.clackGap)
+        let step = feastRumbleLength / 4
+        var notes: [FeelHapticNote] = [
+            .tap(1.0, 0.5),
+            .buzz(1.0, 0.03, duration: hold),
+            .tap(0.8, 0.85, at: clack),
+            .tap(1.0, 0.35, at: hold),
+            .buzz(1.0, 0.08, at: hold, duration: step),
+            .buzz(0.8, 0.08, at: hold + step, duration: step),
+            .buzz(0.55, 0.1, at: hold + 2 * step, duration: step),
+            .buzz(0.3, 0.1, at: hold + 3 * step, duration: step),
+        ]
+        for index in 0..<n {
+            notes.append(.tap(0.45, 1.0, at: Double(FeelSoundBook.cascadeDelay(index: index))))
+        }
+        let runStart = Double(FeelSoundBook.feastStingAt)
+        let runStep = Double(FeelSoundBook.feastStingStep)
+        for index in 0..<3 {
+            let u = Float(index)
+            notes.append(.tap(0.45 + 0.15 * u, 0.75 + 0.1 * u, at: runStart + runStep * Double(index)))
+        }
+        let belch = Double(FeelSoundBook.burpAt)
+        notes.append(.buzz(0.5, 0.15, at: belch, duration: 0.12))
+        notes.append(.tap(0.35, 0.6, at: belch + Double(FeelSoundBook.burpPopAfter)))
+        return FeelHapticCue(notes: notes)
+    }
+
     /// The empty clap: firm but lighter than any CHOMP, short.
     static let drySnap = FeelHapticCue(notes: [
         .tap(0.8, 0.6), .tap(0.5, 0.9, at: Double(FeelSoundBook.clackAt + FeelSoundBook.clackGap)),
@@ -350,6 +392,39 @@ enum FeelHapticBook {
     static let uiConfirm = FeelHapticCue(notes: [.tap(0.5, 0.8), .tap(0.4, 0.9, at: 0.06)])
     static let celebrate = FeelHapticCue(notes: [.tap(0.5, 0.6), .tap(0.6, 0.7, at: 0.09), .tap(0.75, 0.8, at: 0.18),
                                                  .tap(0.95, 0.9, at: 0.3)])
+
+    // MARK: R6: goals and the Garden
+
+    /// R6: a goal completed: a light tick and a keen tap on the chime's two notes (`bonus`: a third, firmer one).
+    static func goal(at start: Double = 0, bonus: Bool = false) -> FeelHapticCue {
+        let begin = start.isFinite ? max(start, 0) : 0
+        let step = Double(FeelSoundBook.goalStep)
+        var notes: [FeelHapticNote] = [.tap(0.3, 0.7, at: begin), .tap(0.4, 0.85, at: begin + 0.01),
+                                       .tap(0.55, 0.95, at: begin + 0.01 + step)]
+        if bonus {
+            notes.append(.tap(0.75, 1.0, at: begin + 0.01 + 2 * step))
+        }
+        return FeelHapticCue(notes: notes)
+    }
+
+    /// R6: a new variety: a firm tap on each of the fanfare's three calls (the last the strongest), a warm held swell
+    /// under the held call, and three keen sparkles on the chime run.
+    static func fanfare(at start: Double = 0) -> FeelHapticCue {
+        let begin = start.isFinite ? max(start, 0) : 0
+        let times = FeelSoundBook.fanfareCallTimes
+        var notes: [FeelHapticNote] = []
+        for (index, time) in times.enumerated() {
+            let last = index == times.count - 1
+            notes.append(.tap(last ? 0.85 : 0.55, last ? 0.6 : 0.5, at: begin + Double(time)))
+        }
+        let held = begin + Double(times.last ?? 0)
+        notes.append(.buzz(0.35, 0.3, at: held, duration: 0.18))
+        notes.append(.buzz(0.18, 0.3, at: held + 0.18, duration: 0.16))
+        for index in 0..<3 {
+            notes.append(.tap(0.4 + 0.1 * Float(index), 0.95, at: held + 0.18 + 0.06 * Double(index)))
+        }
+        return FeelHapticCue(notes: notes)
+    }
 }
 
 /// Core Haptics for Snapjaw: one looping advanced player carries the continuous feel (the creep texture, steered by

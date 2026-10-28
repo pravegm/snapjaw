@@ -5,6 +5,8 @@ import SwiftUI
 /// Where the app is.
 enum AppRoute: String, Equatable {
     case home, playing, lesson, results, book, settings, daily
+    /// R6: the Garden (trap varieties).
+    case garden
 
     /// The bog is live (a session steps).
     var isPlay: Bool { self == .playing || self == .lesson }
@@ -32,8 +34,13 @@ enum HUDHint: Equatable {
     case foldInput
     /// Sprout's free first sting: "Bees and wasps cost snaps. This one's free!" (REVIEW-3 #3, the founder's copy).
     case beesCost
-    /// R4 (REVIEW-3 #10): a player's first chain step ever, once: "Chain ×1.5! Keep the big bites coming".
+    /// R4 (REVIEW-3 #10): a player's first chain step ever, once. R6 (#14): the chain explainer, "Chain ×1.5! Big
+    /// bites in a row multiply."
     case chainTag(Double)
+    /// R6: a goal just completed: "Goal done! A 5-bug bite".
+    case goalDone(String)
+    /// R6 (Core #19): the late night's telegraph, once each ("The night gets fast…", "Last light…").
+    case nightCue(NightCue)
 }
 
 /// The HUD values (one value, published only when it changes).
@@ -68,10 +75,13 @@ struct HUDValues: Equatable {
     /// R3 (REVIEW-2 #12): the lesson shows the snaps row from step 3, and rings it on its last card.
     var lessonSnaps = false
     var ringSnaps = false
-    /// R3 (REVIEW-2 #12): the first Feast's flying glyph is labelled once ("+1 snap").
-    var snapGain: String?
-    /// R5 (REVIEW-4 #7): a costly sting's cost at the row ("−1 snap", "−2 snaps"), the mirror of "+1 snap".
-    var snapLoss: String?
+    /// R3 (REVIEW-2 #12): the first Feast's flying glyph is labelled once ("+1 snap"); R5 (REVIEW-4 #7): a costly
+    /// sting's cost ("−2 snaps"). R6 (#6): one tag at a time, from the message queue, and never with a plate up.
+    var tag: HUDTag?
+    /// R6 (#6): the bugs in the trap (screen-space boxes, coarse), while a plate is up: the plate keeps off them.
+    var subjectRects: [CGRect] = []
+    /// R6 Zen: the snaps never run out, so the row shows its full count quietly.
+    var zen = false
     /// R3 (Scene #14): the scene's crimson sting flash is crossing the row (`BogScene.snapsRowFlashing`).
     var rowFlashing = false
     /// R4 (REVIEW-3 #3): the free sting: the row flashes green with "free!".

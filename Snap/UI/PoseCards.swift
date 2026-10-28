@@ -326,8 +326,12 @@ struct CoverCard: View {
     static func detail(midRun: Bool) -> String {
         midRun ? "Your trap is waiting, jaws open." : "Bugs are gathering in the bog."
     }
-    /// "1,174 so far" (mid-run). Pure; tested.
-    static func scoreLine(_ score: Int) -> String { AppRules.formatted(max(score, 0)) + " so far" }
+    /// R6 (#12): the run's score, big ("1,174"), with "score so far" under it (the HUD's and Results' word).
+    /// Pure; tested.
+    static func scoreLine(_ score: Int) -> String { AppRules.formatted(max(score, 0)) }
+    static let scoreCaption = AppRules.scoreWord + " so far"
+    /// Off a run: "Best score 3,200".
+    static func bestLine(_ best: Int) -> String { "Best " + AppRules.scoreWord + " " + AppRules.formatted(max(best, 0)) }
 
     var body: some View {
         let midRun = controller.isLiveRun
@@ -361,7 +365,7 @@ struct CoverCard: View {
 
     /// The trap open and 3/4, a fly sipping on it (REVIEW-3 #16): the scene's own art.
     private func trap(_ l: CoverLayout) -> some View {
-        TrapHeroImage()
+        TrapHeroImage(variety: controller.trapVariety)
             .frame(width: l.trap.width, height: l.trap.height)
             .shadow(color: Color.black.opacity(0.6), radius: 18, y: 6)
     }
@@ -385,13 +389,13 @@ struct CoverCard: View {
                         .foregroundStyle(SnapTheme.gold)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
-                    // R5 (REVIEW-4 #13, founder call): the score word is "score".
-                    Text(AppRules.scoreWord)
+                    // R5 (REVIEW-4 #13, founder call): the score word is "score". R6 (#12): "score so far".
+                    Text(Self.scoreCaption)
                         .font(CoverLayout.swiftFont(l.bodySize, .semibold))
                         .foregroundStyle(SnapTheme.mist)
                 }
             } else if hasBest {
-                Text("Best feast " + AppRules.formatted(store.data.bestFeed))
+                Text(Self.bestLine(store.data.bestFeed))
                     .font(CoverLayout.swiftFont(l.bodySize + 4, .bold))
                     .foregroundStyle(SnapTheme.gold)
                     .lineLimit(1)
@@ -424,7 +428,7 @@ struct CoverLayout: Equatable {
     static let scoreGap: CGFloat = 2
     /// The hero trap's height over its width (the Scene's 3/4 drawing).
     static var trapAspect: CGFloat { min(max(TrapArt.threeQuarterAspect, 0.5), 1) }
-    static let trapMaxW: CGFloat = 320
+    static let trapMaxW: CGFloat = 420
     /// The smallest trap worth drawing before the type steps down a size.
     static let trapMinH: CGFloat = 90
 
@@ -458,21 +462,32 @@ struct CoverLayout: Equatable {
         return max(r.height.rounded(.up), f.lineHeight.rounded(.up))
     }
 
+    /// R6 (#12, duo-04: the card sat off-centre with an empty half): the insets are applied evenly on both sides (a
+    /// stale inset from the inner display moved the whole card), portrait ignores side insets (none of the cover's
+    /// edges has one), and the content is centred in the screen itself.
+    static func evenInsets(_ insets: EdgeInsets, size: CGSize) -> (h: CGFloat, top: CGFloat, bottom: CGFloat) {
+        let portrait = size.height > size.width
+        let h = portrait ? 0 : max(max(insets.leading, 0), max(insets.trailing, 0))
+        let v = max(max(insets.top, 0), max(insets.bottom, 0))
+        return (h, v, v)
+    }
+
     static func make(size: CGSize, insets: EdgeInsets, midRun: Bool, hasBest: Bool) -> CoverLayout {
-        let x0 = max(insets.leading, 0) + margin
-        let y0 = max(insets.top, 0) + margin
-        let x1 = size.width - max(insets.trailing, 0) - margin
-        let y1 = size.height - max(insets.bottom, 0) - margin
+        let even = evenInsets(insets, size: size)
+        let x0 = even.h + margin
+        let y0 = even.top + margin
+        let x1 = size.width - even.h - margin
+        let y1 = size.height - even.bottom - margin
         let area = CGRect(x: x0, y: y0, width: max(x1 - x0, 1), height: max(y1 - y0, 1))
         let side = area.width > area.height * 1.15
         var last: CoverLayout?
-        // The larger type when it fits, else a size down.
-        for compact in [false, true] {
-            let titleSize: CGFloat = compact ? 22 : 30
-            let bodySize: CGFloat = compact ? 15 : 17
-            let scoreSize: CGFloat = compact ? 28 : 34
-            let spacing: CGFloat = compact ? 8 : 14
-            let textW = side ? min((area.width - gap) / 2, 400) : min(area.width, 400)
+        // R6 (#12): filled: the largest type that fits, then a size down, then the smallest.
+        for tier in 0..<3 {
+            let titleSize: CGFloat = [36, 30, 22][tier]
+            let bodySize: CGFloat = [20, 17, 15][tier]
+            let scoreSize: CGFloat = [48, 38, 28][tier]
+            let spacing: CGFloat = [18, 14, 8][tier]
+            let textW = side ? min((area.width - gap) / 2, 400) : min(area.width, 420)
             var text = height(CoverCard.carryOn, font(titleSize, .heavy), width: textW)
             text += spacing + height(CoverCard.detail(midRun: midRun), font(bodySize, .semibold), width: textW)
             if midRun {
@@ -485,7 +500,7 @@ struct CoverLayout: Equatable {
             if side {
                 trapW = min((area.width - gap) / 2, trapMaxW, area.height / trapAspect)
             } else {
-                trapW = min(area.width * 0.78, trapMaxW, max(area.height - text - spacing, 0) / trapAspect)
+                trapW = min(area.width * 0.92, trapMaxW, max(area.height - text - spacing * 2, 0) / trapAspect)
             }
             trapW = max(trapW, 0)
             let trapH = trapW * trapAspect

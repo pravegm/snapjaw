@@ -105,9 +105,11 @@ struct TrapArtImage: View {
 struct TrapHeroImage: View {
     /// A fly sipping on it.
     var withBug = true
+    /// R6: the Garden's variety.
+    var variety: TrapVariety = .classic
 
     var body: some View {
-        if let hero = TrapImageCache.heroImage(bug: withBug) {
+        if let hero = TrapImageCache.heroImage(bug: withBug, variety: variety) {
             Image(decorative: hero, scale: TrapImageCache.scale)
                 .resizable()
                 .interpolation(.high)
@@ -173,17 +175,18 @@ enum TrapImageCache {
         return cached
     }
 
-    private static var heroCache: [Bool: CGImage] = [:]
-    private static var heroTried: Set<Bool> = []
+    private static var heroCache: [String: CGImage] = [:]
+    private static var heroTried: Set<String> = []
 
     /// R4 (REVIEW-3 #16): the Scene's own 3/4 trap, `bug`: with a fly sipping on it (nil: the App tilts the open trap
-    /// instead).
-    static func heroImage(bug: Bool = false) -> CGImage? {
-        if let hit = heroCache[bug] { return hit }
-        guard !heroTried.contains(bug) else { return nil }
-        heroTried.insert(bug)
-        let made = SceneHooks.threeQuarterTrap(width: width, scale: scale, bug: bug)
-        heroCache[bug] = made
+    /// instead). R6: in `variety` (the Garden), each look drawn once.
+    static func heroImage(bug: Bool = false, variety: TrapVariety = .classic) -> CGImage? {
+        let key = variety.rawValue + (bug ? ".bug" : "")
+        if let hit = heroCache[key] { return hit }
+        guard !heroTried.contains(key) else { return nil }
+        heroTried.insert(key)
+        let made = SceneHooks.threeQuarterTrap(width: width, scale: scale, bug: bug, variety: variety)
+        heroCache[key] = made
         return made
     }
 

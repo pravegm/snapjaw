@@ -10,6 +10,8 @@
 //   node tools/balance-sim.js attract=1            # attract mode never stalls
 //   node tools/balance-sim.js crowd=1              # R2: crowd waves land within 1.2 s
 //   node tools/balance-sim.js detector=1           # the SnapDetector checks (incl. QA-1 #5 and #6)
+//   node tools/balance-sim.js zen=1                # R6: the Zen Bog (10 min per run: never tires, never wilts, keeps
+//                                                  # catching, its day loops); the main run prints it too (zenrows=0 skips)
 //   node tools/balance-sim.js crease=1             # R3: no bug rests within creaseGap(radius) of the midrib line;
 //                                                  # R4: nothing in the trap is low within 20 + r of it (attract too)
 //   Any Tuning value can be overridden: T.beeChanceDusk=0.5
@@ -34,6 +36,9 @@
 // R5: a protected bug pauses the hunger clock from its final approach (in the zone and below creaseAirHeight); the
 // Sprout taper (SessionOptions.sproutRun 1-3: 14 / 13 / 12 snaps); protected entries never start in a Duo thumb band;
 // the pilot's giveUp switch for the report (design/notes/core-R5.md).
+// R6: the Zen Bog (SessionOptions.for(.zen): snaps never run out, no hunger, stingers cost nothing, the day loops every
+// zenDayWaves and the late ramp never starts: TrapRules.paceWave), and the last light (Feed and Daily: from lastLightWave the
+// hunger clock ticks whatever is in the trap, so a hand that never gives up still ends) (design/notes/core-R6.md).
 'use strict';
 
 // MARK: Tuning (mirror of Snap/Core/Tuning.swift)
@@ -78,6 +83,10 @@ const T = {
   creaseClearance: 16,
   // R4 (REVIEW-3 #14): a bug within creaseHalfWidth + its radius of the midrib line (in the trap) flies at least this high
   creaseAirHeight: 0.5,
+  // R6 (#19, REVIEW-5 P2-5): the last light (Feed and the Daily): from this wave the hunger clock ticks whatever is in the trap
+  lastLightWave: 85,
+  // R6: the Zen Bog's day loops every this many waves (below lateWaveStart: Zen never speeds up)
+  zenDayWaves: 28,
   // R2 bugs x1.8 (REVIEW-1 #4)
   bugRadiusScale: 1.8, chainMinBite: 2,
   // motion (ROUND-1 "Movement")
@@ -165,6 +174,8 @@ const MOTION = {
 const motion = (s) => { const m = MOTION[s]; return { style: m[0], speed: m[1], walkSpeed: m[2], wobbleAmp: m[3], wobbleHz: m[4], nectarChance: m[5], lingerFactor: m[6], pauseMin: m[7], pauseMax: m[8] }; };
 
 // MARK: Rules
+// R6: the wave the late factor uses (TrapRules.paceWave): Zen's recipe wave, else the real one.
+function paceWave(wave, mode) { return mode === 'zen' ? ((Math.max(wave, 1) - 1) % T.zenDayWaves) + 1 : wave; }
 function lateFactor(wave) {
   if (wave <= T.lateWaveStart) return 1;
   return Math.max(T.lateReactionFloor, Math.pow(T.lateReactionDecay, wave - T.lateWaveStart));
@@ -509,6 +520,8 @@ class Session {
     this.wilts = opts.snapsRunOut && opts.hunger !== false && !(this.perks && this.perks.noWilt);
     this.freeSting = !!opts.freeFirstSting || (this.perks !== null && this.perks.freeSting);
     this.calm = this.perks !== null && this.perks.calmMorning;
+    // R6 (#19): the last light (TrapRules.lastLightApplies: Feed and the Daily, with wilting on)
+    this.lastLight = this.wilts && (this.mode === 'feed' || this.mode === 'daily');
     // R4 (QA-2 #1, REVIEW-3 #12): the hunger clock ticks only while hungerTicks() (see tick).
     this.hunger = 0; this.hungrySent = false; this.hungerLive = false; this.freeStingUsed = false;
     this.prevArmed = true; this.prevClosure = 0;
@@ -566,7 +579,8 @@ class Session {
     this.bugs = this.bugs.filter((b) => !b.gone);
     // R2 hunger (GAME-DESIGN §5): no catching bite for the phase's wilt time wilts a snap; 3 s before, hungry.
     // R4: it ticks only while a catchable bug has landed in the trap and no protected bug has.
-    this.hungerLive = this.phase === 'playing' && this.wilts && this.hungerTicks();
+    // R6 (#19): in the last light it ticks whatever is in the trap.
+    this.hungerLive = this.phase === 'playing' && this.wilts && ((this.lastLight && this.wave >= T.lastLightWave) || this.hungerTicks());
     if (this.hungerLive) {
       const w = wiltSeconds(this.dayPhase);
       this.hunger += h / w;
@@ -602,7 +616,7 @@ class Session {
     this.wave += 1;
     const idx = this.wave;
     if (idx > 1 && (idx - 1) % T.nectarReseedWaves === 0) this.installNectar(Math.floor((idx - 1) / T.nectarReseedWaves));
-    const recipe = this.mode === 'attract' ? ((idx - 1) % (T.nightWave + 5)) + 1 : idx;
+    const recipe = this.mode === 'attract' ? ((idx - 1) % (T.nightWave + 5)) + 1 : (this.mode === 'zen' ? ((idx - 1) % T.zenDayWaves) + 1 : idx);
     const spec = makeWave(this.seed, recipe, this.g, this.nectar, this.calm);
     this.dayPhase = spec.phase;
     const at = this.nextWaveAt;
@@ -935,7 +949,7 @@ class Session {
       const flying = a === A_ARR || a === A_HOP;
       if (a === A_ARR && b.height >= T.catchableHeight) continue;
       if (!(a === A_ARR || a === A_WALK || a === A_SIP || a === A_HOP)) continue;
-      const r = reaction(b.info, a === A_SIP, flying, onRimBody(this.g, b, b.info.radius), this.wave);
+      const r = reaction(b.info, a === A_SIP, flying, onRimBody(this.g, b, b.info.radius), paceWave(this.wave, this.mode));
       if (d <= r) {
         if (isProtected(b.species)) { stingers.push(b.species); this.takeOff(b, M.release); }
         else { caught.push(b.species); this.freeDrop(b); b.timer = b.height; b.mode = M.caught; b.el = 0; b.fx = b.x; b.fy = b.y; }
@@ -980,7 +994,7 @@ class Session {
       const inT = this.inTrap(b);
       return { id: b.id, species: b.species, x: b.x, y: b.y, activity: a, height: b.height, inTrap: inT, onRim: inT && onRimBody(this.g, b, b.info.radius), restless: b.restless };
     });
-    return { phase: this.phase, time: this.time, bugs, snapsLeft: this.snapsLeft, wave: this.wave, score: this.score, hunger: this.hunger, dayPhase: this.dayPhase };
+    return { phase: this.phase, mode: this.mode, time: this.time, bugs, snapsLeft: this.snapsLeft, wave: this.wave, score: this.score, hunger: this.hunger, dayPhase: this.dayPhase };
   }
 }
 
@@ -1040,7 +1054,7 @@ class Pilot {
       if (a === A_ARR && b.height >= T.catchableHeight) { arriving += 1; continue; }
       if (!(a === A_ARR || a === A_WALK || a === A_SIP || a === A_HOP)) continue;
       if (a === A_ARR) arriving += 1;
-      const r = reaction(inf, a === A_SIP, a === A_ARR || a === A_HOP, b.onRim, snap.wave);
+      const r = reaction(inf, a === A_SIP, a === A_ARR || a === A_HOP, b.onRim, paceWave(snap.wave, snap.mode));
       if (d <= r) { n += 1; sum += inf.points; }
     }
     return { landed, maxPts, n, value: sum * n, arriving, restless };
@@ -1269,6 +1283,35 @@ function runOne(skill, seed, extra, mode, giveUp) {
     stings: s.stats.stings, feasts: s.stats.feasts, dry: s.stats.dry, waves: s.wave, chain: s.stats.longestChain,
     biggest: s.stats.biggest, spared: s.stats.spared, wilts: s.stats.wilts, capped: s.phase !== 'finished' };
 }
+// R6: a Zen Bog run (SessionOptions.for(.zen)) for `seconds`: it must never tire, never change its snaps, and keep
+// catching (the day loops, so the night never outruns the hand).
+const ZEN = { snapsRunOut: false, waves: true, stingCosts: false, hunger: false };
+function runZen(skill, seed, seconds) {
+  const s = new Session(seed, Object.assign({}, ZEN), 'zen');
+  const pilot = new Pilot(skill, u64(BigInt(seed) * 7n + 1n));
+  const dt = 1 / 60; let t = 0; const start = s.snapsLeft; let snapsChanged = 0; let caughtAt = 0;
+  const frames = Math.round(seconds * 60);
+  for (let f = 0; f < frames && s.phase !== 'finished'; f++) {
+    s.step(dt, pilot.step(dt, t, s.snapshot()));
+    t += dt;
+    if (s.snapsLeft !== start) snapsChanged += 1;
+    if (f === frames - 120 * 60) caughtAt = s.stats.caught;
+  }
+  return { tired: s.phase === 'playing' ? 0 : 1, snapsChanged, late: s.stats.caught - caughtAt, caught: s.stats.caught,
+    snaps: s.stats.snaps, stings: s.stats.stings, chain: s.stats.longestChain, wilts: s.stats.wilts, waves: s.wave };
+}
+function zenTable(seeds, base, stride, skills) {
+  const out = {};
+  for (const sk of skills) {
+    const runs = []; for (let i = 0; i < seeds; i++) runs.push(runZen(sk, base + i * stride, 600));
+    out[sk] = { tired: runs.filter((r) => r.tired).length, snapsChanged: runs.reduce((a, r) => a + r.snapsChanged, 0),
+      minLate: Math.min(...runs.map((r) => r.late)), caught: pct(runs.map((r) => r.caught), 0.5),
+      stings: pct(runs.map((r) => r.stings), 0.5), chain: pct(runs.map((r) => r.chain), 0.5),
+      wilts: Math.max(...runs.map((r) => r.wilts)), waves: pct(runs.map((r) => r.waves), 0.5) };
+  }
+  return out;
+}
+function zenLine(sk, m) { return `SNAP-BAL zen ${sk} 600 s: caught=${m.caught} minLate120s=${m.minLate} stings=${m.stings} chain=${m.chain} waves=${m.waves} tired=${m.tired} snapsChanged=${m.snapsChanged} maxWilts=${m.wilts}`; }
 function pct(a, p) { if (a.length === 0) return 0; const s = a.slice().sort((x, y) => x - y); const pos = (s.length - 1) * p; const lo = Math.floor(pos); const hi = Math.min(s.length - 1, lo + 1); return s[lo] + (s[hi] - s[lo]) * (pos - lo); }
 const KEYS = ['score', 'seconds', 'snaps', 'caught', 'stings', 'feasts', 'dry', 'waves', 'chain', 'biggest', 'spared', 'wilts'];
 function medians(runs) {
@@ -1297,6 +1340,17 @@ function checks(med) {
   if (med.sprout3Novice) out.push([`novice Sprout run 3 seconds >= 60 (${med.sprout3Novice.seconds.toFixed(1)})`, med.sprout3Novice.seconds >= 60]);
   for (const [tag, m] of [['1', med.sproutNovice], ['2', med.sprout2Novice], ['3', med.sprout3Novice]]) if (m) out.push([`novice Sprout run ${tag} never capped (${m.capped})`, m.capped === 0]);
   if (e) out.push([`expert wilts <= 6 (${e.wilts})`, e.wilts <= 6]);
+  // R6 (#19): an expert run lasts at most about 6 minutes (median)
+  if (e) out.push([`expert seconds <= 360 (${e.seconds.toFixed(1)})`, e.seconds <= 360]);
+  // R6 (#19): with the last light even a hand that never gives up ends (the nogiveup rows)
+  for (const [tag, m] of [['expert', med.nogiveupExpert], ['perfect', med.nogiveupPerfect]]) if (m) out.push([`${tag} without pilotGiveUp never capped (${m.capped})`, m.capped === 0]);
+  // R6: the Zen Bog never tires or wilts, keeps its snaps, and the pilot still catches in its last 2 minutes
+  if (med.zen) for (const [sk, z] of Object.entries(med.zen)) {
+    out.push([`zen ${sk} never tires (${z.tired})`, z.tired === 0]);
+    out.push([`zen ${sk} snaps never change (${z.snapsChanged})`, z.snapsChanged === 0]);
+    out.push([`zen ${sk} never wilts (${z.wilts})`, z.wilts === 0]);
+    out.push([`zen ${sk} catches late (min ${z.minLate} in the last 120 s)`, z.minLate >= 10]);
+  }
   if (p) out.push([`perfect seconds 240-480 (${p.seconds.toFixed(1)})`, p.seconds >= 240 && p.seconds <= 480]);
   if (p) out.push([`perfect wilts <= 5 (${p.wilts})`, p.wilts <= 5]);
   if (n) out.push([`novice stings >= 1 (${n.stings})`, n.stings >= 1]);
@@ -1379,6 +1433,12 @@ function main() {
     console.log(`CREASE band frames=${banded} low=${low} ${JSON.stringify(lowKinds)}`);
     return;
   }
+  if (args.zen) {
+    const z = zenTable(seeds, base, stride, ['casual', 'perfect']);
+    for (const [sk, m] of Object.entries(z)) console.log(zenLine(sk, m));
+    for (const [name, ok] of checks({ zen: z })) console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`);
+    return;
+  }
   if (args.attract) {
     for (const sk of skills) {
       const s = new Session(7, { snapsRunOut: false, waves: true, stingCosts: true }, 'attract');
@@ -1442,7 +1502,13 @@ function main() {
     const runs = [];
     for (let i = 0; i < seeds; i++) runs.push(runOne(sk, base + i * stride, null, 'feed', false));
     const m = medians(runs);
+    if (sk === 'expert') med.nogiveupExpert = m; else med.nogiveupPerfect = m;
     console.log(`SNAP-BAL nogiveup ${sk} score=${m.score} seconds=${m.seconds.toFixed(1)} snaps=${m.snaps} caught=${m.caught} stings=${m.stings} waves=${m.waves} wilts=${m.wilts} maxWilts=${m.maxWilts} capped=${m.capped} (with pilotGiveUp: wilts=${med[sk].wilts} capped=${med[sk].capped})`);
+  }
+  if (args.zenrows !== '0') {
+    // R6: the Zen Bog, 4 seeds x 10 min per pilot (zenrows=0 skips it)
+    med.zen = zenTable(Math.min(seeds, 4), base, stride, ['casual', 'perfect']);
+    for (const [sk, m] of Object.entries(med.zen)) console.log(zenLine(sk, m));
   }
   for (const [name, ok] of checks(med)) console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`);
 }

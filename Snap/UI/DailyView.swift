@@ -16,6 +16,12 @@ struct DailyView: View {
         return "Today's score: \(AppRules.formatted(record.score))."
     }
 
+    /// R6: "🔥 3 days" (with "best 5" once the longest was longer). Pure; tested.
+    static func streakLine(streak: Int, best: Int) -> String? {
+        guard let s = ProgressRules.streakText(streak) else { return nil }
+        return best > streak ? s + " · best \(best)" : s
+    }
+
     var body: some View {
         let c = info.isCompact
         let today = controller.today
@@ -37,6 +43,10 @@ struct DailyView: View {
                     .font(SnapType.body(c))
                     .foregroundStyle(SnapTheme.mist)
                     .multilineTextAlignment(.center)
+                // R6: the streak (and the longest one).
+                if let line = Self.streakLine(streak: store.streak(today: today), best: store.data.bestStreak) {
+                    SnapPill(text: line, color: SnapTheme.crimson, textColor: SnapTheme.cream)
+                }
                 history(today: today, c)
             }
             .frame(width: min(info.otherPage.width, 420))

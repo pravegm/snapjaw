@@ -14,6 +14,8 @@ import Testing
 // only), the calm first morning, nothing low over the crease, and the 0.2 late reaction floor.
 // Round 5: a protected bug pauses the clock from its final approach, the Sprout taper (SessionOptions.sprout(feedRun:),
 // SproutPerks), and no bee entry under a Duo thumb.
+// Round 6: the Zen Bog (options, free stings, the looping day, no score feats), the late night's cues and the last
+// light, the halo rule for "Hungry… bite!", goals (pool, scopes, tracker, book, draws, rewards) and the Garden's varieties.
 
 struct CoreTests {
 
@@ -209,6 +211,10 @@ struct CoreTests {
         #expect(Tuning.sproutRun2Snaps <= Tuning.firstRunSnaps && Tuning.sproutRun3Snaps <= Tuning.sproutRun2Snaps)
         #expect(abs(Tuning.thumbBandWidth - 90) < 1e-12)
         #expect(abs(Tuning.thumbBandLow - 0.25) < 1e-12 && abs(Tuning.thumbBandHigh - 0.75) < 1e-12)
+        // R6
+        #expect(Tuning.lastLightWave == 85 && Tuning.zenDayWaves == 28)
+        #expect(abs(Tuning.haloScale - 1.6) < 1e-12 && abs(Tuning.haloPad - 4) < 1e-12)
+        #expect(Tuning.goalsActive == 3 && Tuning.goalRecentMemory == 6 && Tuning.goalMinSnaps == 5)
     }
 
     // MARK: SnapDetector
@@ -2166,5 +2172,530 @@ struct CoreTests {
         let again: [AchievementDef] = Achievements.earned(after: big, lifetimeBugs: 99, lifetimeSpared: 0,
                                                           speciesFound: 3, alreadyEarned: ids(first))
         #expect(again.isEmpty)
+    }
+
+    // MARK: R6: the Zen Bog
+
+    @Test func zenOptionsNeverRunOutNeverWiltAndStingsAreFree() {
+        let z: SessionOptions = SessionOptions.for(.zen)
+        #expect(!z.snapsRunOut && z.waves && !z.stingCosts && !z.hunger)
+        #expect(z.sproutPerks(for: .zen) == nil)
+        var withPerks: SessionOptions = z
+        withPerks.sproutRun = 1
+        #expect(withPerks.sproutPerks(for: .zen) == nil && !withPerks.firstRunApplies(to: .zen))
+        // The Daily's rules are untouched.
+        #expect(SessionOptions.for(.daily(day: 3, scored: true)) == SessionOptions())
+        var o: SessionOptions = z
+        o.waves = false
+        let s = TrapSession(mode: .zen, seed: 7, best: 5, geometry: geo, options: o)
+        let start: Int = s.snapshot.snapsLeft
+        sippers(s, [.housefly, .fruitFly])
+        let clean: [TrapEvent] = snap(s, 0.05)
+        #expect(report(clean)?.caught.count == 2)
+        #expect(s.snapshot.chain == 1)
+        #expect(s.snapshot.score > 5)
+        let best: Int = count(clean) { (e: TrapEvent) -> Bool in if case .newBest = e { return true }; return false }
+        #expect(best == 0, "no best in the Zen Bog")
+        run(s, 1)
+        sippers(s, [.housefly, .bee])
+        let stung: [TrapEvent] = snap(s, 0.05)
+        let costs: [Int] = stung.compactMap { (e: TrapEvent) -> Int? in
+            if case .stung(_, _, let cost) = e { return cost }
+            return nil
+        }
+        #expect(costs == [0], "a bee costs no snap in Zen")
+        #expect(report(stung)?.snapsLost == 0)
+        #expect(s.snapshot.chain == 0, "but it breaks the chain")
+        #expect(s.snapshot.snapsLeft == start)
+        #expect(s.snapshot.hunger == 0)
+        #expect(s.snapshot.hint != .lastSnap && s.snapshot.hint != .hungry)
+    }
+
+    @Test func zenDayLoopsAndNeverSpeedsUp() {
+        #expect(Tuning.zenDayWaves < Tuning.lateWaveStart)
+        #expect(TrapRules.paceWave(1, mode: .zen) == 1)
+        #expect(TrapRules.paceWave(Tuning.zenDayWaves, mode: .zen) == Tuning.zenDayWaves)
+        #expect(TrapRules.paceWave(Tuning.zenDayWaves + 1, mode: .zen) == 1)
+        #expect(TrapRules.paceWave(100, mode: .feed) == 100)
+        #expect(TrapRules.paceWave(100, mode: .daily(day: 1, scored: true)) == 100)
+        let fly: BugInfo = BugCatalog.info(.housefly)
+        let late: Double = TrapRules.reaction(fly, sipping: true, flying: false, onRim: false,
+                                              wave: TrapRules.paceWave(150, mode: .zen))
+        let fresh: Double = TrapRules.reaction(fly, sipping: true, flying: false, onRim: false, wave: 1)
+        #expect(abs(late - fresh) < 1e-12, "Zen's night never outruns the hand")
+        let s = TrapSession(mode: .zen, seed: 11, best: 0, geometry: geo, options: SessionOptions.for(.zen))
+        let ev: [TrapEvent] = run(s, 130)
+        var phases: [DayPhase] = []
+        var tired: Int = 0
+        var wilts: Int = 0
+        for e in ev {
+            if case .dayPhaseChanged(let p) = e { phases.append(p) }
+            if case .tired = e { tired += 1 }
+            if case .wilted = e { wilts += 1 }
+        }
+        #expect(phases.contains(.night))
+        if let n = phases.firstIndex(of: .night) {
+            #expect(phases[(n + 1)...].contains(.morning), "after the night comes a new morning: \(phases)")
+        }
+        #expect(tired == 0 && wilts == 0)
+        #expect(!s.isFinished && s.snapshot.snapsLeft == Tuning.startSnaps)
+        #expect(s.snapshot.wave > Tuning.zenDayWaves)
+    }
+
+    @Test func zenEarnsNoScoreFeats() {
+        let zen: RunResult = result(mode: .zen, score: 50_000, caught: ["dragonfly": 2], biggest: 7, chain: 9,
+                                    feasts: 5, waves: 160, bugs: 400)
+        let got: Set<String> = ids(Achievements.earned(after: zen, lifetimeBugs: 400, lifetimeSpared: 60,
+                                                       speciesFound: 10, alreadyEarned: []))
+        #expect(got.contains("snap.ach.feast") && got.contains("snap.ach.bite5"))
+        #expect(got.contains("snap.ach.dragonfly") && got.contains("snap.ach.spare50"))
+        for skipped in ["snap.ach.chain4", "snap.ach.night", "snap.ach.score10k", "snap.ach.nobees", "snap.ach.daily"] {
+            #expect(!got.contains(skipped), "\(skipped)")
+        }
+        #expect(Achievements.zenSkips.count == 4)
+        #expect(!TrapRules.keepsBest(.zen) && TrapRules.keepsBest(.feed) && TrapRules.keepsBest(.daily(day: 1, scored: true)))
+    }
+
+    @Test func zenBugsGrowTheRankAtAQuarter() {
+        #expect(abs(Tuning.zenRankShare - 0.25) < 1e-12)
+        #expect(PlantRanks.growth(from: result(mode: .feed, bugs: 70)) == 70)
+        #expect(PlantRanks.growth(from: result(mode: .daily(day: 2, scored: false), bugs: 33)) == 33)
+        #expect(PlantRanks.growth(from: result(mode: .zen, bugs: 325)) == 81, "25 %, rounded down per run")
+        #expect(PlantRanks.growth(from: result(mode: .zen, bugs: 3)) == 0)
+        #expect(PlantRanks.growth(from: result(mode: .zen, bugs: 4)) == 1)
+        #expect(PlantRanks.growth(from: result(mode: .attract, bugs: 99)) == 0)
+        #expect(PlantRanks.growth(from: result(mode: .lesson, bugs: 5)) == 0)
+    }
+
+    // MARK: R6: the late night (#19) and the halo rule (#15)
+
+    @Test func theLateNightIsTelegraphed() {
+        let feed: RunMode = .feed
+        let daily: RunMode = .daily(day: 9, scored: true)
+        #expect(TrapRules.nightCue(wave: Tuning.lateWaveStart, mode: feed) == nil)
+        #expect(TrapRules.nightCue(wave: Tuning.lateWaveStart + 1, mode: feed) == .nightGetsFast)
+        #expect(TrapRules.nightCue(wave: Tuning.lateWaveStart + 1, mode: daily) == .nightGetsFast)
+        #expect(TrapRules.nightCue(wave: Tuning.lastLightWave, mode: feed) == .lastLight)
+        #expect(TrapRules.nightCue(wave: Tuning.lastLightWave, mode: daily) == .lastLight, "the Daily plays Feed rules")
+        #expect(TrapRules.nightCue(wave: Tuning.lastLightWave + 1, mode: feed) == nil)
+        for m in [RunMode.zen, RunMode.attract, RunMode.lesson] {
+            #expect(TrapRules.nightCue(wave: Tuning.lateWaveStart + 1, mode: m) == nil)
+            #expect(TrapRules.nightCue(wave: Tuning.lastLightWave, mode: m) == nil)
+        }
+        #expect(Tuning.lastLightWave > Tuning.lateWaveStart + 1)
+        #expect(TrapRules.lastLightApplies(to: .feed) && TrapRules.lastLightApplies(to: daily))
+        #expect(!TrapRules.lastLightApplies(to: .zen) && !TrapRules.lastLightApplies(to: .attract))
+        // The cue fires on the wave that starts.
+        var o = SessionOptions()
+        o.firstWave = Tuning.lateWaveStart
+        let s = TrapSession(mode: .feed, seed: 3, best: 0, geometry: geo, options: o)
+        var cues: [NightCue] = []
+        for e in run(s, 12) {
+            if case .waveStarted(let i, _) = e, let c = TrapRules.nightCue(wave: i, mode: .feed) { cues.append(c) }
+        }
+        #expect(cues == [.nightGetsFast])
+    }
+
+    @Test func theLastLightMakesAnyFeedTrapHungry() {
+        // From Tuning.lastLightWave the clock ticks with an empty trap: night wilt 14 s, "hungry" 3 s before.
+        var o = SessionOptions(snapsRunOut: true, waves: false, stingCosts: true)
+        o.firstWave = Tuning.lastLightWave + 1
+        let s = TrapSession(mode: .feed, seed: 7, best: 0, geometry: geo, options: o)
+        #expect(s.inLastLight)
+        let a: [TrapEvent] = run(s, 12)
+        #expect(wiltCount(a) == 0)
+        #expect(s.snapshot.hint == .hungry, "the empty trap is hungry in the last light")
+        let b: [TrapEvent] = run(s, 2.5)
+        #expect(wiltCount(b) == 1)
+        #expect(s.snapshot.snapsLeft == Tuning.startSnaps - 1)
+        // The Daily too (Feed rules); not before the last light, not without hunger.
+        var early = o
+        early.firstWave = Tuning.lastLightWave - 1
+        let e = TrapSession(mode: .feed, seed: 7, best: 0, geometry: geo, options: early)
+        #expect(!e.inLastLight)
+        #expect(wiltCount(run(e, 20)) == 0)
+        let d = TrapSession(mode: .daily(day: 2, scored: true), seed: 7, best: 0, geometry: geo, options: o)
+        #expect(d.inLastLight)
+        #expect(wiltCount(run(d, 14.5)) == 1)
+        var fed = o
+        fed.hunger = false
+        let h = TrapSession(mode: .feed, seed: 7, best: 0, geometry: geo, options: fed)
+        #expect(!h.inLastLight)
+        #expect(wiltCount(run(h, 20)) == 0)
+    }
+
+    @Test func aHaloOnTheTrapEdgeHidesTheHungryHint() {
+        let c: CGPoint = geo.center
+        let bee: CGFloat = BugCatalog.info(.bee).radius
+        #expect(TrapRules.haloTouchesTrap(geo, c, radius: bee))
+        // Just outside the right edge: the halo (1.6 × r + 4 = 50 pt) reaches in.
+        #expect(TrapRules.haloTouchesTrap(geo, CGPoint(x: c.x + geo.a + 30, y: c.y), radius: bee))
+        #expect(!TrapRules.haloTouchesTrap(geo, CGPoint(x: c.x + geo.a + 60, y: c.y), radius: bee))
+        #expect(!TrapRules.haloTouchesTrap(geo, CGPoint(x: c.x, y: c.y + geo.b + 60), radius: bee))
+        #expect(TrapRules.haloTouchesTrap(geo, CGPoint(x: c.x, y: c.y - geo.b - 40), radius: bee))
+        // In real waves with no snaps (hungry all along), "Hungry… bite!" never shows beside a low haloed bee
+        // outside the trap.
+        var hungryFrames: Int = 0
+        var offenders: Int = 0
+        var seed: UInt64 = 1
+        while seed <= 12 {
+            let s = TrapSession(mode: .feed, seed: seed, best: 0, geometry: geo, options: SessionOptions())
+            var f: Int = 0
+            while f < 60 * 60 && !s.isFinished {
+                _ = s.step(dt: frame, input: TrapInput())
+                let shot: TrapSnapshot = s.snapshot
+                if shot.hint == .hungry {
+                    hungryFrames += 1
+                    for b in shot.bugs where b.species.isProtected && !geo.contains(b.position) {
+                        var staying: Bool = false
+                        switch b.activity {
+                        case .arriving, .walking, .sipping, .hopping: staying = true
+                        case .leaving, .caught, .escaped, .released: staying = false
+                        }
+                        if staying && b.height < Tuning.creaseAirHeight
+                            && TrapRules.haloTouchesTrap(geo, b.position, radius: BugCatalog.info(b.species).radius) {
+                            offenders += 1
+                        }
+                    }
+                }
+                f += 1
+            }
+            seed += 1
+        }
+        #expect(hungryFrames > 0)
+        #expect(offenders == 0)
+    }
+
+    // MARK: R6: goals
+
+    /// A bite's events as TrapSession sends them (the report, each catch, a feast, a chain step, a dry snap).
+    private func goalBite(_ caught: [BugSpecies], stingers: [BugSpecies] = [], points: Int = 10,
+                          chain: Int = 0) -> [TrapEvent] {
+        let r = BiteReport(caught: caught, escaped: 0, stingers: stingers, points: points,
+                           countMultiplier: caught.count, chainMultiplier: 1, snapsBack: 0, snapsLost: 0,
+                           duration: 0.1, time: 0)
+        var ev: [TrapEvent] = [.snapped(r)]
+        var k: Int = 0
+        for sp in caught {
+            ev.append(.bugCaught(id: 100 + k, species: sp, position: CGPoint(x: 300, y: 300)))
+            k += 1
+        }
+        if stingers.isEmpty && caught.count >= Tuning.feastCount {
+            ev.append(.feast(count: caught.count, snapsBack: 1))
+        }
+        if stingers.isEmpty && caught.count >= Tuning.chainMinBite && chain > 0 {
+            ev.append(.chainUp(count: chain, multiplier: TrapRules.chainMultiplier(chain)))
+        }
+        if caught.isEmpty && stingers.isEmpty { ev.append(.drySnap) }
+        return ev
+    }
+
+    private func goal(_ id: String) -> GoalSpec {
+        if let d = GoalBook.def(id) { return d }
+        Issue.record("no goal \(id)")
+        return GoalBook.pool[0]
+    }
+
+    @Test func theGoalPoolIsWellFormed() {
+        let pool: [GoalSpec] = GoalBook.pool
+        #expect(pool.count >= 34 && pool.count <= 42, "about 36: \(pool.count)")
+        let poolIDs: Set<String> = Set(pool.map { (d: GoalSpec) -> String in d.id })
+        #expect(poolIDs.count == pool.count, "ids are unique")
+        for d in pool {
+            #expect(d.target >= 1, "\(d.id)")
+            #expect(!d.title.isEmpty && !d.title.contains("{n}") && d.title.count <= 60, "\(d.id): \(d.title)")
+            #expect(d.ranks.lowerBound >= 0 && d.ranks.upperBound <= PlantRanks.count - 1, "\(d.id)")
+            if d.unlocks != nil { #expect(d.span == .run && d.scope != .zen && d.scope != .daily, "\(d.id)") }
+        }
+        #expect(goal("daily2k").title == "Score 2,000 in the Daily")
+        #expect(goal("dragonfly3").title == "Catch 3 dragonflies in one run")
+        #expect(goal("chain3").title == "Reach a ×3 chain")
+        #expect(goal("daily6k").progressLabel(1_250) == "1,250/6,000")
+        #expect(goal("bite4").progressLabel(9) == "4/4")
+        #expect(GoalBook.grouped(0) == "0" && GoalBook.grouped(1_000_005) == "1,000,005" && GoalBook.grouped(-2_500) == "-2,500")
+        // Every rank has plenty to draw from, in every kind of run.
+        var r: Int = 0
+        while r < PlantRanks.count {
+            let open: [GoalSpec] = GoalBook.eligible(rank: r)
+            let anyRun: Int = open.filter { (d: GoalSpec) -> Bool in d.scope == .anyMode || d.scope == .standard }.count
+            let families: Set<String> = Set(open.map { (d: GoalSpec) -> String in d.kind.family })
+            #expect(anyRun >= 8, "rank \(r): \(anyRun)")
+            #expect(families.count >= 5, "rank \(r): \(families)")
+            let hasDaily: Bool = open.contains { (d: GoalSpec) -> Bool in d.scope == .daily }
+            let hasZen: Bool = open.contains { (d: GoalSpec) -> Bool in d.scope == .zen }
+            #expect(hasDaily, "rank \(r) has a Daily goal")
+            #expect(hasZen, "rank \(r) has a Zen goal")
+            r += 1
+        }
+        // The variety goals match the Garden.
+        for v in TrapVariety.allCases {
+            if case .goal(let id) = Varieties.info(v).unlock {
+                #expect(GoalBook.def(id)?.unlocks == v, "\(v)")
+            }
+        }
+        let unlockers: [GoalSpec] = pool.filter { (d: GoalSpec) -> Bool in d.unlocks != nil }
+        #expect(unlockers.count == 3)
+    }
+
+    @Test func goalScopesCountTheRightModes() {
+        let daily: RunMode = .daily(day: 4, scored: false)
+        #expect(GoalScope.anyMode.includes(.feed) && GoalScope.anyMode.includes(daily) && GoalScope.anyMode.includes(.zen))
+        #expect(GoalScope.standard.includes(.feed) && GoalScope.standard.includes(daily))
+        #expect(!GoalScope.standard.includes(.zen))
+        #expect(GoalScope.daily.includes(daily) && !GoalScope.daily.includes(.feed) && !GoalScope.daily.includes(.zen))
+        #expect(GoalScope.zen.includes(.zen) && !GoalScope.zen.includes(.feed))
+        for sc in GoalScope.allCases {
+            #expect(!sc.includes(.attract) && !sc.includes(.lesson))
+            #expect(!sc.label.isEmpty)
+        }
+        // A run that doesn't count leaves a goal where it was.
+        let ev: [TrapEvent] = goalBite([.housefly, .housefly, .housefly])
+        #expect(GoalBook.progress(for: goal("bite3"), mode: .attract, events: ev) == 0)
+        #expect(GoalBook.progress(for: goal("bite3"), mode: .zen, events: ev) == 3)
+        #expect(GoalBook.progress(for: goal("feast2"), mode: .zen, events: ev) == 0)
+        #expect(GoalBook.progress(for: goal("feast2"), mode: .feed, events: ev) == 1)
+        #expect(GoalBook.progress(for: goal("daily2k"), mode: .feed, events: goalBite([.dragonfly], points: 5_000)) == 0)
+        #expect(GoalBook.progress(for: goal("daily2k"), mode: daily, events: goalBite([.dragonfly], points: 5_000)) == 5_000)
+    }
+
+    @Test func goalTrackerReadsTheEvents() {
+        var ev: [TrapEvent] = [.waveStarted(index: 1, phase: .morning)]
+        ev += goalBite([.housefly, .fruitFly, .bluebottle], points: 120, chain: 1)
+        ev += goalBite([.housefly, .housefly], points: 40, chain: 2)
+        ev += [.beeSpared(species: .bee), .beeSpared(species: .wasp), .beeSpared(species: .wasp)]
+        let picks: [String] = ["flyTrio", "bite3", "mixed3", "feastMorning", "feast2", "chain2", "spare3", "wasp2",
+                               "catch20", "clean25", "cleanToDusk", "night", "fireflyNight"]
+        let defs: [GoalSpec] = picks.map { (id: String) -> GoalSpec in goal(id) }
+        var t = GoalTracker(goals: defs, carried: [:], mode: .feed)
+        let met: [GoalSpec] = t.ingest(ev)
+        let metIDs: Set<String> = Set(met.map { (d: GoalSpec) -> String in d.id })
+        #expect(metIDs == ["flyTrio", "bite3", "mixed3", "feastMorning", "chain2", "spare3", "wasp2"], "\(metIDs)")
+        #expect(t.progress(goal("feast2")) == 1)
+        #expect(t.progress(goal("spare3")) == 3)
+        #expect(t.progress(goal("catch20")) == 5)
+        #expect(t.progress(goal("clean25")) == 5)
+        #expect(t.progress(goal("chain2")) == 2)
+        // Clean to dusk needs Tuning.goalMinSnaps snaps first: two are not enough.
+        var early = t
+        early.ingest([.dayPhaseChanged(.dusk)])
+        #expect(early.progress(goal("cleanToDusk")) == 0 && early.isSpoiled(goal("cleanToDusk")))
+        var k: Int = 0
+        while k < Tuning.goalMinSnaps {
+            t.ingest(goalBite([.housefly]))
+            k += 1
+        }
+        #expect(!t.isSpoiled(goal("cleanToDusk")))
+        let dusk: [GoalSpec] = t.ingest([.waveStarted(index: 15, phase: .dusk), .dayPhaseChanged(.dusk)])
+        let duskIDs: [String] = dusk.map { (d: GoalSpec) -> String in d.id }
+        #expect(duskIDs == ["cleanToDusk"])
+        // A dry snap at dusk, then a bee bitten: the counts stop where they were.
+        t.ingest(goalBite([]))
+        t.ingest(goalBite([.housefly], stingers: [.bee]))
+        t.ingest(goalBite([.housefly, .housefly]))
+        #expect(t.progress(goal("clean25")) == 5 + Tuning.goalMinSnaps)
+        #expect(t.isSpoiled(goal("clean25")))
+        #expect(t.progress(goal("catch20")) == 5 + Tuning.goalMinSnaps + 3)
+        // Night: a firefly caught at night counts, and the trap reached night.
+        t.ingest([.waveStarted(index: 23, phase: .night), .dayPhaseChanged(.night)])
+        #expect(t.progress(goal("night")) == 1)
+        let ff: [GoalSpec] = t.ingest(goalBite([.firefly]))
+        let ffIDs: [String] = ff.map { (d: GoalSpec) -> String in d.id }
+        #expect(ffIDs == ["fireflyNight"])
+        let again: [GoalSpec] = t.ingest(goalBite([.firefly]))
+        #expect(again.isEmpty, "each goal toasts once")
+        // A dry snap before dusk spoils the clean-to-dusk goal for the run.
+        var dry = GoalTracker(goals: [goal("cleanToDusk")], carried: [:], mode: .feed)
+        dry.ingest(goalBite([]))
+        #expect(dry.isSpoiled(goal("cleanToDusk")))
+    }
+
+    @Test func goalProgressCarriesBetweenRuns() {
+        // Run goals keep the best run; total goals add up.
+        let spare3: GoalSpec = goal("spare3")
+        let spare100: GoalSpec = goal("spare100")
+        var t = GoalTracker(goals: [spare3, spare100], carried: ["spare3": 2, "spare100": 98], mode: .zen)
+        #expect(t.progress(spare3) == 2 && t.progress(spare100) == 98)
+        let first: [GoalSpec] = t.ingest([.beeSpared(species: .bee)])
+        #expect(first.isEmpty)
+        #expect(t.progress(spare3) == 2, "Zen doesn't count for a Feed-or-Daily goal")
+        let met: [GoalSpec] = t.ingest([.beeSpared(species: .bumblebee)])
+        #expect(met == [spare100])
+        let later: [GoalSpec] = t.ingest([.beeSpared(species: .bee)])
+        #expect(later.isEmpty)
+        #expect(t.progress(spare100) == 101)
+        var f = GoalTracker(goals: [spare3], carried: ["spare3": 2], mode: .feed)
+        f.ingest([.beeSpared(species: .bee)])
+        #expect(f.progress(spare3) == 2, "one run's 1 doesn't beat the best run's 2")
+        f.ingest([.beeSpared(species: .bee), .beeSpared(species: .bee)])
+        #expect(f.isMet(spare3))
+    }
+
+    @Test func goalBookDrawsDeterministically() {
+        var rank: Int = 0
+        var differs: Bool = false
+        while rank < PlantRanks.count {
+            var seed: UInt64 = 1
+            while seed <= 24 {
+                let a: GoalBookState = GoalBook.start(seed: seed, rank: rank)
+                let b: GoalBookState = GoalBook.start(seed: seed, rank: rank)
+                #expect(a == b)
+                if seed > 1 && a.active != GoalBook.start(seed: 1, rank: rank).active { differs = true }
+                let defs: [GoalSpec] = GoalBook.activeGoals(a)
+                let slotIDs: Set<String> = Set(a.active.map { (s: GoalBookSlot) -> String in s.id })
+                #expect(defs.count == Tuning.goalsActive && slotIDs.count == Tuning.goalsActive)
+                for d in defs { #expect(d.ranks.contains(rank), "rank \(rank) seed \(seed): \(d.id)") }
+                let modeGoals: Int = defs.filter { (d: GoalSpec) -> Bool in d.scope == .daily || d.scope == .zen }.count
+                let variety: Int = defs.filter { (d: GoalSpec) -> Bool in d.unlocks != nil }.count
+                #expect(modeGoals <= 1 && variety <= 1, "rank \(rank) seed \(seed)")
+                let fams: Set<String> = Set(defs.map { (d: GoalSpec) -> String in d.kind.family })
+                #expect(fams.count == Tuning.goalsActive, "rank \(rank) seed \(seed)")
+                seed += 1
+            }
+            rank += 1
+        }
+        #expect(differs, "the seed matters")
+        // A stale book is repaired: unknown ids and repeats go, the slots refill.
+        var stale = GoalBookState(seed: 3)
+        stale.active = [GoalBookSlot(id: "gone"), GoalBookSlot(id: "bite3", progress: 2), GoalBookSlot(id: "bite3")]
+        let fixed: GoalBookState = GoalBook.normalized(stale, rank: 0)
+        #expect(fixed.active.count == 3 && fixed.active[0] == GoalBookSlot(id: "bite3", progress: 2))
+        // Codable round trip.
+        let data: Data? = try? JSONEncoder().encode(fixed)
+        let back: GoalBookState? = data.flatMap { (d: Data) -> GoalBookState? in try? JSONDecoder().decode(GoalBookState.self, from: d) }
+        #expect(back == fixed)
+    }
+
+    @Test func goalBookCompletesReplacesAndRewards() {
+        #expect(GoalBook.reward(rank: 0) == 10 && GoalBook.reward(rank: 3) == 30 && GoalBook.reward(rank: 11) == 150)
+        var r: Int = 1
+        while r < PlantRanks.count {
+            #expect(GoalBook.reward(rank: r) >= GoalBook.reward(rank: r - 1))
+            r += 1
+        }
+        var st = GoalBookState(seed: 9)
+        st.active = [GoalBookSlot(id: "bite3"), GoalBookSlot(id: "chain2"), GoalBookSlot(id: "spare3")]
+        var ev: [TrapEvent] = [.waveStarted(index: 1, phase: .morning)]
+        ev += goalBite([.housefly, .housefly, .housefly], chain: 1)
+        ev += goalBite([.gnat, .gnat], chain: 2)
+        ev += [.beeSpared(species: .bee), .beeSpared(species: .bee), .beeSpared(species: .bee)]
+        let up: GoalBookUpdate = GoalBook.complete(st, mode: .feed, events: ev, rank: 0)
+        let doneIDs: [String] = up.completed.map { (d: GoalSpec) -> String in d.id }
+        #expect(doneIDs == ["bite3", "chain2", "spare3"])
+        #expect(up.bonus == GoalBook.tripleBonus(rank: 0) && up.growth == 3 * 10 + up.bonus)
+        #expect(up.state.growth == up.growth && up.state.completedCount == 3)
+        #expect(up.state.everCompleted == ["bite3", "chain2", "spare3"] && up.state.recent == up.state.everCompleted)
+        #expect(up.added.count == 3 && up.state.active.count == 3)
+        for d in up.added {
+            #expect(!["bite3", "chain2", "spare3"].contains(d.id) && d.ranks.contains(0), "\(d.id)")
+        }
+        let fresh: [Int] = up.state.active.map { (s: GoalBookSlot) -> Int in s.progress }
+        #expect(fresh == [0, 0, 0])
+        #expect(GoalBook.complete(st, mode: .feed, events: ev, rank: 0) == up, "deterministic")
+        // One met: no bonus; the others bank their progress.
+        var two = GoalBookState(seed: 9)
+        two.active = [GoalBookSlot(id: "bite4"), GoalBookSlot(id: "chain2"), GoalBookSlot(id: "spare100", progress: 40)]
+        let up2: GoalBookUpdate = GoalBook.complete(two, mode: .feed, events: ev, rank: 4)
+        let done2: [String] = up2.completed.map { (d: GoalSpec) -> String in d.id }
+        #expect(done2 == ["chain2"])
+        #expect(up2.bonus == 0 && up2.growth == GoalBook.reward(rank: 4))
+        #expect(up2.state.active[0] == GoalBookSlot(id: "bite4", progress: 3))
+        #expect(up2.state.active[2] == GoalBookSlot(id: "spare100", progress: 43))
+        #expect(up2.state.active[1].id != "chain2")
+        // A run of a mode that doesn't count banks nothing.
+        let up3: GoalBookUpdate = GoalBook.complete(st, mode: .attract, events: ev, rank: 0)
+        #expect(up3.completed.isEmpty && up3.growth == 0 && up3.state.active == st.active)
+    }
+
+    @Test func varietyGoalsAreOfferedOnceTheirBandOpens() {
+        let at3: GoalBookState = GoalBook.start(seed: 5, rank: 3)
+        let at3IDs: [String] = at3.active.map { (s: GoalBookSlot) -> String in s.id }
+        #expect(at3IDs.contains(GoalBook.sawtoothGoal), "\(at3IDs)")
+        var st = GoalBookState(seed: 5)
+        st.everCompleted = [GoalBook.sawtoothGoal]
+        let at6: GoalBookState = GoalBook.normalized(st, rank: 6)
+        let at6IDs: [String] = at6.active.map { (s: GoalBookSlot) -> String in s.id }
+        #expect(at6IDs.contains(GoalBook.sharkToothGoal), "\(at6IDs)")
+        #expect(!at6IDs.contains(GoalBook.sawtoothGoal))
+        var doneAll = GoalBookState(seed: 5)
+        doneAll.everCompleted = [GoalBook.sawtoothGoal, GoalBook.sharkToothGoal, GoalBook.fusedToothGoal]
+        var seed: UInt64 = 1
+        while seed <= 20 {
+            doneAll.seed = seed
+            let b: GoalBookState = GoalBook.normalized(doneAll, rank: 10)
+            let plainOnly: Bool = GoalBook.activeGoals(b).allSatisfy { (d: GoalSpec) -> Bool in d.unlocks == nil }
+            #expect(plainOnly, "seed \(seed)")
+            seed += 1
+        }
+        // At rank 9 all three variety goals are open, but only one is offered at a time.
+        let at9: GoalBookState = GoalBook.start(seed: 2, rank: 9)
+        let at9Variety: Int = GoalBook.activeGoals(at9).filter { (d: GoalSpec) -> Bool in d.unlocks != nil }.count
+        #expect(at9Variety == 1)
+    }
+
+    @Test func varietiesUnlockByRankAndGoals() {
+        #expect(Varieties.all.count == TrapVariety.allCases.count)
+        let order: [TrapVariety] = Varieties.all.map { (v: VarietyInfo) -> TrapVariety in v.variety }
+        let names: Set<String> = Set(Varieties.all.map { (v: VarietyInfo) -> String in v.name })
+        #expect(order == TrapVariety.allCases)
+        #expect(names.count == 8)
+        for v in TrapVariety.allCases {
+            #expect(Varieties.info(v).variety == v)
+            #expect(!Varieties.info(v).blurb.isEmpty && Varieties.info(v).blurb.count <= 60)
+            #expect(!Varieties.ruleText(v).isEmpty)
+        }
+        #expect(Varieties.unlocked(rank: 0, completedGoals: []) == [.classic])
+        #expect(Varieties.unlocked(rank: 2, completedGoals: []) == [.classic, .redDragon])
+        #expect(Varieties.unlocked(rank: 11, completedGoals: []) == [.classic, .redDragon, .b52, .cupped, .goldenGlow])
+        let goals: Set<String> = [GoalBook.sawtoothGoal, GoalBook.sharkToothGoal, GoalBook.fusedToothGoal]
+        #expect(Varieties.unlocked(rank: 11, completedGoals: goals) == TrapVariety.allCases)
+        #expect(Varieties.unlocked(rank: 0, completedGoals: [GoalBook.sawtoothGoal]) == [.classic, .sawtooth])
+        #expect(Varieties.ruleText(.redDragon) == "Reach " + PlantRanks.title(2))
+        #expect(Varieties.ruleText(.sawtooth) == "Goal: Spare 12 bees in one run")
+        #expect(Varieties.newlyUnlocked(rankBefore: 1, goalsBefore: [], rankAfter: 2, goalsAfter: []) == [.redDragon])
+        #expect(Varieties.newlyUnlocked(rankBefore: 4, goalsBefore: [], rankAfter: 5,
+                                        goalsAfter: [GoalBook.sawtoothGoal]) == [.b52, .sawtooth])
+        #expect(Varieties.effective(.goldenGlow, rank: 3, completedGoals: []) == .classic)
+        #expect(Varieties.effective(.redDragon, rank: 3, completedGoals: []) == .redDragon)
+        // About every 1.5 ranks: the unlock ranks (a goal's from its band) step 1–2 ranks apart up to the top.
+        var steps: [Int] = []
+        for v in TrapVariety.allCases {
+            switch Varieties.info(v).unlock {
+            case .start: steps.append(0)
+            case .rank(let r): steps.append(r)
+            case .goal(let id): steps.append(GoalBook.def(id)?.ranks.lowerBound ?? -1)
+            }
+        }
+        let sortedSteps: [Int] = steps.sorted()
+        #expect(sortedSteps.first == 0 && sortedSteps.last == PlantRanks.count - 1, "\(sortedSteps)")
+        var i: Int = 1
+        while i < sortedSteps.count {
+            let gap: Int = sortedSteps[i] - sortedSteps[i - 1]
+            #expect(gap >= 1 && gap <= 2, "\(sortedSteps)")
+            i += 1
+        }
+    }
+
+    @Test func goalsAgreeWithTheRunResultOnARealRun() {
+        let s = TrapSession(mode: .feed, seed: 1000, best: 0, geometry: geo, options: SessionOptions())
+        var pilot = TrapPilot(skill: .casual, seed: 7001)
+        var ev: [TrapEvent] = []
+        var t: Double = 0
+        var f: Int = 0
+        while f < 60 * 300 && !s.isFinished {
+            let out: PilotOutput = pilot.step(dt: frame, time: t, snapshot: s.snapshot)
+            ev.append(contentsOf: s.step(dt: frame, input: out.input))
+            t += frame
+            f += 1
+        }
+        let r: RunResult = s.partialResult()
+        #expect(r.bugsCaught > 10)
+        var compared: Int = 0
+        for d in GoalBook.pool {
+            guard let fromResult = GoalBook.progress(for: d, result: r) else { continue }
+            let fromEvents: Int = GoalBook.progress(for: d, mode: .feed, events: ev)
+            #expect(fromEvents == fromResult, "\(d.id): events \(fromEvents), result \(fromResult)")
+            compared += 1
+        }
+        #expect(compared >= 20)
     }
 }

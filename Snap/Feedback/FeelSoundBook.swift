@@ -227,8 +227,12 @@ enum FeelSoundBook {
     /// One caught bug (with the CHOMP, one per `bugCaught`): a tiny crackle of shell where it was, so a big bite has
     /// countable crunches. Panned to the bug. `light` (QA-1 #4, bugs past the 4th): two crackles and no shell ring, so
     /// a huge Feast still has voices left for its sparkle, scarab and chain.
-    static func crunch(index: Int, pan: Float, light: Bool = false, dice: inout FeelDice) -> [FeelSynthCommand] {
-        let start = crunchDelay(index: index)
+    /// R6 `cascade` (the FEAST CHOMP): the crunch lands on the FEAST's cascade instead (`cascadeDelay`: after the
+    /// longer hit-stop, `cascadeSpacing` apart, so every bug is its own countable "crk"), and its shell ring climbs
+    /// `cascadeRise` per bug, so the run of crunches rises like a drum roll.
+    static func crunch(index: Int, pan: Float, light: Bool = false, cascade: Bool = false,
+                       dice: inout FeelDice) -> [FeelSynthCommand] {
+        let start = cascade ? cascadeDelay(index: index) : crunchDelay(index: index)
         var commands: [FeelSynthCommand] = []
         var t = start
         for k in 0..<(light ? 2 : 3) {
@@ -238,10 +242,142 @@ enum FeelSoundBook {
             t += dice.float(0.005, 0.008)
         }
         if light { return commands }
-        commands.append(.ring(FeelRingSpec(.wood, fundamental: dice.float(1200, 1600), partials: 2, decay: 0.006,
+        let shell: Float
+        if cascade {
+            let rung = Float(min(max(index, 0), 10))
+            shell = cascadeShell * (1 + cascadeRise * rung) * dice.float(0.97, 1.03)
+        } else {
+            shell = dice.float(1200, 1600)
+        }
+        commands.append(.ring(FeelRingSpec(.wood, fundamental: shell, partials: 2, decay: 0.006,
                                            brightness: 0.45, gain: 0.08, delay: start, seed: dice.seed32(),
                                            pan: pan)))
         return commands
+    }
+
+    // MARK: R6: the FEAST CHOMP (a bite of 5+ bugs, or one at ×4+ chain)
+
+    /// R6 (ROUND-6 decision 5, SCORE-R5 D4 #1): a bite that caught at least this many bugs (Core's
+    /// `Tuning.bigFeastCount`), or that scored at this chain multiplier or more, is a FEAST: it plays `feastChomp`
+    /// and `FeelHapticBook.feastChomp`. A 3–4 bug Feast keeps the plain CHOMP (and the Feast sparkle).
+    static let feastChompCount: Int = Tuning.bigFeastCount
+    static let feastChompChain: Double = 4
+
+    /// Pure: is this bite a FEAST CHOMP? Only a bite that caught something. The Scene's FEAST treatment uses the same
+    /// rule (keep them in step: design/notes/feel-R6.md).
+    static func isFeastChomp(_ report: BiteReport) -> Bool {
+        let count = report.caught.count
+        // R6 founder rule: a bite with a stinger is never a FEAST (matches Scene's FeastEvent.isBig).
+        guard count > 0, report.stingers.isEmpty else { return false }
+        if count >= feastChompCount { return true }
+        let chain = report.chainMultiplier.isFinite ? report.chainMultiplier : 1
+        return chain >= feastChompChain - 1e-6
+    }
+
+    /// The Scene's FEAST hit-stop (ROUND-6: 80 ms, against a plain bite's 50 ms `hitStop`). The slam lands at 0; the
+    /// wet tail and the crunch cascade wait it out.
+    static let feastHitStop: Float = 0.08
+    /// The crunch cascade: the first crunch `cascadeLead` after the hit-stop, then one every `cascadeSpacing` (wider
+    /// than a plain bite's `crunchSpacing`, so each bug is its own countable "crk"), capped at 11 rungs.
+    static let cascadeLead: Float = 0.008
+    static let cascadeSpacing: Float = 0.038
+    /// The cascade's shell ring starts near `cascadeShell` Hz and climbs `cascadeRise` per bug (a rising drum roll).
+    static let cascadeShell: Float = 1250
+    static let cascadeRise: Float = 0.06
+    /// The sting (choir + marimba) and the burp land here (s after the bite), after the cascade, the Feast sparkle,
+    /// the chain chime and the snaps' pops. The marimba run's notes are `feastStingStep` apart.
+    static let feastStingAt: Float = 0.74
+    static let feastStingStep: Float = 0.045
+    static let burpAt: Float = 1.12
+    /// The burp's lip "pop" comes this long after the burp; the whole burp is over after `burpLength`.
+    static let burpPopAfter: Float = 0.22
+    static let burpLength: Float = 0.4
+    /// When the FEAST CHOMP is over (s after the bite).
+    static let feastChompLength: Float = burpAt + burpLength
+
+    /// When the `index`th caught bug's crunch lands in a FEAST (s after the bite).
+    static func cascadeDelay(index: Int) -> Float {
+        feastHitStop + cascadeLead + cascadeSpacing * Float(min(max(index, 0), 10))
+    }
+
+    /// R6: the FEAST CHOMP. In order:
+    /// 1. the plain CHOMP's slam for the bite (rims, wet thwack, thump, knock, whump, teeth), at 0;
+    /// 2. a **deeper body** under it: a sub "thoom" falling 64 → 30 Hz (an 8-harmonic stack, so a phone speaker carries
+    ///    its weight) and a dark low-passed chest of air;
+    /// 3. after the 80 ms FEAST hit-stop (`feastHitStop`), the CHOMP's squelch (and its low slosh);
+    /// 4. the **crunch cascade**, one crunch per caught bug (`crunch(cascade: true)`, played by the director per
+    ///    `bugCaught`, `cascadeSpacing` apart and rising);
+    /// 5. at `feastStingAt`, the bright **sting** (`feastSting`): a marimba run over a soft "aah" choir;
+    /// 6. at `burpAt`, a cute **burp** (`burp`) instead of the plain gulp.
+    /// The impact stays within a quarter of the plain 8-bug CHOMP's, and the limiter holds the whole frame under the
+    /// master's peak (tested).
+    static func feastChomp(caught: Int, dice: inout FeelDice) -> [FeelSynthCommand] {
+        let n = min(max(caught, 1), 8)
+        let lag: Float = feastHitStop - hitStop
+        var commands: [FeelSynthCommand] = []
+        // 1 and 3: the plain CHOMP's slam at 0; its wet tail waits out the longer hit-stop; its "mm" gulp gives way to
+        // the burp.
+        for command in chomp(caught: n, dice: &dice) {
+            let at = command.delay
+            if at >= gulpAt - 1e-6 { continue }
+            commands.append(at >= hitStop - 1e-6 ? command.delayed(by: lag) : command)
+        }
+        // 2. The deeper body.
+        let k = dice.float(1 - chompPitchJitter, 1 + chompPitchJitter)
+        commands.append(.tone(FeelToneSpec(start: 64 * k, end: 30 * k, glide: 0.12, duration: 0.5, attack: 0.002,
+                                           decay: 0.15, gain: 0.26, harmonics: 8, delay: 0.003)))
+        commands.append(.noise(FeelNoiseSpec(.lowPass, cutoff: 260 * k, to: 70 * k, sweep: 0.12, q: 1.8,
+                                             attack: 0.002, decay: 0.1, gain: 0.1, delay: 0.002)))
+        // 5 and 6.
+        commands.append(contentsOf: feastSting(delay: feastStingAt, dice: &dice))
+        commands.append(contentsOf: burp(delay: burpAt, dice: &dice))
+        return commands
+    }
+
+    /// R6: the FEAST's sting. A bright marimba run up C6–E6–G6–C7 (`feastStingStep` apart, spreading left to right)
+    /// with a glass glint at the top, over a soft "aah" choir: C5, E5, G5 and C6 held, each with its own slow
+    /// vibrato and a hair of detune, and a breathy band of air at the vowel's ~1.1 kHz. Bright, light voices.
+    static func feastSting(delay: Float = FeelSoundBook.feastStingAt, dice: inout FeelDice) -> [FeelSynthCommand] {
+        let at: Float = delay.isFinite ? max(delay, 0) : 0
+        var commands: [FeelSynthCommand] = []
+        let run: [Float] = [c6, e6, g6, c7]
+        for (index, f) in run.enumerated() {
+            let last = index == run.count - 1
+            commands.append(.ring(FeelRingSpec(.marimba, fundamental: f, partials: 3, decay: last ? 0.5 : 0.2,
+                                               brightness: 0.4, gain: last ? 0.07 : 0.06,
+                                               delay: at + feastStingStep * Float(index), seed: dice.seed32(),
+                                               pan: -0.3 + 0.2 * Float(index))))
+        }
+        let top = at + feastStingStep * Float(run.count - 1)
+        commands.append(.ring(FeelRingSpec(.glass, fundamental: e7, partials: 2, decay: 0.3, brightness: 0.3,
+                                           gain: 0.035, delay: top + 0.02, seed: dice.seed32())))
+        let choir: [Float] = [c5, e5, g5, c6]
+        for (index, f) in choir.enumerated() {
+            let detune = dice.float(0.997, 1.003)
+            commands.append(.tone(FeelToneSpec(start: f * detune, duration: 0.8, attack: 0.05, decay: 0.32,
+                                               gain: 0.03, harmonics: 4, vibratoRate: 5.2 + 0.35 * Float(index),
+                                               vibratoDepth: 0.007, delay: at, pan: -0.24 + 0.16 * Float(index))))
+        }
+        commands.append(.noise(FeelNoiseSpec(.bandPass, cutoff: 1100, q: 2.2, attack: 0.04, decay: 0.22, gain: 0.03,
+                                             delay: at)))
+        return commands
+    }
+
+    /// R6: the FEAST's cute "burp": a short raspy little belch falling 210 → 140 Hz (a fast, wide vibrato is the
+    /// rasp; its harmonics carry it on a phone speaker), a puff of air at its vowel, then a tiny lip "pop" and a
+    /// contented glint.
+    static func burp(delay: Float = FeelSoundBook.burpAt, dice: inout FeelDice) -> [FeelSynthCommand] {
+        let at: Float = delay.isFinite ? max(delay, 0) : 0
+        let k = dice.float(0.96, 1.04)
+        return [
+            .tone(FeelToneSpec(start: 210 * k, end: 140 * k, glide: 0.16, duration: 0.22, attack: 0.012, decay: 0.07,
+                               gain: 0.12, harmonics: 7, vibratoRate: 32, vibratoDepth: 0.07, delay: at)),
+            .noise(FeelNoiseSpec(.bandPass, cutoff: 520 * k, q: 2.5, attack: 0.008, decay: 0.06, gain: 0.06,
+                                 delay: at)),
+            .drop(FeelDropSpec(frequency: 760 * k, chirp: 1.8, decay: 0.018, gain: 0.06, delay: at + burpPopAfter)),
+            .ring(FeelRingSpec(.glass, fundamental: g6, partials: 2, decay: 0.2, brightness: 0.3, gain: 0.025,
+                               delay: at + burpPopAfter + 0.04, seed: dice.seed32())),
+        ]
     }
 
     // MARK: Feast, refunds, chain
@@ -837,6 +973,97 @@ enum FeelSoundBook {
         return commands
     }
 
+    // MARK: R6: goals and the Garden
+
+    /// A goal ticked by a bite waits for that bite's sounds: a plain bite's chain chime and Feast pops are over by
+    /// `goalAfterBite`; a FEAST CHOMP's burp by `feastChompLength`.
+    static let goalAfterBite: Float = 0.62
+
+    /// Pure: how long (s) a goal chime waits when it is asked for `sinceBite` s after the last bite (`feast`: that bite
+    /// was a FEAST CHOMP). 0 once the bite's sounds are over, or with no bite (`sinceBite` infinite or NaN).
+    static func goalDelay(sinceBite: Double, feast: Bool) -> Float {
+        guard sinceBite.isFinite else { return 0 }
+        let end: Float = feast ? feastChompLength : goalAfterBite
+        let since = Float(max(sinceBite, 0))
+        return max(end - since, 0)
+    }
+
+    /// The goal chime's second note lands this long after its first.
+    static let goalStep: Float = 0.1
+
+    /// R6: a goal completed (the live toast). A checkbox "tick" (a small wooden click) and a bright two-note
+    /// "ding-ding" up a fourth, G6 → C7, on the chime, with a glass glint. `bonus` (three goals at once) adds a third
+    /// note up to E7 and a soft held C major shimmer. Small and bright: under the CHOMP, never on its impact.
+    static func goalChime(bonus: Bool = false, delay: Float = 0, dice: inout FeelDice) -> [FeelSynthCommand] {
+        let at: Float = delay.isFinite ? max(delay, 0) : 0
+        var commands: [FeelSynthCommand] = [
+            .ring(FeelRingSpec(.wood, fundamental: 1700, partials: 2, decay: 0.008, brightness: 0.4, gain: 0.07,
+                               delay: at, seed: dice.seed32())),
+            .ring(FeelRingSpec(.chime, fundamental: g6, partials: 3, decay: 0.3, brightness: 0.35, gain: 0.065,
+                               delay: at + 0.01, seed: dice.seed32(), pan: -0.15)),
+            .ring(FeelRingSpec(.chime, fundamental: c7, partials: 3, decay: bonus ? 0.4 : 0.6, brightness: 0.35,
+                               gain: 0.07, delay: at + 0.01 + goalStep, seed: dice.seed32(), pan: 0.15)),
+            .ring(FeelRingSpec(.glass, fundamental: e7, partials: 2, decay: 0.2, brightness: 0.3, gain: 0.025,
+                               delay: at + 0.03 + goalStep, seed: dice.seed32())),
+        ]
+        guard bonus else { return commands }
+        commands.append(.ring(FeelRingSpec(.chime, fundamental: e7, partials: 3, decay: 0.8, brightness: 0.35,
+                                           gain: 0.065, delay: at + 0.01 + 2 * goalStep, seed: dice.seed32())))
+        let shimmer: [Float] = [c5, e5, g5]
+        for (index, f) in shimmer.enumerated() {
+            commands.append(.tone(FeelToneSpec(start: f, duration: 0.7, attack: 0.04, decay: 0.3, gain: 0.02,
+                                               harmonics: 2, vibratoRate: 5.5 + 0.4 * Float(index),
+                                               vibratoDepth: 0.006, delay: at + 2 * goalStep)))
+        }
+        return commands
+    }
+
+    /// The variety fanfare's three calls ("ta-ta-taaa") and when they land (s after its start).
+    static let fanfareCalls: [Float] = [g5, g5, c6]
+    static let fanfareCallTimes: [Float] = [0, 0.12, 0.24]
+
+    /// R6: a new trap variety in the Garden: a proud little fanfare, about 1.4 s. Three brassy calls (6-harmonic
+    /// saw-like stacks scooping up into pitch; the last held with a touch of vibrato) "ta-ta-taaa" on G5, G5, C6,
+    /// doubled on the marimba; under the held call a soft C major chord swells; then a chime run up E6–G6–C7–E7 spreading
+    /// left to right, and three glints. Bigger than a goal's chime, light beside the CHOMP.
+    static func varietyFanfare(delay: Float = 0, dice: inout FeelDice) -> [FeelSynthCommand] {
+        let at: Float = delay.isFinite ? max(delay, 0) : 0
+        var commands: [FeelSynthCommand] = []
+        let calls = min(fanfareCalls.count, fanfareCallTimes.count)
+        for index in 0..<calls {
+            let last = index == calls - 1
+            let f = fanfareCalls[index]
+            let t = at + fanfareCallTimes[index]
+            commands.append(.tone(FeelToneSpec(start: f * 0.985, end: f, glide: 0.025, duration: last ? 0.6 : 0.1,
+                                               attack: 0.008, decay: last ? 0.28 : 0.05, gain: 0.05, harmonics: 6,
+                                               vibratoRate: last ? 5.5 : 0, vibratoDepth: last ? 0.008 : 0,
+                                               delay: t)))
+            commands.append(.ring(FeelRingSpec(.marimba, fundamental: f, partials: 3, decay: last ? 0.35 : 0.12,
+                                               brightness: 0.4, gain: 0.05, delay: t, seed: dice.seed32())))
+        }
+        let held = at + (fanfareCallTimes.last ?? 0)
+        let chord: [Float] = [c5, e5, g5]
+        for (index, f) in chord.enumerated() {
+            commands.append(.tone(FeelToneSpec(start: f, duration: 1.0, attack: 0.08, decay: 0.4, gain: 0.025,
+                                               harmonics: 3, vibratoRate: 5 + 0.4 * Float(index), vibratoDepth: 0.006,
+                                               delay: held)))
+        }
+        let run: [Float] = [e6, g6, c7, e7]
+        for (index, f) in run.enumerated() {
+            let last = index == run.count - 1
+            commands.append(.ring(FeelRingSpec(.chime, fundamental: f, partials: 3, decay: last ? 0.8 : 0.35,
+                                               brightness: 0.35, gain: last ? 0.055 : 0.045,
+                                               delay: held + 0.18 + 0.06 * Float(index), seed: dice.seed32(),
+                                               pan: -0.3 + 0.2 * Float(index))))
+        }
+        for index in 0..<3 {
+            commands.append(.ring(FeelRingSpec(.glass, fundamental: dice.float(2800, 4200), partials: 2, decay: 0.15,
+                                               brightness: 0.3, gain: 0.025, delay: held + 0.5 + 0.1 * Float(index),
+                                               seed: dice.seed32(), pan: dice.float(-0.6, 0.6))))
+        }
+        return commands
+    }
+
     // MARK: The bed (everything continuous)
 
     /// Glide (s) of the frame-by-frame bed, and of a fade to quiet (pause, menus).
@@ -898,22 +1125,44 @@ enum FeelSoundBook {
         return FeelMath.smoothstep((clock - 2.75) / 0.5)
     }
 
+    // MARK: R6: the Zen Bog's gentle bed
+
+    /// Zen (`FeedbackDirector.zen`): the marimba loop plays at this share, with at most `zenMaxMusicVoices` voices (the
+    /// chain still adds them up to there); the bog (wind, frogs, crickets) at `zenAmbienceShare`, the drips sparser
+    /// still; the creep groan, which still tells you the bugs feel it, at `zenGroanShare`. The buzz layer is unchanged
+    /// (a bee's hum is still the choice).
+    static let zenMusicShare: Double = 0.55
+    static let zenMaxMusicVoices: Float = 3
+    static let zenAmbienceShare: Double = 0.75
+    static let zenDripShare: Double = 0.6
+    static let zenGroanShare: Double = 0.7
+
+    /// Pure: whether a run in `mode` gets the Zen feel (the gentle bed, no hunger or warning sounds).
+    static func isZen(_ mode: RunMode) -> Bool {
+        switch mode {
+        case .zen: return true
+        case .feed, .daily, .attract, .lesson: return false
+        }
+    }
+
     /// The continuous layers for one game frame. `ambience` (0…1) is the bog's level: the director keeps it up
-    /// through the result moments and lets it fade in menus.
-    static func playBed(telemetry: TrapTelemetry, master: Float, ambience: Double) -> FeelBed {
+    /// through the result moments and lets it fade in menus. R6 `zen`: the Zen Bog's softer bed (see `zenMusicShare`).
+    static func playBed(telemetry: TrapTelemetry, master: Float, ambience: Double, zen: Bool = false) -> FeelBed {
         var bed = idleBed(master: master, glide: frameGlide)
         if telemetry.playing {
-            bed.groan = Float(groanLevel(closure: telemetry.closure, creeping: telemetry.creeping))
+            let groan = groanLevel(closure: telemetry.closure, creeping: telemetry.creeping)
+            bed.groan = Float(zen ? groan * zenGroanShare : groan)
             bed.groanHz = Float(groanHz(closure: telemetry.closure))
-            bed.music = 1
-            bed.musicVoices = musicVoices(chain: telemetry.chain)
+            bed.music = Float(zen ? zenMusicShare : 1)
+            let voices = musicVoices(chain: telemetry.chain)
+            bed.musicVoices = zen ? min(voices, zenMaxMusicVoices) : voices
         }
-        let air = FeelMath.clamp01(ambience)
+        let air = FeelMath.clamp01(ambience) * (zen ? zenAmbienceShare : 1)
         if air > 0 {
             let clock = telemetry.dayClock
             bed.wind = Float(air * windShare(dayClock: clock))
             bed.frogs = Float(air * frogShare(dayClock: clock))
-            bed.dripRate = Float(dripRate * air)
+            bed.dripRate = Float(dripRate * air * (zen ? zenDripShare : 1))
             bed.crickets = Float(air * cricketShare(dayClock: clock))
         }
         return bed
@@ -1103,6 +1352,36 @@ struct FeelBuzzMixer {
             if ids[slot] != nil { releasedAt[slot] = now }
             ids[slot] = nil
             targets[slot].level = 0
+        }
+    }
+}
+
+extension FeelSynthCommand {
+    /// R6: the same one-shot `offset` s later (the FEAST CHOMP's tail waits out the longer hit-stop). A negative or NaN
+    /// offset never moves a voice before 0. The continuous commands (`bed`, `buzz`, `stopAll`) are unchanged.
+    func delayed(by offset: Float) -> FeelSynthCommand {
+        let shift: Float = offset.isFinite ? offset : 0
+        switch self {
+        case .noise(var spec):
+            spec.delay = max(spec.delay + shift, 0)
+            return .noise(spec)
+        case .tone(var spec):
+            spec.delay = max(spec.delay + shift, 0)
+            return .tone(spec)
+        case .ring(var spec):
+            spec.delay = max(spec.delay + shift, 0)
+            return .ring(spec)
+        case .drop(var spec):
+            spec.delay = max(spec.delay + shift, 0)
+            return .drop(spec)
+        case .fm(var spec):
+            spec.delay = max(spec.delay + shift, 0)
+            return .fm(spec)
+        case .squelch(var spec):
+            spec.delay = max(spec.delay + shift, 0)
+            return .squelch(spec)
+        case .bed, .buzz, .stopAll:
+            return self
         }
     }
 }

@@ -50,6 +50,15 @@ final class BogBugNode {
     /// the bug's ground point.
     var creaseCue: CGFloat = 0
     var shadowOffset: CGPoint = .zero
+    /// R6 (#7): the clearance nudge drawn now (eased towards `BogBugLayer.clearOffset`), and whether it has been set
+    /// once (a new bug takes its first nudge at once).
+    var nudge: CGPoint = .zero
+    var nudged = false
+    /// R6 (FEAST): this caught bug waits `gulpDelay` s (held in the closing jaws, over the closed trap) and is then
+    /// gulped into the midrib; `gulped` once it is in.
+    var feastGulp = false
+    var gulpDelay: Double = 0
+    var gulped = false
 
     /// Every sprite under `root` (the streak test checks each one's frame).
     var parts: [SKSpriteNode] { [halo, ring, body, wings, blur, glow, flash] }
@@ -141,8 +150,14 @@ final class BogBugNode {
             glow.color = BogPaint.ui(TrapArt.palette.gold)
             bogResize(glow, CGSize(width: r * 3, height: r * 3))
             glow.position = .zero
+        case .cricket:
+            // R6 (#5): a moonlit sheen at night, so the night's crickets read on the dark trap.
+            glow.isHidden = false
+            glow.color = BogPaint.ui(BogBugLayer.moonGlint)
+            bogResize(glow, CGSize(width: r * 3.2, height: r * 3.2))
+            glow.position = .zero
         case .housefly, .gnat, .fruitFly, .bluebottle, .ant, .ladybird, .grasshopper, .moth, .mosquito, .dragonfly,
-             .cricket, .bee, .bumblebee, .wasp:
+             .bee, .bumblebee, .wasp:
             glow.isHidden = true
             bogResize(glow, CGSize(width: r, height: r))
             glow.position = .zero
@@ -157,6 +172,11 @@ final class BogBugNode {
         flashFrames = 0
         creaseCue = 0
         shadowOffset = .zero
+        nudge = .zero
+        nudged = false
+        feastGulp = false
+        gulpDelay = 0
+        gulped = false
         root.isHidden = false
         shadow.isHidden = false
         mark.isHidden = true
@@ -195,6 +215,11 @@ final class BogBugLayer {
     private var free: [BogBugNode] = []
     private var frame = 0
     private var radii: [BugSpecies: CGFloat] = [:]
+    /// R6 (#7): what bugs keep clear of (scene space): the HUD's corners (`BogScene.hudKeepOut`) and the canvas.
+    var keepOut: [CGRect] = []
+    var canvas = CGSize(width: ScreenLayout.canvasWidth, height: ScreenLayout.canvasHeight)
+    /// R6 (FEAST): the seam points where caught bugs were gulped this frame (the scene sparkles them).
+    private(set) var gulps: [CGPoint] = []
 
     init() {
         let g = SKNode()
@@ -273,14 +298,109 @@ final class BogBugLayer {
         return CGPoint(x: g.center.x, y: min(max(y, g.center.y - reach), g.center.y + reach))
     }
 
-    /// A bug in the bite: it flashes white for 2 frames and squishes into the midrib from here.
+    /// A bug in the bite: it flashes white for 2 frames and squishes into the midrib from here (R6: from where it
+    /// was drawn, its clearance nudge included, so it never jumps).
     func markCaught(_ id: Int, at p: CGPoint) {
         guard let n = live[id] else { return }
         if n.catchPoint == nil {
-            n.catchPoint = p
+            n.catchPoint = CGPoint(x: p.x + n.nudge.x, y: p.y + n.nudge.y)
             n.catchHeight = n.lastHeight
         }
         n.flashFrames = 2
+    }
+
+    /// R6 (FEAST): caught bug `id` is gulped into the midrib `delay` s into its caught moment (one after another).
+    func queueGulp(_ id: Int, delay: Double) {
+        guard let n = live[id] else { return }
+        n.feastGulp = true
+        n.gulpDelay = max(delay, 0)
+        n.gulped = false
+    }
+
+    /// R6 (tests): whether caught bug `id` is queued for a FEAST gulp, and whether it has been gulped.
+    func gulpQueued(_ id: Int) -> Bool { live[id]?.feastGulp ?? false }
+    func gulpDone(_ id: Int) -> Bool { live[id]?.gulped ?? false }
+
+    /// R6 (FEAST): how long one gulp takes (s), and the global z a FEAST's caught bugs are drawn at (over the closed
+    /// trap, z 16.5, so the gulps are seen).
+    static let gulpTime: Double = 0.09
+    static let feastZ: CGFloat = 17.2
+    /// R6 (#5): the cricket's moonlit sheen.
+    static let moonGlint = RGBA(hex: 0xC8D8FF)
+
+    // MARK: R6 (#7) clearance
+
+    /// How far a bug's footprint keeps inside the canvas edge, and off the HUD's corners (points).
+    static let edgeGap: CGFloat = 6
+    static let hudGap: CGFloat = 8
+    /// How fast the drawn nudge follows its target (points per second).
+    static let nudgeRate: CGFloat = 260
+
+    /// A bug's footprint half-size: its protected ring (bees, wasps) or its art and wings.
+    static func footprintHalf(_ s: BugSpecies, radius r: CGFloat) -> CGFloat {
+        s.isProtected ? r * TrapArt.protectedRingScale + 4 : r * 1.25
+    }
+
+    /// R6 (#7): how far to push a bug in from one edge when its centre is `inside` points in from it and its footprint
+    /// needs `margin`: all of the shortfall when `resting` (centre on screen), or eased in for a flyer
+    /// (`(margin − inside) × smoothstep(0, margin, inside)`: 0 at the edge, monotonic, so it never stalls or pops).
+    static func edgePush(_ inside: CGFloat, margin m: CGFloat, resting: Bool) -> CGFloat {
+        guard inside < m, inside > 0, m > 0 else { return 0 }
+        let need = m - inside
+        return resting ? need : need * BogMath.smoothstep(0, m, inside)
+    }
+
+    /// R6 (#7): the cosmetic offset that keeps a bug at `p` (footprint half-size `half`, art radius `r`) clear:
+    /// - of the canvas edge: its footprint (ring included) sits `edgeGap` inside. A `resting` bug (walking, sipping)
+    ///   whose centre is on screen is pushed all the way in. A flying one is eased in (`edgePush`: nothing while its
+    ///   centre is off screen, all of it once its centre is a footprint in), so a bug flying in never pops;
+    /// - of the midrib, when `resting` in the trap: its centre `creaseHalfWidth` + r + 16 off it (Core's own rule: a
+    ///   resting bug is never drawn on the hinge);
+    /// - of every rect in `keepOut` (the HUD's corners), when outside the trap: pushed out to the nearest side that
+    ///   stays on screen.
+    /// Pure (tests). Caught bugs never move.
+    static func clearOffset(at p: CGPoint, half: CGFloat, radius r: CGFloat, resting: Bool, keepOut: [CGRect],
+                            canvas: CGSize, geometry g: TrapGeometry) -> CGPoint {
+        guard p.x.isFinite, p.y.isFinite else { return .zero }
+        var d = CGPoint.zero
+        let w = canvas.width, h = canvas.height
+        let m = half + edgeGap
+        d.x += edgePush(p.x, margin: m, resting: resting) - edgePush(w - p.x, margin: m, resting: resting)
+        d.y += edgePush(p.y, margin: m, resting: resting) - edgePush(h - p.y, margin: m, resting: resting)
+        if resting && g.normalizedRadius(p) <= 1.05 {
+            let band = ScreenLayout.creaseHalfWidth + r + 16
+            let dx = p.x + d.x - g.center.x
+            if abs(dx) < band {
+                let side: CGFloat = dx < 0 ? -1 : 1
+                d.x = g.center.x + side * band - p.x
+            }
+        }
+        // (The HUD never lies over the trap, so a bug in the trap is never pushed by it.)
+        let outside = g.normalizedRadius(p) > 1
+        for rect in keepOut where outside && !rect.isNull && rect.width > 0 && rect.height > 0 {
+            let q = CGPoint(x: p.x + d.x, y: p.y + d.y)
+            let box = rect.insetBy(dx: -(half + hudGap), dy: -(half + hudGap))
+            guard box.contains(q) else { continue }
+            // The nearest way out that keeps the footprint on screen.
+            let ways = [CGPoint(x: box.minX - q.x, y: 0), CGPoint(x: box.maxX - q.x, y: 0),
+                        CGPoint(x: 0, y: box.minY - q.y), CGPoint(x: 0, y: box.maxY - q.y)]
+            var best: CGPoint?
+            var bestLen = CGFloat.greatestFiniteMagnitude
+            for o in ways {
+                let t = CGPoint(x: q.x + o.x, y: q.y + o.y)
+                guard t.x >= m - 0.5, t.x <= w - m + 0.5, t.y >= m - 0.5, t.y <= h - m + 0.5 else { continue }
+                let len = abs(o.x) + abs(o.y)
+                if len < bestLen {
+                    bestLen = len
+                    best = o
+                }
+            }
+            if let o = best {
+                d.x += o.x
+                d.y += o.y
+            }
+        }
+        return d
     }
 
     func clear() {
@@ -316,6 +436,7 @@ final class BogBugLayer {
     func update(_ bugs: [BugState], time: Double, dt: Double, geometry g: TrapGeometry, night: CGFloat,
                 tint: UIColor, tintAmount: CGFloat, reduceMotion: Bool, squeeze: CGFloat = 1, hold: Bool = false) {
         frame &+= 1
+        gulps.removeAll(keepingCapacity: true)
         if hold {
             // R4 (#6): the hit-stop freezes the crowd, but the caught bugs keep sinking into the seam (60 ms).
             for b in bugs {
@@ -323,7 +444,7 @@ final class BogBugLayer {
                 draw(n, b, t: CGFloat(time), dt: 0, geometry: g, night: night, reduceMotion: reduceMotion,
                      squeeze: squeeze)
             }
-            for n in live.values { applyFlash(n, tint: tint, tintAmount: tintAmount) }
+            for n in live.values { applyFlash(n, tint: tint, tintAmount: tintAmount, night: night) }
             return
         }
         let t = CGFloat(time)
@@ -332,7 +453,7 @@ final class BogBugLayer {
             let n = node(for: b)
             n.seen = frame
             draw(n, b, t: t, dt: fdt, geometry: g, night: night, reduceMotion: reduceMotion, squeeze: squeeze)
-            applyFlash(n, tint: tint, tintAmount: tintAmount)
+            applyFlash(n, tint: tint, tintAmount: tintAmount, night: night)
         }
         // Bugs gone from the snapshot leave the screen.
         if live.count > bugs.count || live.values.contains(where: { $0.seen != frame }) {
@@ -348,7 +469,7 @@ final class BogBugLayer {
     }
 
     /// The catch flash (2 frames of white) or the light's tint (a colour blend, never a replacement).
-    private func applyFlash(_ n: BogBugNode, tint: UIColor, tintAmount: CGFloat) {
+    private func applyFlash(_ n: BogBugNode, tint: UIColor, tintAmount: CGFloat, night: CGFloat) {
         if n.flashFrames > 0 {
             n.flashFrames -= 1
             n.flash.isHidden = false
@@ -356,7 +477,9 @@ final class BogBugLayer {
         } else {
             n.flash.isHidden = true
         }
-        let amount = max(tintAmount, 0)
+        // R6 (#5): the night's own bugs (fireflies, crickets) keep most of their colour, so they read in the trap.
+        let nightBug = n.species == .firefly || n.species == .cricket
+        let amount = max(tintAmount, 0) * (nightBug ? 1 - 0.7 * night : 1)
         n.body.color = tint
         n.body.colorBlendFactor = min(amount, 0.6)
         n.wings.color = tint
@@ -424,20 +547,64 @@ final class BogBugLayer {
         // shrinks and spins in, whole, and is gone.
         var sunk: CGFloat = 0
         if caughtT >= 0 {
-            let start = n.catchPoint ?? b.position
+            let start = n.catchPoint ?? CGPoint(x: b.position.x + n.nudge.x, y: b.position.y + n.nudge.y)
             if n.catchPoint == nil {
                 n.catchPoint = start
                 n.catchHeight = n.lastHeight
             }
-            sunk = BogBugLayer.sinkLevel(caughtAge)
-            pos = BogMath.lerp(start, BogBugLayer.seamPoint(from: start, geometry: g), sunk)
-            let shrink = (1 - 0.45 * sunk) * (1 - 0.4 * BogMath.smoothstep(0.06, 0.3, CGFloat(caughtAge)))
-            let boing = 1 + 0.1 * sin(.pi * sunk)
-            sx *= shrink * boing
-            sy *= shrink * boing
-            rot += 1.4 * .pi * sunk * sunk
-            alpha = 1 - BogMath.smoothstep(0.1, 0.22, CGFloat(caughtAge))
-            h = n.catchHeight * (1 - sunk)
+            let seam = BogBugLayer.seamPoint(from: start, geometry: g)
+            if n.feastGulp {
+                // R6 (FEAST): held in the closing jaws (riding the squeeze, wriggling), over the closed trap, until
+                // its turn; then gulped into the midrib in `gulpTime`, with a gold sparkle as it goes in.
+                let local = caughtAge - n.gulpDelay
+                let held = CGPoint(x: g.center.x + (start.x - g.center.x) * min(max(squeeze, 0.2), 1), y: start.y)
+                if local < 0 {
+                    pos = held
+                    let wr = 1 + 0.07 * sin(t * 42 + ph) * motion
+                    sx *= 0.9 * wr
+                    sy *= 0.9 / wr
+                    rot += 0.25 * sin(t * 31 + ph) * motion
+                    h = 0
+                } else {
+                    let u = CGFloat(min(local / BogBugLayer.gulpTime, 1))
+                    sunk = 1 - (1 - u) * (1 - u)
+                    pos = BogMath.lerp(held, seam, sunk)
+                    let shrink = 0.9 * (1 - 0.75 * sunk)
+                    sx *= shrink
+                    sy *= shrink
+                    rot += 1.6 * .pi * sunk * sunk
+                    alpha = 1 - BogMath.smoothstep(0.75, 1, u)
+                    h = 0
+                    if u >= 1 && !n.gulped {
+                        n.gulped = true
+                        gulps.append(seam)
+                    }
+                }
+            } else {
+                sunk = BogBugLayer.sinkLevel(caughtAge)
+                pos = BogMath.lerp(start, seam, sunk)
+                let shrink = (1 - 0.45 * sunk) * (1 - 0.4 * BogMath.smoothstep(0.06, 0.3, CGFloat(caughtAge)))
+                let boing = 1 + 0.1 * sin(.pi * sunk)
+                sx *= shrink * boing
+                sy *= shrink * boing
+                rot += 1.4 * .pi * sunk * sunk
+                alpha = 1 - BogMath.smoothstep(0.1, 0.22, CGFloat(caughtAge))
+                h = n.catchHeight * (1 - sunk)
+            }
+        } else {
+            // R6 (#7): clear of the HUD's corners, the canvas edge and (resting) the midrib, eased so it never jumps.
+            let target = BogBugLayer.clearOffset(at: pos, half: BogBugLayer.footprintHalf(b.species, radius: r),
+                                                 radius: r, resting: walking || sipping, keepOut: keepOut,
+                                                 canvas: canvas, geometry: g)
+            if !n.nudged || reduceMotion {
+                n.nudge = target
+                n.nudged = true
+            } else {
+                let k = BogBugLayer.nudgeRate
+                n.nudge = CGPoint(x: BogMath.approach(n.nudge.x, target.x, rate: k, dt: dt),
+                                  y: BogMath.approach(n.nudge.y, target.y, rate: k, dt: dt))
+            }
+            pos = CGPoint(x: pos.x + n.nudge.x, y: pos.y + n.nudge.y)
         }
         n.lastHeight = h
 
@@ -454,7 +621,8 @@ final class BogBugLayer {
         n.root.yScale = max(sy * lift, 0.01)
         n.root.alpha = alpha
         // Caught: under the closed trap (`caughtZ`), over the lobes and the nectar. Otherwise by height.
-        n.root.zPosition = caughtT >= 0 ? BogBugLayer.caughtZ - layer.zPosition : 6 * max(h, 0.5 * cue)
+        let sinkZ = n.feastGulp ? BogBugLayer.feastZ : BogBugLayer.caughtZ
+        n.root.zPosition = caughtT >= 0 ? sinkZ - layer.zPosition : 6 * max(h, 0.5 * cue)
 
         // Wings.
         var spread: CGFloat = st.restSpread
@@ -496,12 +664,16 @@ final class BogBugLayer {
         // Glow (fireflies at night; the scarab's shimmer).
         switch b.species {
         case .firefly:
+            // R6 (#5): at night it blooms bigger and never blinks right out, so it reads in the trap.
             let blink = 0.55 + 0.45 * max(0, sin(t * 2.2 + ph))
-            n.glow.alpha = (0.35 + 0.65 * night) * blink * alpha
+            n.glow.alpha = min((0.35 + 0.65 * night) * (blink + 0.25 * night), 1) * alpha
+            n.glow.setScale(1 + 0.35 * night)
         case .goldenScarab:
             n.glow.alpha = (0.28 + 0.14 * sin(t * 2.6 + ph)) * alpha
+        case .cricket:
+            n.glow.alpha = 0.42 * night * alpha
         case .housefly, .gnat, .fruitFly, .bluebottle, .ant, .ladybird, .grasshopper, .moth, .mosquito, .dragonfly,
-             .cricket, .bee, .bumblebee, .wasp:
+             .bee, .bumblebee, .wasp:
             break
         }
 

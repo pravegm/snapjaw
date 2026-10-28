@@ -41,3 +41,24 @@ Engineers: add a dated line when you need something another module does not expo
 - 2026-10-28 Core → App: `SessionOptions.startSnaps: Int?` (nil = 10; pass 12 while Sprout) and `hunger: Bool`
   (default true; only runs with `snapsRunOut` ever wilt, so the lesson and attract never do). `chainUp` now fires only
   for clean bites of ≥ 2; a clean 1-bug bite holds the chain silently. Nectar is 6–8 drops in clusters of 2–3.
+- 2026-10-28 Core → Founder (contract, R6 #19): the late night's telegraph has no event of its own. Core exposes
+  `TrapRules.nightCue(wave:mode:)` (`.nightGetsFast` at wave 31, `.lastLight` at wave 85 in Feed and the Daily); the App maps each
+  `.waveStarted(index:)` through it. A contract `TrapEvent.nightCue(NightCue)` (or a `TrapHint.lastLight` for the
+  last light's empty-trap hunger) would be tidier; until then the pure function is the source of truth.
+- 2026-10-28 Core → App (R6): goals, varieties and Zen are in `design/notes/core-R6.md` (API: `GoalBook.start /
+  normalized / tracker / complete`, `GoalTracker.ingest / progress / isSpoiled`, `Varieties.unlocked(rank:
+  completedGoals:)`, `SessionOptions.for(.zen)`). Zen never fires `newBest`; `Achievements.earned` skips the score
+  feats for Zen. Founder call (decided): Zen bugs count 25 % toward rank via `PlantRanks.growth(from:)`; full for the Bug Book.
+- 2026-10-28 Scene → App (R6 #7): please set `scene.hudKeepOut` (scene space, y up) from `HUDLayout` each time it
+  changes: `[score ∪ pause, chain ∪ snaps]` via `AppCanvas.scenePoint` (add it to `SceneHooks`). Until then the Scene
+  uses `BogScene.defaultKeepOut(_:)`, the HUD half's two outer corners (214 × 134 top, 252 × 98 bottom). Also: draw the
+  HUD's snaps row with `TrapArt.snapGlyph(width:height:scale:empty:variety:)`, so it matches the scene's glyph flights.
+- 2026-10-28 Scene → Feel + App (R6 FEAST): the Scene's rule is `FeastEvent.isBig(_:)` (Snap/Scene/TrapVarieties.swift:
+  5+ caught, or a chain multiplier ≥ 4, and **no stinger in the bite**). `FeelSoundBook.isFeastChomp` and
+  `AppRules.isBigFeast` don't exclude a stung bite (it scores ×1 and refunds nothing), so a stung 6-bug bite would play
+  the FEAST CHOMP and freeze while the Scene shows "Stung!". Please call `FeastEvent.isBig` or add `stingers.isEmpty`.
+- 2026-10-28 Scene → Core (R6 #5, #7): the Scene now draws every bug's footprint (a bee's ring too) ≥ 6 pt inside the
+  canvas, outside the HUD's corners and (resting) Core's midrib clearance, as a small eased cosmetic nudge. Please make
+  it true at the source: landing, hover and walk spots with the footprint inside the canvas by 6 pt and outside
+  `BogScene.defaultKeepOut` (or the App's rects). And at night (waves 23+) let fireflies and crickets land **in the
+  trap** often enough to dominate it (R5 frame 35 had only houseflies); the Scene makes them glow there.

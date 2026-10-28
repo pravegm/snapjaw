@@ -534,7 +534,8 @@ struct WordsTests {
         #expect(AppRules.hudHintText(.beesCost, touch: true) == "Bees and wasps cost snaps. This one's free!")
         #expect(!AppRules.hudHintIsWarning(.beesCost))
         #expect(AppRules.hudHintIsLong(.beesCost))
-        #expect(AppRules.hudHintText(.chainTag(1.5), touch: false) == "Chain ×1.5! Keep the big bites coming")
+        // R6 (#14): the one-time chain explainer.
+        #expect(AppRules.hudHintText(.chainTag(1.5), touch: false) == "Chain ×1.5! Big bites in a row multiply.")
         #expect(AppRules.allHintCopy.contains(AppRules.freeStingCopy))
         #expect(!AppRules.hudHintIsWarning(.foldInput))
         #expect(AppRules.hudHintText(.trap(.crowd), touch: false) == "Now!")
@@ -672,7 +673,8 @@ struct WordsTests {
         #expect(AppRules.hintText(.hungry, touch: false) == "Hungry… bite!")
         #expect(AppRules.hintText(.hungry, touch: true) == "Hungry… bite!")
         #expect(AppRules.hintIsWarning(.hungry))
-        #expect(AppRules.lessonShowsHint(.beeInside))
+        // R6 (#6, frame 07): the bee step's card says it, so the plate doesn't repeat "Bee! Wait…".
+        #expect(!AppRules.lessonShowsHint(.beeInside))
         #expect(AppRules.lessonShowsHint(.crowd))
         #expect(!AppRules.lessonShowsHint(.hungry))
         #expect(AppRules.hudHunger(0.51, live: true) == 0.5)
@@ -718,7 +720,10 @@ struct WordsTests {
         #expect(PoseCard.title(isDuo: true) == "Hold it open like a book")
         #expect(CoverCard.title(midRun: true) == "Open it up to carry on")
         #expect(CoverCard.title(midRun: false) == "Open it up to carry on")
-        #expect(CoverCard.scoreLine(1_174) == "1,174 so far")
+        // R6 (#12): the number big, "score so far" under it.
+        #expect(CoverCard.scoreLine(1_174) == "1,174")
+        #expect(CoverCard.scoreCaption == "score so far")
+        #expect(CoverCard.bestLine(3_200) == "Best score 3,200")
         #expect(ClosingCard.title == CoverCard.title(midRun: true))
         // REVIEW-2 #20: no debug line in Settings, a hinge readout only on TestFlight with a hinge.
         #expect(!SettingsView.showsDiagnostics(channel: .debug, hasHinge: true))
@@ -1474,7 +1479,9 @@ struct RoundFiveTests {
         let size = CGSize(width: 951, height: 669)
         let c = AppCanvas(size: size, insets: EdgeInsets(), layout: ScreenLayout.make(viewSize: size, hasFold: true))
         let l = HUDLayout.make(c)
-        #expect(l.numeralSize == HUDLayout.numeralDuo)
+        // R6 (#14): the labelled numeral where there's room, else R5's on the row (never smaller than R5's).
+        #expect(l.numeralSize == (l.numeralLabeled ? HUDLayout.numeralDuo : HUDLayout.numeralRowDuo))
+        #expect(l.numeralSize >= 24)
         #expect(l.numeral.height >= HUDLayout.numeralHeight(glyph: l.glyph) - 0.01)
         // The bigger numeral still sits inside the snaps, clear of the glyphs (hudClearsTheCiliaOnTheDuo checks it
         // against the cilia).
@@ -1567,6 +1574,354 @@ struct RoundFiveTests {
             #expect(BadgePainter.species(for: id).count <= 2)
         }
         #expect(BadgePainter.species(for: Achievements.monarch.id).isEmpty)
+    }
+}
+
+// MARK: - Round 6: goals, the Garden, the Zen Bog, the streak, one message at a time
+
+/// A book whose three active goals are `ids` (Core's pool).
+private func book(_ ids: [String]) -> GoalBookState {
+    var b = GoalBookState(seed: 42)
+    b.active = ids.map { GoalBookSlot(id: $0) }
+    return b
+}
+
+@MainActor
+struct RoundSixTests {
+    /// #6: one message at a time; a moment's tag takes the screen and the toast waits; a warning holds a toast's clock.
+    @Test func oneMessageAtATime() {
+        var q = MessageQueue()
+        q.post(.plate(.goalDone("A 3-bug bite")), seconds: 2, now: 0)
+        q.post(.plate(.chainTag(1.5)), seconds: 2, now: 0)
+        let first = q.shown(now: 0.1, hint: .trap(.crowd))
+        #expect(first == .plate(.goalDone("A 3-bug bite")))
+        // The same toast is never queued twice.
+        q.post(.plate(.chainTag(1.5)), seconds: 2, now: 0.2)
+        #expect(q.pending.count == 1)
+        // A tag interrupts; the toast goes back to the front.
+        q.post(.tag(.loss("−2 snaps")), seconds: 1, now: 0.5, interrupt: true)
+        let tag = q.shown(now: 0.6, hint: nil)
+        #expect(tag == .tag(.loss("−2 snaps")))
+        let back = q.shown(now: 1.6, hint: nil)
+        #expect(back == .plate(.goalDone("A 3-bug bite")))
+        // A warning shows over a waiting toast, and the toast keeps its time.
+        let warned = q.shown(now: 2.5, hint: .trap(.beeInside), warning: true)
+        #expect(warned == .plate(.trap(.beeInside)))
+        let still = q.shown(now: 3.0, hint: nil)
+        #expect(still == .plate(.goalDone("A 3-bug bite")))
+        let next = q.shown(now: 4.0, hint: nil)
+        #expect(next == .plate(.chainTag(1.5)))
+        let hint = q.shown(now: 7, hint: .trap(.crowd))
+        #expect(hint == .plate(.trap(.crowd)))
+        #expect(q.isIdle)
+        q.clear()
+        #expect(q.current == nil)
+        // Paused or frozen: nothing; tired: only a tag.
+        #expect(AppRules.hidesMessage(.plate(.foldInput), paused: true, frozen: false, live: true))
+        #expect(AppRules.hidesMessage(.plate(.foldInput), paused: false, frozen: false, live: false))
+        #expect(!AppRules.hidesMessage(.tag(.loss("x")), paused: false, frozen: false, live: false))
+        #expect(!AppRules.hidesMessage(.plate(.foldInput), paused: false, frozen: false, live: true))
+    }
+
+    /// #6 (frame 43): the plate keeps off the trap's flies when the other slot is clear, and never covers a pop.
+    @Test func plateKeepsOffItsSubjects() {
+        let top = CGRect(x: 500, y: 20, width: 220, height: 100)
+        let bottom = CGRect(x: 500, y: 540, width: 200, height: 100)
+        let fly = CGRect(x: 520, y: 40, width: 30, height: 30)
+        let moved = HUDLayout.hintSlot(primary: top, alternate: bottom, pops: [], subjects: [fly])
+        #expect(moved?.low == true)
+        let both = HUDLayout.hintSlot(primary: top, alternate: bottom, pops: [],
+                                      subjects: [fly, CGRect(x: 520, y: 560, width: 30, height: 30)])
+        #expect(both?.low == false)
+        #expect(HUDLayout.hintSlot(primary: top, alternate: bottom, pops: [bottom], subjects: [fly])?.low == false)
+        let s = TrapSnapshot(bugs: [BugState(id: 1, species: .housefly, position: CGPoint(x: 300, y: 300), heading: 0,
+                                             activity: .sipping, height: 0, inTrap: true, onRim: false),
+                                    BugState(id: 2, species: .gnat, position: CGPoint(x: 10, y: 10), heading: 0,
+                                             activity: .walking, height: 0, inTrap: false, onRim: false)])
+        let rects = AppRules.subjectRects(s)
+        #expect(rects.count == 1)
+        #expect(rects.first?.contains(CGPoint(x: 300, y: 300)) == true)
+    }
+
+    /// #6 (frame 42): the chip doesn't repeat the bite's "×2 held"; the free sting's plate stands alone.
+    @Test func noDoubledWords() {
+        #expect(AppRules.chainChipText(2, short: true, held: false) == "×2")
+        #expect(AppRules.hudHintText(.goalDone("A 3-bug bite"), touch: true) == "Goal done! A 3-bug bite")
+        #expect(AppRules.hudHintIsLong(.goalDone("x")))
+        #expect(!AppRules.hudHintIsWarning(.goalDone("x")))
+        #expect(AppRules.nightCueText(.nightGetsFast) == "The night gets fast…")
+        #expect(AppRules.nightCueText(.lastLight) == "Last light…")
+        #expect(!AppRules.isFreeSting(.stung(id: 1, species: .bee, cost: 0), mode: .zen))
+    }
+
+    /// Goals: Core's tracker ticks live through `GoalRun`; the lesson and the attract bog track nothing.
+    @Test func goalsTickLive() {
+        var run = GoalRun(book: book(["bite3", "catch20", "spare3"]), mode: .feed)
+        #expect(!run.isEmpty)
+        let met = run.note([.snapped(report(caught: [.gnat, .gnat, .housefly]))])
+        let metIDs = met.map { $0.id }
+        #expect(metIDs == ["bite3"])
+        let again = run.note([.snapped(report(caught: [.gnat, .gnat, .housefly]))])
+        #expect(again.isEmpty)
+        #expect(run.completed == ["bite3"])
+        let lines = run.lines
+        #expect(lines.count == 3)
+        #expect(lines.first?.done == true)
+        #expect(run.report.completed == ["bite3"])
+        #expect(run.report.progress["bite3"] == 3)
+        let lesson = GoalRun(book: book(["bite3"]), mode: .lesson)
+        #expect(lesson.isEmpty)
+        #expect(GoalRun().lines.isEmpty)
+    }
+
+    /// Goals at Results: the report is filed with Core (`GoalBook.complete`): done goals give growth and are replaced.
+    @Test func goalsAreFiledWithGrowth() {
+        var d = ProgressData()
+        d.goalBook = book(["bite3", "catch20", "spare3"])
+        let report = GoalReport(completed: ["bite3"], progress: ["bite3": 3, "catch20": 7, "spare3": 1])
+        let o = record(makeRun(score: 400, bugs: 7, caught: ["housefly": 7], biggest: 3), &d)
+        #expect(o.goalsDone.isEmpty)
+        var e = ProgressData()
+        e.goalBook = book(["bite3", "catch20", "spare3"])
+        let out = ProgressRules.record(makeRun(score: 400, bugs: 7, caught: ["housefly": 7], biggest: 3), into: &e,
+                                       today: 299, goals: report, rankFor: fakeRank, earn: noAchievements)
+        #expect(out.goalsDone == ["bite3"])
+        #expect(out.goalGrowth >= GoalBook.reward(rank: 0))
+        #expect(!out.goalBonus)
+        #expect(out.newGoals.count == 1)
+        #expect(out.goalLines.count == 3)
+        let ids = e.goalBook?.active.map(\.id) ?? []
+        #expect(!ids.contains("bite3"))
+        #expect(ids.count == GoalBridge.slots)
+        #expect(e.goalsDone == 1)
+        // The growth is on the rank bar.
+        #expect(e.growth == e.rankBugs + out.goalGrowth)
+        #expect(out.lifetimeAfter == e.growth)
+        // The banked progress of an unfinished goal.
+        let catchSlot = e.goalBook?.active.first { $0.id == "catch20" }
+        #expect(catchSlot?.progress == 7)
+        // A report is worth filing on its own.
+        #expect(ProgressRules.worthRecording(makeRun(mode: .zen, score: 0, bugs: 0, caught: [:]), goals: report))
+    }
+
+    /// Persistence: v2 keeps the book, the Garden and the streak; a v1 save's rank keeps every bug it had.
+    @Test func roundSixPersistence() throws {
+        var d = ProgressData()
+        d.goalBook = book(["bite3", "catch20", "spare3"])
+        d.rankBugs = 0
+        d.variety = TrapVariety.redDragon.rawValue
+        d.varietiesSeen = [TrapVariety.classic.rawValue, TrapVariety.redDragon.rawValue]
+        d.bestStreak = 4
+        d.chainTipSeen = true
+        d.pendingGoals = GoalReport(completed: ["bite3"], progress: ["bite3": 3])
+        let raw = try #require(ProgressStore.encode(d))
+        let back = try #require(ProgressStore.decode(raw))
+        #expect(back == d)
+        #expect(back.version == 2)
+        let v1 = try #require(ProgressStore.decode(Data(#"{"version":1,"lifetimeBugs":250,"longestChain":2}"#.utf8)))
+        #expect(v1.rankBugs == 250)
+        #expect(v1.chainTipSeen)
+        #expect(v1.goalBook == nil)
+        let odd = try #require(ProgressStore.decode(Data(#"{"variety":"plum","goalBook":7}"#.utf8)))
+        #expect(odd.variety == TrapVariety.classic.rawValue)
+        #expect(odd.goalBook == nil)
+        // Home's goals before the first run are the ones the first run plays.
+        var fresh = ProgressData()
+        let shown = ProgressRules.goalLines(ProgressRules.goalBook(fresh)).map(\.id)
+        let played = ProgressRules.prepareGoals(&fresh).active.map(\.id)
+        #expect(shown == played)
+        #expect(shown.count == GoalBridge.slots)
+    }
+
+    /// Zen (founder rule): no best and no leaderboard; the Bug Book counts every bug, the rank a quarter.
+    @Test func zenIsFiledGently() {
+        var d = ProgressData()
+        d.bestFeed = 900
+        let o = record(makeRun(mode: .zen, score: 5_000, bugs: 40, caught: ["housefly": 40]), &d)
+        #expect(o.zen)
+        #expect(!o.isNewBest)
+        #expect(o.best == 0)
+        #expect(d.bestFeed == 900)
+        #expect(d.lifetimeBugs == 40)
+        #expect(d.caughtCount(.housefly) == 40)
+        #expect(d.rankBugs == 10)
+        #expect(d.lifetimeScore == 0)
+        #expect(d.runs == 1)
+        #expect(d.feedRuns == 0)
+        #expect(ProgressRules.best(for: .zen, in: d) == 0)
+        #expect(AppRules.againMode(.zen) == .zen)
+        #expect(AppRules.startBanner(.zen, touch: true) == AppRules.zenBanner)
+        #expect(ResultsView.heroWord(zen: true) == "bugs caught")
+        #expect(ResultsView.heroWord(zen: false) == "score")
+        #expect(PauseMenu.zenEnd == "End")
+        // Feed and the Daily still count every bug for the rank.
+        _ = record(makeRun(score: 100, bugs: 8, caught: ["gnat": 8]), &d)
+        #expect(d.rankBugs == 18)
+    }
+
+    /// The Daily streak: days in a row with the scored try played; it survives until today's is played; a gap ends it.
+    @Test func dailyStreak() {
+        var d = ProgressData()
+        d.dailyAttempted = [296, 297, 298]
+        #expect(ProgressRules.dailyStreak(d, today: 299) == 3)
+        #expect(ProgressRules.dailyStreak(d, today: 300) == 0)
+        ProgressRules.noteDailyStart(&d, day: 299)
+        #expect(ProgressRules.dailyStreak(d, today: 299) == 4)
+        #expect(d.bestStreak == 4)
+        let o = record(makeRun(mode: .daily(day: 299, scored: true), score: 4_210, biggest: 6), &d)
+        #expect(o.streak == 4)
+        #expect(ProgressRules.streakText(4) == "🔥 4 days")
+        #expect(ProgressRules.streakText(1) == "🔥 1 day")
+        #expect(ProgressRules.streakText(0) == nil)
+        #expect(HomeView.streakBadge(3) == "🔥 3")
+        #expect(HomeView.streakBadge(1) == nil)
+        #expect(DailyView.streakLine(streak: 3, best: 5) == "🔥 3 days · best 5")
+        #expect(DailyView.streakLine(streak: 0, best: 5) == nil)
+        // The share line carries the streak.
+        let share = ResultsView.shareText(makeRun(mode: .daily(day: 300, scored: true), score: 4_210, biggest: 6),
+                                          streak: 4)
+        #expect(share == "\(AppBrand.name) Daily Bog #301 · 4,210 · biggest bite 6 · 🔥 4 days 🪤")
+    }
+
+    /// The Garden: Core's rules; a locked variety can't be picked; the pick is drawn everywhere.
+    @Test func gardenPicks() {
+        var d = ProgressData()
+        #expect(d.unlockedVarieties == [.classic])
+        #expect(d.chosenVariety == .classic)
+        d.variety = TrapVariety.goldenGlow.rawValue
+        #expect(d.chosenVariety == .classic)
+        #expect(GardenView.countLine(d) == "1 of 8 grown")
+        let store = ProgressStore(inMemory: d)
+        let locked = store.chooseVariety(.redDragon)
+        #expect(!locked)
+        var grown = ProgressData()
+        grown.rankBugs = PlantRanks.threshold(2)
+        grown.lifetimeBugs = grown.rankBugs
+        #expect(grown.unlockedVarieties.contains(.redDragon))
+        #expect(HomeView.gardenHasNew(grown))
+        let s2 = ProgressStore(inMemory: grown)
+        let picked = s2.chooseVariety(.redDragon)
+        #expect(picked)
+        #expect(s2.data.chosenVariety == .redDragon)
+        s2.markVarietiesSeen()
+        #expect(!HomeView.gardenHasNew(s2.data))
+        #expect(GardenCard.line(.redDragon, grown: true) == Varieties.info(.redDragon).blurb)
+        #expect(GardenCard.line(.goldenGlow, grown: false) == Varieties.ruleText(.goldenGlow))
+        // A run that crosses a rank names the new variety for Results' celebration.
+        var r = ProgressData()
+        r.rankBugs = PlantRanks.threshold(2) - 5
+        r.lifetimeBugs = r.rankBugs
+        let o = record(makeRun(score: 300, bugs: 10, caught: ["housefly": 10]), &r)
+        #expect(o.newVarieties.contains(.redDragon))
+    }
+
+    /// #16: Results names the next Bug Book page from the Book's own clue.
+    @Test func nextBookPage() {
+        var d = ProgressData()
+        let first = AppRules.nextBookTarget(d)
+        #expect(first != nil)
+        let phase = first.map { BugCatalog.info($0).firstPhase }
+        #expect(phase == .morning)
+        for s in BugSpecies.allCases {
+            if s.isProtected { d.spared[s.rawValue] = 1 } else { d.caught[s.rawValue] = 1 }
+        }
+        #expect(AppRules.nextBookTarget(d) == nil)
+        #expect(AppRules.nextBookLine(.bee) == "Spare a striped one to fill its page.")
+        #expect(AppRules.nextBookLine(.dragonfly).hasPrefix("Something new"))
+        #expect(ResultsView.nextBookTitle == "Next for the Bug Book")
+    }
+
+    /// #12: the cover card is centred in the screen whatever a stale inset says, and fills it.
+    @Test func coverIsCentredAndFilled() {
+        let size = CGSize(width: 466, height: 678)
+        let stale = EdgeInsets(top: 24, leading: 0, bottom: 20, trailing: 86)
+        let l = CoverLayout.make(size: size, insets: stale, midRun: true, hasBest: false)
+        #expect(abs(l.area.midX - size.width / 2) < 0.5)
+        #expect(l.contentHeight <= l.area.height + 0.5)
+        #expect(l.trap.width >= size.width * 0.6)
+        #expect(l.titleSize >= 30)
+        let wide = CoverLayout.make(size: CGSize(width: 874, height: 402),
+                                    insets: EdgeInsets(top: 0, leading: 62, bottom: 21, trailing: 20), midRun: true,
+                                    hasBest: false)
+        #expect(abs(wide.area.midX - 437) < 0.5)
+    }
+
+    /// #14: the snaps numeral is labelled "SNAPS" where it has room (and always clear of the cilia: LayoutTests).
+    @Test func snapsNumeralIsLabelled() {
+        let size = CGSize(width: 951, height: 669)
+        for left in [false, true] {
+            let c = AppCanvas(size: size, insets: EdgeInsets(),
+                              layout: ScreenLayout.make(viewSize: size, hasFold: true, hudOnLeft: left))
+            let l = HUDLayout.make(c)
+            #expect(l.snaps.contains(l.numeral))
+            #expect(!l.chain.intersects(l.numeral))
+            for i in 0..<HUDLayout.slotCount {
+                let p = l.glyphCenter(i)
+                #expect(!l.numeral.insetBy(dx: 1, dy: 1).contains(p))
+            }
+            if l.numeralLabeled {
+                #expect(l.numeral.maxY <= (l.snapRowRects.first?.minY ?? 0))
+                #expect(l.numeralSize == HUDLayout.numeralDuo)
+            }
+        }
+        #expect(HUDLayout.numeralLabel == "SNAPS")
+        #expect(HUDLayout.numeralDuo >= 30)
+    }
+
+    /// The FEAST freeze is the Scene's FEAST: 5+ clean bugs, or ×4; a bite with a stinger never is.
+    @Test func bigFeastFreeze() {
+        let five = report(caught: [.gnat, .gnat, .gnat, .gnat, .housefly])
+        #expect(AppRules.isBigFeast([.snapped(five)]))
+        #expect(!AppRules.isBigFeast([.snapped(report(caught: [.gnat, .gnat, .gnat]))]))
+        let stung = report(caught: [.gnat, .gnat, .gnat, .gnat, .gnat, .gnat], stingers: [.bee])
+        #expect(!AppRules.isBigFeast([.snapped(stung)]))
+        let s = TrapSnapshot()
+        #expect(GameController.matches(.bigFeast, s, events: [.snapped(five)]))
+        #expect(GameController.matches(.goalDone, s, events: [], hint: .goalDone("A 3-bug bite")))
+        #expect(!GameController.matches(.goalDone, s, events: [], hint: .foldInput))
+        #expect(DemoMode.Freeze.bigFeast.isEvent)
+        #expect(!DemoMode.Freeze.goalDone.isEvent)
+        #expect(abs(DemoMode.Freeze.bigFeast.holdDelay - 0.45) < 1e-9)
+    }
+
+    /// The goal toasts fit the plate's own slot (≤ 3 lines, no word cut), on the Duo and a phone, either side.
+    @Test func goalToastsFit() {
+        let phone = CGSize(width: 874, height: 402)
+        let duo = CGSize(width: 951, height: 669)
+        let canvases = [AppCanvas(size: duo, insets: EdgeInsets(), layout: ScreenLayout.make(viewSize: duo, hasFold: true)),
+                        AppCanvas(size: phone, insets: EdgeInsets(top: 0, leading: 62, bottom: 21, trailing: 62),
+                                  layout: ScreenLayout.make(viewSize: phone, hasFold: false, hudOnLeft: true))]
+        let titles = AppRules.goalToastTitles
+        #expect(titles.count == GoalBook.pool.count)
+        #expect(AppRules.goalDoneText("A 3-bug bite") == "Goal done! A 3-bug bite")
+        for c in canvases {
+            let plate = HUDLayout.make(c).hint
+            #expect(HintFit.fits(AppRules.goalDoneHeading, plateWidth: plate.width, compact: c.isCompact))
+            for text in titles {
+                let fits = HintFit.fits(text, plateWidth: plate.width, compact: c.isCompact, long: true)
+                #expect(fits)
+            }
+        }
+    }
+
+    /// Demo keys for the R6 frames.
+    @Test func roundSixDemoKeys() {
+        #if DEBUG
+        #expect(DemoMode.parse("screen=garden").screen == .garden)
+        #expect(DemoMode.parse("mode=zen").runMode(today: 3) == .zen)
+        #expect(DemoMode.parse("freezeOn=bigFeast").freezeOn == .bigFeast)
+        #expect(DemoMode.parse("freezeOn=goalDone").freezeOn == .goalDone)
+        #expect(DemoMode.parse("variety=b52").variety == .b52)
+        #expect(DemoMode.parse("variety=plum").variety == nil)
+        #endif
+        let mid = DemoPresets.progress(.mid, today: 299)
+        #expect(mid.goalBook?.active.count == GoalBridge.slots)
+        #expect(mid.rank == 4)
+        #expect(ProgressRules.dailyStreak(mid, today: 299) == 2)
+        let late = DemoPresets.progress(.late, today: 299)
+        #expect(late.unlockedVarieties.contains(.sawtooth))
+        #expect(!late.unlockedVarieties.contains(.goldenGlow))
+        #expect(!HomeView.gardenHasNew(late))
     }
 }
 

@@ -63,7 +63,7 @@ struct HomeView: View {
 
     private func titleBlock(_ c: Bool) -> some View {
         let rank = store.rank
-        let progress = ProgressRules.rankProgress(lifetime: store.data.lifetimeBugs, rank: rank)
+        let progress = ProgressRules.rankProgress(lifetime: store.data.growth, rank: rank)
         return VStack(spacing: c ? 4 : 8) {
             Text(AppBrand.name)
                 .font(SnapType.wordmark(c))
@@ -105,7 +105,7 @@ struct HomeView: View {
                     }
                 }
                 SnapProgressBar(value: progress, height: 8)
-                Text(AppRules.rankHint(lifetimeBugs: store.data.lifetimeBugs))
+                Text(AppRules.rankHint(lifetimeBugs: store.data.growth))
                     .font(SnapType.caption(c))
                     .foregroundStyle(SnapTheme.mist)
                     .lineLimit(1)
@@ -115,7 +115,23 @@ struct HomeView: View {
             .snapCard(padding: c ? 10 : 14, radius: 18)
             .padding(.top, c ? 2 : 6)
             .accessibilityElement(children: .combine)
+            // R6: the three goals (the best of any run so far), under the rank they grow.
+            GoalsCard(lines: ProgressRules.goalLines(store.goalBook), compact: c)
+                .frame(maxWidth: 320)
         }
+    }
+
+    /// R6 Daily: the streak beside the Daily's status ("🔥 3"), from a streak of two days.
+    static func streakBadge(_ n: Int) -> String? { n >= 2 ? "🔥 \(n)" : nil }
+
+    /// R6 Garden: "3/8" grown.
+    static func gardenCount(_ data: ProgressData) -> String {
+        "\(data.unlockedVarieties.count)/\(TrapVariety.allCases.count)"
+    }
+
+    /// R6 Garden: a grown variety not seen there yet.
+    static func gardenHasNew(_ data: ProgressData) -> Bool {
+        data.unlockedVarieties.contains { !data.varietiesSeen.contains($0.rawValue) }
     }
 
     // MARK: Buttons
@@ -160,7 +176,48 @@ struct HomeView: View {
                             .foregroundStyle(SnapTheme.mist)
                     }
                     Spacer(minLength: 0)
+                    // R6: the Daily streak, next to "Today's bog is ready".
+                    if let badge = Self.streakBadge(store.streak(today: today)) {
+                        Text(badge)
+                            .font(SnapType.caption(c).weight(.heavy).monospacedDigit())
+                            .foregroundStyle(SnapTheme.cream)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(SnapTheme.crimson.opacity(0.85)))
+                            .fixedSize()
+                            .accessibilityLabel("\(store.streak(today: today))-day streak")
+                    }
                 }
+            }
+            // R6: the Zen Bog and the Garden.
+            HStack(spacing: c ? 8 : 12) {
+                SnapButton(kind: .secondary, height: c ? 52 : 60, compact: c, action: { controller.playZen() }) {
+                    VStack(spacing: 0) {
+                        Text("Zen Bog")
+                        Text(Self.zenDetail)
+                            .font(SnapType.caption(true))
+                            .foregroundStyle(SnapTheme.mist)
+                    }
+                }
+                .accessibilityHint("A calm bog that never ends")
+                SnapButton(kind: .secondary, height: c ? 52 : 60, compact: c, action: { controller.show(.garden) }) {
+                    VStack(spacing: 0) {
+                        Text("Garden")
+                        HStack(spacing: 4) {
+                            Text(Self.gardenCount(store.data))
+                                .font(SnapType.caption(true).monospacedDigit())
+                                .foregroundStyle(SnapTheme.mist)
+                            if Self.gardenHasNew(store.data) {
+                                Text("New")
+                                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                    .foregroundStyle(SnapTheme.ink)
+                                    .padding(.horizontal, 5)
+                                    .background(Capsule().fill(SnapTheme.gold))
+                            }
+                        }
+                    }
+                }
+                .accessibilityHint("Choose your trap")
             }
             HStack(spacing: c ? 8 : 12) {
                 SnapButton(kind: .secondary, height: c ? 52 : 60, compact: c, action: { controller.show(.book) }) {
@@ -180,6 +237,9 @@ struct HomeView: View {
             }
         }
     }
+
+    /// R6: under "Zen Bog".
+    static let zenDetail = "No rush, no end"
 
     private func dailyStatus(_ today: Int) -> String {
         if store.canPlayScoredDaily(today: today) { return "Today's bog is ready" }

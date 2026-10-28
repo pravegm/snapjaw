@@ -208,6 +208,17 @@ public enum RunMode: Codable, Hashable, Sendable {
     case attract
     /// The First Bite lesson (the App drives the script with `SessionOptions` and `spawnScripted`).
     case lesson
+    /// R6 Zen Bog: a relaxed run that never ends (snaps never run out, no hunger); no leaderboard; still fills the Bug
+    /// Book and the goals.
+    case zen
+}
+
+// MARK: Trap varieties (R6, cosmetic; the Garden)
+
+/// Real flytrap cultivars (plus one fantasy), unlocked by plant rank and goals (`Varieties` in Core). Cosmetic only:
+/// the Scene and TrapArt draw them; the rules are identical. Raw values are stable ids (persisted).
+public enum TrapVariety: String, Codable, CaseIterable, Sendable {
+    case classic, redDragon, b52, sawtooth, sharkTooth, fusedTooth, cupped, goldenGlow
 }
 
 // MARK: Input

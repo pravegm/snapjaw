@@ -7,7 +7,8 @@ import Foundation
 // (same names) and the detector values in its `D` table: KEEP THEM IDENTICAL. R1 tuning (design/notes/core-R1.md)
 // changed some GAME-DESIGN starting values; each change is marked "R1". R2 changes (design/notes/core-R2.md) are
 // marked "R2", R3 changes (design/notes/core-R3.md) "R3", R4 changes (design/notes/core-R4.md) "R4", R5 changes
-// (design/notes/core-R5.md) "R5".
+// (design/notes/core-R5.md) "R5", R6 changes (design/notes/core-R6.md) "R6". The R6 goal and halo values are not in the
+// sim (it has no goals or hints); lastLightWave and zenDayWaves are.
 
 enum Tuning {
 
@@ -132,6 +133,12 @@ enum Tuning {
     static let deepNightWave: Int = 31
     /// The attract mode's day repeats after this many waves.
     static let attractDayWaves: Int = 28
+    /// R6: the Zen Bog's day repeats after this many waves (below lateWaveStart, so Zen never speeds up).
+    static let zenDayWaves: Int = 28
+    /// R6 (#19, REVIEW-5 P2-5): the last light (Feed and the Daily). From this wave the hunger clock ticks whatever is in the
+    /// trap (empty, or a bee in it), so even a hand that never gives up waiting ends by about 7 minutes (it reached
+    /// the 10-minute cap in 14 of 16 seeds in R5). TrapRules.nightCue tells the HUD here and at lateWaveStart + 1.
+    static let lastLightWave: Int = 85
     static let nectarReseedWaves: Int = 6
     /// R2 (REVIEW-1 #19): 6–8 drops in clusters of 2–3, the clusters alternating between the lobes.
     static let nectarMin: Int = 6
@@ -235,6 +242,10 @@ enum Tuning {
     /// R2 (REVIEW-1 #4): bug radii (BugInfo.radius) are the R1 art radii × this, for the art and the rules alike.
     static let bugRadiusScale: Double = 1.8
 
+    /// R6 (#15): a protected bug's halo as the Scene draws it (TrapArt.protectedRingScale × radius + this pad, pt).
+    static let haloScale: Double = 1.6
+    static let haloPad: Double = 4
+
     static let tiredSeconds: Double = 2.2
     static let caughtSeconds: Double = 0.5
     /// "Open up to reset" after this long unarmed after a snap.
@@ -321,4 +332,26 @@ enum Tuning {
     /// R4: expert and perfect bite a landed bug after this long (s) without a snap even when they judge it too quick
     /// (a hand never waits for ever; with R4's gated hunger an unfed trap only wilts slowly).
     static let pilotGiveUp: Double = 12
+
+    // MARK: Rank growth (R6, founder call; PlantRanks.growth(from:))
+
+    /// A Zen Bog run grows the plant rank by this share of its bugs (rounded down per run); Feed and the Daily count
+    /// every bug. The Bug Book and any-mode goals count Zen bugs in full.
+    static let zenRankShare: Double = 0.25
+
+    // MARK: Goals (R6, Goals.swift; not in the sim)
+
+    /// Active goals at a time.
+    static let goalsActive: Int = 3
+    /// A completed goal's growth (bugs-equivalent on the rank bar): this share of the gap from the current rank to
+    /// the next (the top rank uses the last gap), rounded to goalRewardRound, at least goalRewardMin.
+    static let goalRewardShare: Double = 0.15
+    static let goalRewardMin: Int = 10
+    static let goalRewardRound: Int = 5
+    /// Completing all goalsActive at once adds this many more rewards.
+    static let goalTripleBonus: Int = 1
+    /// A completed goal is not drawn again until this many other goals have been completed.
+    static let goalRecentMemory: Int = 6
+    /// "No dry snaps until …" goals need at least this many snaps before that phase.
+    static let goalMinSnaps: Int = 5
 }

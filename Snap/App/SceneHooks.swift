@@ -33,9 +33,27 @@ enum SceneHooks {
     }
 
     /// R4 (REVIEW-3 #16): the Scene's 3/4 trap (`TrapArt.trapImage(style: .threeQuarter …)`, design/notes/scene-R4.md)
-    /// for the isolated trap: Results, the cover, the badges. `bug`: a fly sipping on its back face.
-    static func threeQuarterTrap(width: CGFloat, scale: CGFloat, bug: Bool) -> CGImage? {
-        TrapArt.trapImage(style: .threeQuarter, width: width, scale: scale, sippingBug: bug ? .housefly : nil)
+    /// for the isolated trap: Results, the cover, the badges. `bug`: a fly sipping on its back face. R6: in `variety`
+    /// (design/notes/scene-R6.md).
+    static func threeQuarterTrap(width: CGFloat, scale: CGFloat, bug: Bool,
+                                 variety: TrapVariety = .classic) -> CGImage? {
+        TrapArt.trapImage(style: .threeQuarter, width: width, scale: scale, sippingBug: bug ? .housefly : nil,
+                          variety: variety)
+    }
+
+    /// R6 (Scene #7): the HUD's corners in scene space (the score and pause; the snaps and the chain chip), so no bug
+    /// parks under them (`BogScene.hudKeepOut`; nil: the Scene's own default corners).
+    static func setHUDKeepOut(_ scene: BogScene?, _ rects: [CGRect]?) {
+        guard let scene else { return }
+        if let rs = rects, rs.contains(where: { !($0.minX.isFinite && $0.minY.isFinite && $0.width.isFinite
+                                                  && $0.height.isFinite) }) { return }
+        if scene.hudKeepOut != rects { scene.hudKeepOut = rects }
+    }
+
+    /// R6 Garden: the play trap, Home's trap and the snap glyphs in the chosen variety (`BogScene.variety`).
+    static func setVariety(_ scene: BogScene?, _ v: TrapVariety) {
+        guard let scene else { return }
+        if scene.variety != v { scene.variety = v }
     }
 
     /// Where a point on the 3/4 trap's back face lands in its image drawn `width` wide and centred on `c` (y down):

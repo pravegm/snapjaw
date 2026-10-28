@@ -24,6 +24,10 @@ import UIKit
 ///
 /// R4 (QA-2 #9): the loss blip lands with the HUD numeral's drop (`FeelSoundBook.numeralDropAt`), not 0.26 s after it.
 ///
+/// R6: a bite of 5+ bugs or at ×4+ chain plays the FEAST CHOMP (`FeelSoundBook.feastChomp`: a deeper body, a crunch
+/// cascade, a choir/marimba sting and a burp; `FeelHapticBook.feastChomp`). The App calls `goalCompleted(bonus:)` and
+/// `varietyUnlocked(after:)` for the goal chime and the Garden's fanfare, and sets `zen` for the Zen Bog's gentle bed.
+///
 /// Battery: with `idle` set (menus), or after `idleDelay` s with no play and no events, the engines idle by themselves
 /// (the haptic player stops, the audio engine naps once quiet). A playing frame, an event, a menu sound or Home's
 /// creaking trap wakes them. If the frames stop without a `silence()` (the app went away), a watchdog fades the
@@ -58,6 +62,8 @@ final class FeedbackDirector: FeedbackSink {
     static let afterWiltAt: Float = FeelSoundBook.wiltLength
     /// Caught bugs past this many get the light crunch (QA-1 #4: voices for the reward sounds).
     static let fullCrunches = 4
+    /// R6: in a FEAST CHOMP's cascade, every crunch up to this many is a full one (each bug its own "crk").
+    static let feastFullCrunches = 8
 
     var soundOn: Bool = true {
         didSet {
@@ -117,6 +123,19 @@ final class FeedbackDirector: FeedbackSink {
     /// `ScreenLayout.size.width` (wider phones have a wider scene); the Duo's 952 by default.
     var sceneWidth: Double = Double(ScreenLayout.canvasWidth)
 
+    /// R6 Zen Bog: the App sets this at every run start, `FeedbackDirector.wantsZen(mode)` (true only for `.zen`; set
+    /// it back to false for every other mode). While true the play bed is gentler (`FeelSoundBook.playBed(zen:)`:
+    /// a softer marimba with at most three voices, a quieter bog, a softer creep groan) and the hunger and warning
+    /// cues stay silent: the rumble (`hungry`), the droop (`wilted`), the last-snap knocks, the tired yawn and the
+    /// free sting's "oops" (counted in `hushed`). Everything else (the CHOMP, the "Bzzt!", the chain) is unchanged.
+    /// Neither the telemetry nor the events carry the mode, so this is the director's one source for it.
+    var zen: Bool = false
+
+    /// R6: whether a run in `mode` gets the Zen feel (exhaustive over `RunMode`).
+    static func wantsZen(_ mode: RunMode) -> Bool {
+        FeelSoundBook.isZen(mode)
+    }
+
     private let audio = FeelAudioEngine()
     private let haptics = FeelHaptics()
     private var started = false
@@ -168,6 +187,17 @@ final class FeedbackDirector: FeedbackSink {
     private var lastChainMultiplier: Double = 1
     /// Haptic patterns built (one per frame with cues, after merging), for diagnostics and tests.
     private(set) var hapticPatterns = 0
+    /// R6: FEAST CHOMPs played (5+ bug or ×4+ chain bites; each is also counted in `chomps`).
+    private(set) var feastChomps = 0
+    /// R6: goal chimes and variety fanfares played, and when the last goal chime was scheduled (s after its call).
+    private(set) var goalChimes = 0
+    private(set) var lastGoalChimeAt: Float = -1
+    private(set) var fanfares = 0
+    /// R6 Zen: hunger and warning cues left silent because `zen` was on.
+    private(set) var hushed = 0
+    /// R6: the last bite (any `snapped`), so a goal it ticked chimes after its sounds (`FeelSoundBook.goalDelay`).
+    private var lastBiteAt: CFTimeInterval = -Double.infinity
+    private var lastBiteWasFeast = false
 
     /// While `react` runs, haptic cues are collected here and played as one pattern (QA-1 #18).
     private var frameCues: [FeelHapticCue]?
@@ -226,7 +256,7 @@ final class FeedbackDirector: FeedbackSink {
         if now - lastBedSend >= 1.0 / 60 || leavingPlay {
             lastBedSend = now
             let ambience = now - lastPlaying <= Self.ambienceHold ? 1.0 : 0.0
-            var bed = FeelSoundBook.playBed(telemetry: telemetry, master: master, ambience: ambience)
+            var bed = FeelSoundBook.playBed(telemetry: telemetry, master: master, ambience: ambience, zen: zen)
             if !telemetry.playing { bed.glide = FeelSoundBook.fadeGlide }
             audio.setBed(bed)
             let share = telemetry.playing ? 1.0 : FeelSoundBook.buzzRestShare * ambience
@@ -318,19 +348,51 @@ final class FeedbackDirector: FeedbackSink {
         playHaptic(FeelHapticBook.celebrate)
     }
 
+    // MARK: - R6: goals and the Garden
+
+    /// R6: a goal was completed (the live toast, in play or Results). `bonus`: three goals completed at once. Call it
+    /// AFTER `handle(_:telemetry:)` for the frame whose events completed the goal: when that frame had a bite, the chime
+    /// waits until the bite's sounds are over (`FeelSoundBook.goalDelay`: 0.62 s after a plain bite, the burp's end
+    /// after a FEAST CHOMP), so it never lands on the CHOMP. Otherwise it plays at once.
+    func goalCompleted(bonus: Bool = false) {
+        ensureStarted()
+        let now = CACurrentMediaTime()
+        heal(now: now)
+        let delay = FeelSoundBook.goalDelay(sinceBite: now - lastBiteAt, feast: lastBiteWasFeast)
+        goalChimes += 1
+        lastGoalChimeAt = delay
+        audio.play(FeelSoundBook.goalChime(bonus: bonus, delay: delay, dice: &dice))
+        playHaptic(FeelHapticBook.goal(at: Double(delay), bonus: bonus))
+    }
+
+    /// R6: a new trap variety unlocked (Results, Home or the Garden): a proud little fanfare and its haptic. `after`
+    /// (s) lets the App play it after another moment (for example a rank-up's `celebrate()`, about 0.8 s).
+    func varietyUnlocked(after delay: Double = 0) {
+        ensureStarted()
+        heal(now: CACurrentMediaTime())
+        let at: Double = delay.isFinite ? min(max(delay, 0), 2) : 0
+        fanfares += 1
+        audio.play(FeelSoundBook.varietyFanfare(delay: Float(at), dice: &dice))
+        playHaptic(FeelHapticBook.fanfare(at: at))
+    }
+
     // MARK: - Events
 
     private func react(to events: [TrapEvent], now: CFTimeInterval) {
         guard !events.isEmpty else { return }
         // The bite frame: `snapped` comes first, then the per-bug events, then the feast/lucky/chain/… (ARCHITECTURE).
         var biting = false
+        var feasting = false
         var stung = false
         var wilting = false
         var breaking = false
         var stingCost = 0
         for event in events {
             switch event {
-            case .snapped: biting = true
+            case .snapped(let report):
+                biting = true
+                // R6: a 5+ bug or ×4+ chain bite is a FEAST CHOMP (its crunches cascade).
+                if FeelSoundBook.isFeastChomp(report) { feasting = true }
             case .stung(_, _, let cost):
                 stung = true
                 stingCost += max(cost, 0)
@@ -362,6 +424,12 @@ final class FeedbackDirector: FeedbackSink {
         // R5 (REVIEW-4 #4): the yawn after the numeral's drop, the loss blip and the bwoop, with the tired banner.
         let yawnAt: Float = FeelSoundBook.tiredDelay(biting: biting, wilting: wilting, stingCost: stingCost,
                                                      bwoopAt: breaking ? bwoopAt : nil)
+        // R6: a goal this frame completes chimes after the bite's sounds (`goalCompleted`).
+        if biting {
+            lastBiteAt = now
+            lastBiteWasFeast = feasting
+        }
+        let hush = zen
         frameCues = []
         defer { flushHaptics() }
         var caught = 0
@@ -397,7 +465,13 @@ final class FeedbackDirector: FeedbackSink {
                 if !biting { audio.play(FeelSoundBook.snapWhoosh(dice: &dice)) }
             case .snapped(let report):
                 let count = report.caught.count
-                if count > 0 {
+                if count > 0 && FeelSoundBook.isFeastChomp(report) {
+                    // R6: the FEAST CHOMP (a deeper body, the cascade, the sting and the burp; a heavier haptic).
+                    chomps += 1
+                    feastChomps += 1
+                    playHaptic(FeelHapticBook.feastChomp(caught: count))
+                    audio.play(FeelSoundBook.feastChomp(caught: count, dice: &dice))
+                } else if count > 0 {
                     chomps += 1
                     playHaptic(FeelHapticBook.chomp(caught: count))
                     audio.play(FeelSoundBook.chomp(caught: count, dice: &dice))
@@ -406,8 +480,9 @@ final class FeedbackDirector: FeedbackSink {
                     audio.play(FeelSoundBook.drySnap(dice: &dice))
                 }
             case .bugCaught(_, _, let position):
+                let full = feasting ? Self.feastFullCrunches : Self.fullCrunches
                 audio.play(FeelSoundBook.crunch(index: caught, pan: pan(x: Double(position.x)),
-                                                light: caught >= Self.fullCrunches, dice: &dice))
+                                                light: caught >= full, cascade: feasting, dice: &dice))
                 caught += 1
             case .bugEscaped(let id, _):
                 if escaped < Self.maxWhiffsPerFrame {
@@ -453,25 +528,43 @@ final class FeedbackDirector: FeedbackSink {
                 audio.play(FeelSoundBook.spared(species, dice: &dice))
                 playHaptic(FeelHapticBook.spared)
             case .lastSnap:
-                var delay: Float = biting ? Self.warnAt : (wilting ? Self.afterWiltAt : 0)
-                delay = max(delay, afterLoss)
-                audio.play(FeelSoundBook.lastSnap(delay: delay))
-                playHaptic(FeelHapticBook.lastSnap(at: Double(delay)))
+                if hush {
+                    // R6 Zen: no warnings (snaps never run out there).
+                    hushed += 1
+                } else {
+                    var delay: Float = biting ? Self.warnAt : (wilting ? Self.afterWiltAt : 0)
+                    delay = max(delay, afterLoss)
+                    audio.play(FeelSoundBook.lastSnap(delay: delay))
+                    playHaptic(FeelHapticBook.lastSnap(at: Double(delay)))
+                }
             case .hungry:
-                // The trap's tummy rumbles (3 s before a snap wilts; once per hunger cycle).
-                rumbles += 1
-                audio.play(FeelSoundBook.hungry(dice: &dice))
-                playHaptic(FeelHapticBook.hungry)
+                if hush {
+                    // R6 Zen: no hunger.
+                    hushed += 1
+                } else {
+                    // The trap's tummy rumbles (3 s before a snap wilts; once per hunger cycle).
+                    rumbles += 1
+                    audio.play(FeelSoundBook.hungry(dice: &dice))
+                    playHaptic(FeelHapticBook.hungry)
+                }
             case .wilted:
-                // A snap wilted: a soft droop and a weak haptic.
-                droops += 1
-                audio.play(FeelSoundBook.wilted(dice: &dice))
-                playHaptic(FeelHapticBook.wilted())
+                if hush {
+                    hushed += 1
+                } else {
+                    // A snap wilted: a soft droop and a weak haptic.
+                    droops += 1
+                    audio.play(FeelSoundBook.wilted(dice: &dice))
+                    playHaptic(FeelHapticBook.wilted())
+                }
             case .tired:
-                yawns += 1
-                lastYawnAt = yawnAt
-                audio.play(FeelSoundBook.tired(delay: yawnAt))
-                playHaptic(FeelHapticBook.tired(at: Double(yawnAt)))
+                if hush {
+                    hushed += 1
+                } else {
+                    yawns += 1
+                    lastYawnAt = yawnAt
+                    audio.play(FeelSoundBook.tired(delay: yawnAt))
+                    playHaptic(FeelHapticBook.tired(at: Double(yawnAt)))
+                }
             case .newBest:
                 let delay: Float = biting ? Self.newBestAt : 0
                 audio.play(FeelSoundBook.newBest(delay: delay))
@@ -486,6 +579,9 @@ final class FeedbackDirector: FeedbackSink {
                 lastLossBlipAt = lossAt
                 audio.play(FeelSoundBook.snapLost(cost: stingCost, delay: lossAt, dice: &dice))
                 playHaptic(FeelHapticBook.snapLost(at: Double(lossAt)))
+            } else if hush {
+                // R6 Zen: bees cost nothing there, so the free sting's "Bees cost a snap!" warning stays silent.
+                hushed += 1
             } else {
                 oopses += 1
                 audio.play(FeelSoundBook.oops(delay: verdictAt, dice: &dice))

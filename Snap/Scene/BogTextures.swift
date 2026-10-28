@@ -174,16 +174,26 @@ enum BogTextures {
     /// The lobe layers' margin past the zone's edge (R2: room for the green back).
     static let lobePad: CGFloat = TrapArt.exteriorWidth + 6
 
-    static func lobe(side: Int) -> SKTexture {
-        lobeLayer("lobe", side: side, reach: 1, pad: lobePad, scale: 2) { ctx, sd, g in
-            BogArt.drawLobe(ctx, side: sd, geometry: g)
+    /// R6: the variety suffix of a texture key (none for Classic, so its keys are the R5 ones).
+    nonisolated static func varietyKey(_ v: TrapVariety) -> String { v == .classic ? "" : "~\(v.rawValue)" }
+
+    static func lobe(side: Int, variety: TrapVariety = .classic) -> SKTexture {
+        lobeLayer("lobe" + varietyKey(variety), side: side, reach: 1, pad: lobePad, scale: 2) { ctx, sd, g in
+            BogArt.drawLobe(ctx, side: sd, geometry: g, variety: variety)
         }
     }
 
-    /// The lobe's silhouette in white (the night tint and the hunger wilt are tinted copies of it).
+    /// The lobe's silhouette in white (the night tint is a tinted copy of it).
     static func lobeSilhouette(side: Int) -> SKTexture {
         lobeLayer("lsil", side: side, reach: 1, pad: lobePad, scale: 0.5) { ctx, sd, g in
             BogArt.drawLobeSilhouette(ctx, side: sd, geometry: g)
+        }
+    }
+
+    /// R6 (#17): the face alone in white (the tired dim and the hunger wilt: the margin and back stay green).
+    static func lobeFace(side: Int) -> SKTexture {
+        lobeLayer("lface", side: side, reach: 1, pad: lobePad, scale: 0.5) { ctx, sd, g in
+            BogArt.drawLobeFaceSilhouette(ctx, side: sd, geometry: g)
         }
     }
 
@@ -213,12 +223,15 @@ enum BogTextures {
 
     /// R3 (#1): the closed trap for the bite's hold (both lobes squeezed shut, the cilia interlocked), centred on the
     /// trap centre. Its size is `closedSize`.
-    static var closedTrap: SKTexture {
+    static var closedTrap: SKTexture { closedTrap(variety: .classic) }
+
+    /// R6: the closed trap in `variety`'s colours and cut.
+    static func closedTrap(variety: TrapVariety) -> SKTexture {
         let g = TrapGeometry(sceneSize: CGSize(width: ScreenLayout.canvasWidth, height: ScreenLayout.canvasHeight))
         let frame = BogArt.closedFrame(geometry: g)
-        return make("closed", width: frame.width, height: frame.height, scale: 2) { ctx, _ in
+        return make("closed" + varietyKey(variety), width: frame.width, height: frame.height, scale: 2) { ctx, _ in
             ctx.translateBy(x: -frame.minX, y: -frame.minY)
-            BogArt.drawClosedTrap(ctx, geometry: g)
+            BogArt.drawClosedTrap(ctx, geometry: g, variety: variety)
         }
     }
 
@@ -259,10 +272,11 @@ enum BogTextures {
     }
 
     /// The reference tooth; `curl` ±1.
-    static func tooth(curl: CGFloat) -> SKTexture {
-        make(curl < 0 ? "tooth-L" : "tooth-R", width: BogArt.toothTexSize.width, height: BogArt.toothTexSize.height,
-             scale: 3) { ctx, s in
-            BogArt.drawTooth(ctx, size: s, curl: curl < 0 ? -1 : 1)
+    static func tooth(curl: CGFloat, variety: TrapVariety = .classic) -> SKTexture {
+        let sz = BogArt.varietyToothTexSize(variety)
+        return make((curl < 0 ? "tooth-L" : "tooth-R") + varietyKey(variety), width: sz.width, height: sz.height,
+                    scale: 3) { ctx, s in
+            BogArt.drawTooth(ctx, size: s, curl: curl < 0 ? -1 : 1, variety: variety)
         }
     }
 
@@ -286,10 +300,22 @@ enum BogTextures {
     /// The economy's snap glyph (≈ 30 × 22 pt) and its two halves (a sting cracks one).
     static let glyphSize = CGSize(width: 30, height: 22)
 
-    static var snapGlyph: SKTexture {
-        make("glyph", width: glyphSize.width, height: glyphSize.height, scale: 3) { ctx, s in
-            TrapArt.drawSnapGlyph(ctx, size: s)
+    static var snapGlyph: SKTexture { snapGlyph(variety: .classic) }
+
+    /// R6: the economy's glyph in `variety`'s colours.
+    static func snapGlyph(variety: TrapVariety) -> SKTexture {
+        make("glyph" + varietyKey(variety), width: glyphSize.width, height: glyphSize.height, scale: 3) { ctx, s in
+            TrapArt.drawSnapGlyph(ctx, size: s, variety: variety)
         }
+    }
+
+    /// R6: every texture `variety` adds (built when the scene's variety is set, never mid-frame).
+    static func warm(variety: TrapVariety) {
+        for side in [-1, 1] { _ = lobe(side: side, variety: variety) }
+        _ = tooth(curl: 1, variety: variety)
+        _ = tooth(curl: -1, variety: variety)
+        _ = closedTrap(variety: variety)
+        _ = snapGlyph(variety: variety)
     }
 
     // MARK: Bugs
@@ -366,6 +392,7 @@ enum BogTextures {
             _ = gloss(side: side)
             _ = lobeGlow(side: side)
             _ = lobeSilhouette(side: side)
+            _ = lobeFace(side: side)
         }
         _ = closedTrap
         _ = trapShadow

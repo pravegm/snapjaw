@@ -242,7 +242,7 @@ struct RootView: View {
                     .transition(.opacity)
             case .results:
                 if let summary = controller.summary {
-                    ResultsView(controller: controller, summary: summary, info: info)
+                    ResultsView(controller: controller, store: store, summary: summary, info: info)
                         .transition(SnapTheme.pageTransition(controller.reduceMotion))
                 }
             case .book:
@@ -253,6 +253,9 @@ struct RootView: View {
                     .transition(SnapTheme.pageTransition(controller.reduceMotion))
             case .daily:
                 DailyView(controller: controller, store: store, info: info)
+                    .transition(SnapTheme.pageTransition(controller.reduceMotion))
+            case .garden:
+                GardenView(controller: controller, store: store, info: info)
                     .transition(SnapTheme.pageTransition(controller.reduceMotion))
             }
         }

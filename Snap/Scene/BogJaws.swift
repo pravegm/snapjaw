@@ -14,11 +14,16 @@ final class BogLobeSide {
     let shadeWide: SKSpriteNode
     let overlay: SKSpriteNode
     let wilt: SKSpriteNode
+    /// R6 (#17): the tired trap's dim, on the face only (the green margin and back keep their colour).
+    let faceDim: SKSpriteNode
     let gloss: SKSpriteNode
     /// R3 (#10): the rim light (additive: gold morning, peach dusk, moonlight at night).
     let glow: SKSpriteNode
     private(set) var teeth: [SKSpriteNode] = []
     private(set) var specs: [TrapTooth] = []
+    /// R6 (Golden Glow): twinkles on the rim (hidden for every other variety).
+    private(set) var sparkles: [SKSpriteNode] = []
+    private(set) var variety: TrapVariety = .classic
 
     init(side: Int) {
         self.side = side < 0 ? -1 : 1
@@ -29,7 +34,8 @@ final class BogLobeSide {
         let sn = SKSpriteNode(texture: BogTextures.lobeShadeNarrow(side: side), size: lobeSize)
         let sw = SKSpriteNode(texture: BogTextures.lobeShadeWide(side: side), size: lobeSize)
         let ov = SKSpriteNode(texture: BogTextures.lobeSilhouette(side: side), size: lobeSize)
-        let wl = SKSpriteNode(texture: BogTextures.lobeSilhouette(side: side), size: lobeSize)
+        let wl = SKSpriteNode(texture: BogTextures.lobeFace(side: side), size: lobeSize)
+        let fd = SKSpriteNode(texture: BogTextures.lobeFace(side: side), size: lobeSize)
         let gl = SKSpriteNode(texture: BogTextures.gloss(side: side), size: lobeSize)
         let gw = SKSpriteNode(texture: BogTextures.lobeGlow(side: side), size: lobeSize)
         node = n
@@ -38,10 +44,11 @@ final class BogLobeSide {
         shadeWide = sw
         overlay = ov
         wilt = wl
+        faceDim = fd
         gloss = gl
         glow = gw
-        let layers: [(SKSpriteNode, CGFloat)] = [(l, 0), (sn, 1), (sw, 1.1), (ov, 1.5), (wl, 1.6), (gl, 2),
-                                                 (gw, 2.2)]
+        let layers: [(SKSpriteNode, CGFloat)] = [(l, 0), (sn, 1), (sw, 1.1), (ov, 1.5), (wl, 1.6), (fd, 1.65),
+                                                 (gl, 2), (gw, 2.2)]
         for (s, z) in layers {
             s.anchorPoint = anchor
             s.position = .zero
@@ -50,38 +57,77 @@ final class BogLobeSide {
         }
         sn.alpha = 0
         sw.alpha = 0
-        for s in [ov, wl] {
+        for s in [ov, wl, fd] {
             s.colorBlendFactor = 1
             s.color = .white
             s.alpha = 0
             s.isHidden = true
         }
-        // R3 (#17): the hunger wilt is a plain grey veil.
+        // R3 (#17): the hunger wilt is a plain grey veil. R6 (#17): it and the tired dim lie on the face only.
         wl.color = UIColor(white: 0.5, alpha: 1)
+        fd.color = UIColor(red: 0.12, green: 0.01, blue: 0.04, alpha: 1)
         gw.blendMode = .add
         gw.colorBlendFactor = 1
         gw.alpha = 0
         gw.isHidden = true
         gl.alpha = 0.75
         buildTeeth()
+        buildSparkles()
+    }
+
+    private func buildSparkles() {
+        let g = TrapGeometry(sceneSize: CGSize(width: ScreenLayout.canvasWidth, height: ScreenLayout.canvasHeight))
+        for p in TrapArt.sparkleSpots(side: side, geometry: g) {
+            let s = SKSpriteNode(texture: BogTextures.sparkle, size: CGSize(width: 22, height: 22))
+            s.blendMode = .add
+            s.color = BogPaint.ui(TrapArt.palette.gold)
+            s.colorBlendFactor = 0.35
+            s.position = CGPoint(x: p.x - g.center.x, y: p.y - g.center.y)
+            s.zPosition = 5
+            s.alpha = 0
+            s.isHidden = true
+            node.addChild(s)
+            sparkles.append(s)
+        }
+    }
+
+    /// R6: re-dress the lobe and its cilia as `v` (textures are cached per variety; the sprites are reused).
+    func apply(_ v: TrapVariety) {
+        guard v != variety else { return }
+        variety = v
+        lobe.texture = BogTextures.lobe(side: side, variety: v)
+        placeTeeth()
     }
 
     private func buildTeeth() {
         let g = TrapGeometry(sceneSize: CGSize(width: ScreenLayout.canvasWidth, height: ScreenLayout.canvasHeight))
-        specs = TrapArt.teeth(side: side, geometry: g)
-        let tex = BogArt.toothTexSize
-        for t in specs {
-            let s = SKSpriteNode(texture: BogTextures.tooth(curl: t.curl),
-                                 size: CGSize(width: tex.width * t.width / BogArt.toothTexWidth,
-                                              height: tex.height * t.length / BogArt.toothTexLength))
-            s.anchorPoint = CGPoint(x: 0.5, y: BogArt.toothRootY / tex.height)
-            s.position = CGPoint(x: t.root.x - g.center.x, y: t.root.y - g.center.y)
-            s.zRotation = t.angle - .pi / 2
+        for _ in TrapArt.teeth(side: side, geometry: g) {
+            let s = SKSpriteNode(texture: nil, size: CGSize(width: 4, height: 40))
             s.zPosition = 4
             s.color = UIColor(red: 0.07, green: 0.2, blue: 0.1, alpha: 1)
             s.colorBlendFactor = 0
             node.addChild(s)
             teeth.append(s)
+        }
+        placeTeeth()
+    }
+
+    /// Sizes and places every cilium for the current variety (its reference tooth, `BogArt.varietyToothTexSize`,
+    /// mapped onto each `TrapTooth`).
+    private func placeTeeth() {
+        let g = TrapGeometry(sceneSize: CGSize(width: ScreenLayout.canvasWidth, height: ScreenLayout.canvasHeight))
+        let vl = TrapArt.look(variety)
+        specs = TrapArt.teeth(side: side, geometry: g, variety: variety)
+        let tex = BogArt.varietyToothTexSize(variety)
+        let refW = BogArt.toothTexWidth * vl.toothWidth, refL = BogArt.toothTexLength * vl.toothLength
+        for (i, t) in specs.enumerated() where i < teeth.count {
+            let s = teeth[i]
+            s.texture = BogTextures.tooth(curl: t.curl, variety: variety)
+            bogResize(s, CGSize(width: tex.width * t.width / max(refW, 0.1),
+                                height: tex.height * t.length / max(refL, 0.1)))
+            s.anchorPoint = CGPoint(x: 0.5, y: BogArt.toothRootY / tex.height)
+            s.position = CGPoint(x: t.root.x - g.center.x, y: t.root.y - g.center.y)
+            s.zRotation = t.angle - .pi / 2
         }
     }
 }
@@ -135,6 +181,17 @@ final class BogJaws {
     /// R5 (#3): how far the hinge's own darkening is held off after a bite (1 while the hands reopen; it lets go once
     /// they close again).
     private(set) var reopenHold: CGFloat = 0
+    /// R6 (#17): the tired trap's dim on the face (the margin and back are never darkened by it), and the darkest any
+    /// layer that covers the green margin is drawn now (the closure shades: 0 while the trap is open, tired or not).
+    private(set) var faceDimAlpha: CGFloat = 0
+    private(set) var marginShade: CGFloat = 0
+    /// R6: the variety drawn (`BogScene.variety`), and its lobes' x scale about the midrib (B52 1.03).
+    private(set) var variety: TrapVariety = .classic
+    private(set) var spread: CGFloat = 1
+    /// R6 (Golden Glow): the rim twinkles showing now.
+    private(set) var sparklesShowing = 0
+    private var glossBoost: CGFloat = 1
+    private var sparkleOn = false
     var reduceMotion = false
 
     /// R4 (#6): the closed trap's one x scale (1 = the squeezed lobes' width, `TrapArt.slamSqueeze` of the open trap).
@@ -202,6 +259,35 @@ final class BogJaws {
 
     var teethCount: Int { sides.reduce(0) { $0 + $1.teeth.count } }
 
+    /// R6: draw `v` (its textures are built here, once, never per frame).
+    func setVariety(_ v: TrapVariety) {
+        guard v != variety else { return }
+        variety = v
+        BogTextures.warm(variety: v)
+        let vl = TrapArt.look(v)
+        spread = vl.spread
+        glossBoost = vl.gloss
+        sparkleOn = vl.sparkle
+        for s in sides { s.apply(v) }
+        closed.texture = BogTextures.closedTrap(variety: v)
+    }
+
+    /// R6 (tests): every open cilium's projected tip in scene space (unshaken), from the drawn sprites.
+    var drawnToothTips: [CGPoint] {
+        var out: [CGPoint] = []
+        let g = TrapGeometry(sceneSize: CGSize(width: ScreenLayout.canvasWidth, height: ScreenLayout.canvasHeight))
+        for s in sides {
+            for (i, t) in s.specs.enumerated() where i < s.teeth.count && !s.teeth[i].isHidden {
+                let reach = s.teeth[i].yScale
+                let local = CGPoint(x: t.root.x - g.center.x + cos(t.angle) * t.length * reach,
+                                    y: t.root.y - g.center.y + sin(t.angle) * t.length * reach)
+                out.append(CGPoint(x: root.position.x + local.x * s.node.xScale,
+                                   y: root.position.y + local.y * s.node.yScale))
+            }
+        }
+        return out
+    }
+
     /// Every tooth's projected length factor as drawn (tests).
     var toothReach: CGFloat { TrapArt.toothReach(lean: lean) }
 
@@ -227,7 +313,7 @@ final class BogJaws {
             }
         }
         for s in sides {
-            for n in [s.lobe, s.shadeNarrow, s.shadeWide, s.overlay, s.wilt, s.gloss, s.glow] { add(n) }
+            for n in [s.lobe, s.shadeNarrow, s.shadeWide, s.overlay, s.wilt, s.faceDim, s.gloss, s.glow] { add(n) }
             for t in s.teeth { add(t) }
         }
         add(midrib)
@@ -396,11 +482,15 @@ final class BogJaws {
         // R3 (#17): the hungry lobes droop to y 0.95, pinned at the midrib (the node's origin).
         lobeYScale = 1 - 0.05 * droop
         // R5 (#3): the closure shades darken the face only while closing (the hands or the bite), never on the reopen.
-        let shadeK = max(shut, 0.55 * tiredLevel)
+        // R6 (#17): tiredness no longer drives them (they cover the margin and back too: the R5 tired trap lost its
+        // green rim); the tired trap dims its face only (`faceDim`).
+        let shadeK = shut
         let narrow = 0.95 * BogMath.smoothstep(0.02, 0.6, shadeK)
         let wide = 0.6 * BogMath.smoothstep(0.45, 1, shadeK)
-        faceShade = max(narrow, wide)
-        let darkTeeth = min(0.32 * hingeK * (1 - closingLevel) + 0.25 * tiredLevel + 0.25 * droop + 0.3 * night, 0.7)
+        marginShade = max(narrow, wide)
+        faceDimAlpha = 0.42 * tiredLevel
+        faceShade = max(narrow, wide, faceDimAlpha)
+        let darkTeeth = min(0.32 * hingeK * (1 - closingLevel) + 0.1 * tiredLevel + 0.25 * droop + 0.3 * night, 0.7)
         let shimmer = CGFloat(0.05 * sin(time * 1.3))
         overlayAlpha = min(max(tintAlpha, 0), 0.25)
         overlayColor = tint
@@ -417,9 +507,26 @@ final class BogJaws {
         // release (the outer fringe frames the reopening trap, so it never reads as a bare round shape).
         teethAlpha = 1 - BogMath.smoothstep(0.25, 0.75, closingLevel)
         let wiltA = 0.15 * droop + 0.12 * tiredLevel
+        // R6 (Golden Glow): the rim twinkles, on the wall clock, gone while the jaws close.
+        let twinkle = sparkleOn ? (1 - shut) * (1 - 0.6 * tiredLevel) : 0
+        sparklesShowing = 0
         for s in sides {
             let sx = CGFloat(s.side)
-            s.node.xScale = lobeScale
+            s.node.xScale = lobeScale * spread
+            s.faceDim.alpha = faceDimAlpha
+            s.faceDim.isHidden = faceDimAlpha < 0.005
+            for (i, k) in s.sparkles.enumerated() {
+                let ph = CGFloat(i) * 1.7 + (s.side < 0 ? 0 : 0.9)
+                let b = max(0, sin(CGFloat(time) * 1.9 + ph))
+                let a = twinkle * (0.25 + 0.75 * b * b * b)
+                k.alpha = a
+                k.isHidden = a < 0.01
+                if !k.isHidden {
+                    sparklesShowing += 1
+                    k.zRotation = CGFloat(time) * 0.6 + ph
+                    k.setScale(0.7 + 0.5 * b)
+                }
+            }
             s.node.yScale = lobeYScale
             s.shadeNarrow.alpha = narrow
             s.shadeNarrow.isHidden = narrow < 0.005
@@ -431,7 +538,8 @@ final class BogJaws {
             s.wilt.alpha = wiltA
             s.wilt.isHidden = wiltA < 0.005
             s.gloss.position = CGPoint(x: -sx * 18 * shut, y: -6 * shut)
-            s.gloss.alpha = max(0.75 - 0.45 * shut - 0.3 * tiredLevel - 0.35 * droop + shimmer, 0.08)
+            let glossA = max(0.75 - 0.45 * shut - 0.3 * tiredLevel - 0.35 * droop + shimmer, 0.08)
+            s.gloss.alpha = min(glossA * glossBoost, 1)
             s.glow.color = rim
             s.glow.alpha = rimLightAlpha
             s.glow.isHidden = rimLightAlpha < 0.005
@@ -452,7 +560,7 @@ final class BogJaws {
         if show > 0.005 {
             closed.isHidden = false
             closed.alpha = show
-            closed.xScale = BogJaws.holdWidthScale * (1 - 0.02 * droop)
+            closed.xScale = BogJaws.holdWidthScale * (1 - 0.02 * droop) * spread
             closed.yScale = lobeYScale
         } else if !closed.isHidden {
             closed.isHidden = true
@@ -461,7 +569,7 @@ final class BogJaws {
         midrib.yScale = lobeYScale
         midrib.color = tint
         midrib.colorBlendFactor = overlayAlpha * 0.8
-        shadow.xScale = max(lobeScale, 0.3)
+        shadow.xScale = max(lobeScale, 0.3) * spread
         shadow.yScale = lobeYScale
     }
 }

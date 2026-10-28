@@ -43,6 +43,14 @@ final class BogEconomy {
     private var flights: [Flight] = []
     private let halfL: SKSpriteNode
     private let halfR: SKSpriteNode
+    /// R6 (FEAST): the snaps row's refill flourish: a gold glow across the row and a sweep of sparkles along it.
+    private let rowGlow: SKSpriteNode
+    private var sweep: [SKSpriteNode] = []
+    private var flourishAge: Double = -1
+    private var flourishRow: CGRect = .zero
+    private(set) var variety: TrapVariety = .classic
+    /// R6: how long the flourish runs (s).
+    static let flourishTime: Double = 0.75
     private let wiltGlyph: SKSpriteNode
     private let flash: SKSpriteNode
     private let rowFlash: SKSpriteNode
@@ -84,13 +92,61 @@ final class BogEconomy {
         rowFlash = SKSpriteNode(texture: BogTextures.soft, size: BogEconomy.rowFlashSize)
         rowFlash.color = BogPaint.ui(RGBA(hex: 0xE0203C))
         rowFlash.colorBlendFactor = 1
-        for s in [halfL, halfR, wiltGlyph, flash, rowFlash] {
+        rowGlow = SKSpriteNode(texture: BogTextures.soft, size: BogEconomy.rowFlashSize)
+        rowGlow.color = BogPaint.ui(TrapArt.palette.gold)
+        rowGlow.colorBlendFactor = 1
+        rowGlow.blendMode = .add
+        for s in [halfL, halfR, wiltGlyph, flash, rowFlash, rowGlow] {
             s.isHidden = true
             root.addChild(s)
         }
         flash.zPosition = -1
         rowFlash.zPosition = -2
+        rowGlow.zPosition = -1.5
+        for _ in 0..<6 {
+            let s = SKSpriteNode(texture: BogTextures.sparkle, size: CGSize(width: 30, height: 30))
+            s.blendMode = .add
+            s.color = BogPaint.ui(TrapArt.palette.gold)
+            s.colorBlendFactor = 0.5
+            s.isHidden = true
+            s.zPosition = 1
+            root.addChild(s)
+            sweep.append(s)
+        }
     }
+
+    /// R6: the glyphs in `v`'s colours (the snaps row is the App's: it draws `TrapArt.snapGlyph(variety:)`).
+    func setVariety(_ v: TrapVariety) {
+        guard v != variety else { return }
+        variety = v
+        let tex = BogTextures.snapGlyph(variety: v)
+        for g in glyphs { g.texture = tex }
+        wiltGlyph.texture = tex
+        halfL.texture = SKTexture(rect: CGRect(x: 0, y: 0, width: 0.5, height: 1), in: tex)
+        halfR.texture = SKTexture(rect: CGRect(x: 0.5, y: 0, width: 0.5, height: 1), in: tex)
+    }
+
+    /// R6 (tests): the refill flourish is running.
+    var flourishing: Bool { flourishAge >= 0 || flourishPending }
+
+    /// R6 (FEAST): the snaps row refills with a flourish: a gold glow over `row` (scene space; nil = the fallback row
+    /// right of `anchor`) and sparkles sweeping along it, after `delay` s (the glyph flights land first).
+    func flourish(row: CGRect?, anchor: CGPoint, delay: Double = 0) {
+        if let r = row, !r.isNull, r.width > 1, r.height > 1 {
+            flourishRow = r
+        } else {
+            let s = BogEconomy.rowFlashSize
+            flourishRow = CGRect(x: anchor.x - 20, y: anchor.y - 12 - s.height / 4, width: s.width - 60,
+                                 height: s.height / 2)
+        }
+        flourishAge = -max(delay, 0)
+        bogResize(rowGlow, CGSize(width: flourishRow.width + 60, height: flourishRow.height + 50))
+        rowGlow.position = CGPoint(x: flourishRow.midX, y: flourishRow.midY)
+        rowGlow.isHidden = true
+        flourishPending = true
+    }
+
+    private var flourishPending = false
 
     /// Glyphs in the air or landing now (tests).
     var activeFlights: Int { flights.filter { $0.active }.count }
@@ -117,7 +173,10 @@ final class BogEconomy {
         crackAge = -1
         crackCost = 0
         wiltAge = -1
-        for s in [halfL, halfR, wiltGlyph, flash, rowFlash] { s.isHidden = true }
+        for s in [halfL, halfR, wiltGlyph, flash, rowFlash, rowGlow] { s.isHidden = true }
+        for s in sweep { s.isHidden = true }
+        flourishAge = -1
+        flourishPending = false
         landedCount = 0
     }
 
@@ -249,6 +308,34 @@ final class BogEconomy {
     /// R4 (tests): the row flash's centre.
     var rowFlashCenter: CGPoint { rowFlash.position }
 
+    private func stepFlourish(_ dt: Double) {
+        flourishAge += dt
+        if flourishAge < 0 { return }
+        flourishPending = false
+        let u = CGFloat(flourishAge / BogEconomy.flourishTime)
+        if u >= 1 {
+            flourishAge = -1
+            rowGlow.isHidden = true
+            for s in sweep { s.isHidden = true }
+            return
+        }
+        rowGlow.isHidden = false
+        rowGlow.alpha = 0.85 * sin(.pi * u)
+        rowGlow.setScale(1 + 0.12 * u)
+        // The sparkles run along the row, one after another, towards its inner end.
+        let n = CGFloat(sweep.count)
+        for (i, s) in sweep.enumerated() {
+            let v = BogMath.clamp01(u * 1.6 - CGFloat(i) / n * 0.6)
+            let x = flourishRow.minX + flourishRow.width * v
+            let y = flourishRow.midY + 0.35 * flourishRow.height * sin(CGFloat(i) * 2.1 + 6 * v)
+            s.isHidden = v <= 0 || v >= 1
+            s.position = CGPoint(x: x, y: y)
+            s.alpha = sin(.pi * v)
+            s.setScale(0.6 + 0.6 * sin(.pi * v))
+            s.zRotation = 4 * v
+        }
+    }
+
     /// A snap wilted (hunger): one glyph droops off the row at `p`, greyed.
     func wilt(at p: CGPoint) {
         wiltAge = 0
@@ -261,6 +348,7 @@ final class BogEconomy {
 
     func update(_ dt: Double) {
         guard dt > 0 else { return }
+        if flourishPending || flourishAge >= 0 { stepFlourish(dt) }
         for i in 0..<flights.count where flights[i].active {
             flights[i].age += dt
             let f = flights[i]

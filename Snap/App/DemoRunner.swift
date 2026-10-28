@@ -10,8 +10,10 @@ enum DemoRunner {
     /// Plays `session` with a `skill` pilot for up to `seconds` of session time, or until it finishes. Returns the
     /// seconds played.
     @discardableResult
+    /// R6: `onStep` gets each step's events with the snapshot after them (the goals tick from both).
     static func play(_ session: TrapSession, skill: PilotSkill, seed: UInt64, seconds: Double,
-                     onEvent: (TrapEvent) -> Void = { _ in }) -> Double {
+                     onEvent: (TrapEvent) -> Void = { _ in },
+                     onStep: ([TrapEvent], TrapSnapshot) -> Void = { _, _ in }) -> Double {
         var pilot = TrapPilot(skill: skill, seed: seed &+ 101)
         var played = 0.0
         while played < seconds && !session.isFinished {
@@ -19,6 +21,7 @@ enum DemoRunner {
             let out = pilot.step(dt: step, time: snapshot.time, snapshot: snapshot)
             let events = session.step(dt: step, input: out.input)
             for e in events { onEvent(e) }
+            onStep(events, session.snapshot)
             played += step
         }
         return played

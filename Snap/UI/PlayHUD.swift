@@ -26,11 +26,14 @@ struct PlayLayer: View {
         // R4 (REVIEW-3 #3): the plate never covers a live pop (it moves to the inner bottom, or waits a beat).
         let slot: (rect: CGRect, low: Bool)? = showsCard
             ? (rect: l.lessonHint, low: true)
-            : HUDLayout.hintSlot(primary: l.hint, alternate: l.lessonHint, pops: v.popRects.map { info.screenRect($0) })
+            : HUDLayout.hintSlot(primary: l.hint, alternate: l.lessonHint, pops: v.popRects.map { info.screenRect($0) },
+                                 subjects: v.subjectRects.map { info.screenRect($0) })
         let hintRect = slot?.rect ?? l.hint
         let inner: HorizontalAlignment = l.trailing ? .leading : .trailing
         let hintAlign = Alignment(horizontal: inner, vertical: (slot?.low ?? false) ? .bottom : .top)
-        let showsSnaps = !v.lesson || v.lessonSnaps
+        // R6 Zen: the snaps never run out, so there's no row.
+        let showsSnaps = (!v.lesson || v.lessonSnaps) && !v.zen
+        let tagY = min(l.chain.minY, l.snaps.minY) - (c ? 14 : 18)
         ZStack {
             if let lesson, !paused, !lesson.isFinal, !v.lessonTargets.isEmpty {
                 LessonPointer(targets: v.lessonTargets, avoid: v.lessonAvoid, info: info,
@@ -48,7 +51,8 @@ struct PlayLayer: View {
                     .position(x: l.score.midX, y: l.score.midY)
                     .allowsHitTesting(false)
                 if v.chainMultiplier > 1.01 {
-                    ChainChip(multiplier: v.chainMultiplier, compact: c, short: l.chainCompact, held: v.chainHeld)
+                    // R6 (#6, frame 42): the bite's own pop says "×2 held"; the chip only glows.
+                    ChainChip(multiplier: v.chainMultiplier, compact: c, short: l.chainCompact, glow: v.chainHeld)
                         .scaleEffect(chainBump ? 1.22 : 1, anchor: l.trailing ? .trailing : .leading)
                         .frame(width: l.chain.width, height: l.chain.height,
                                alignment: l.trailing ? .trailing : .leading)
@@ -80,20 +84,15 @@ struct PlayLayer: View {
                     SnapsRing(rect: l.snaps, reduceMotion: controller.reduceMotion)
                         .allowsHitTesting(false)
                 }
-                if let loss = v.snapLoss {
-                    // R5 (REVIEW-4 #7): a costly sting says what it cost, at the row ("−2 snaps").
-                    SnapGainTag(text: loss, compact: c, loss: true)
-                        .position(x: l.chain.midX, y: l.chain.minY - (c ? 14 : 18))
-                        .allowsHitTesting(false)
-                        .transition(.scale(scale: 0.6).combined(with: .opacity))
-                } else if let gain = v.snapGain {
-                    SnapGainTag(text: gain, compact: c)
-                        .position(x: l.chain.midX, y: l.chain.minY - (c ? 14 : 18))
-                        .allowsHitTesting(false)
-                        .transition(.scale(scale: 0.6).combined(with: .opacity))
-                } else if v.freeFlash {
-                    SnapGainTag(text: "free!", compact: c)
-                        .position(x: l.chain.midX, y: l.chain.minY - (c ? 14 : 18))
+                // R5 (REVIEW-4 #7): a costly sting says what it cost, at the row ("−2 snaps"); the first Feast its
+                // refund ("+1 snap"). R6 (#6): one tag at a time from the message queue, never beside a plate (the free
+                // sting's plate says it all: the row just flashes green).
+                if let tag = v.tag {
+                    SnapGainTag(tag: tag, compact: c)
+                        .frame(width: max(l.snaps.width, 140), alignment: l.trailing ? .trailing : .leading)
+                        .position(x: l.trailing ? l.snaps.maxX - max(l.snaps.width, 140) / 2
+                                                : l.snaps.minX + max(l.snaps.width, 140) / 2,
+                                  y: tagY)
                         .allowsHitTesting(false)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
@@ -143,8 +142,7 @@ struct PlayLayer: View {
         .animation(SnapTheme.settle(controller.reduceMotion), value: controller.isClosingPaused)
         .animation(SnapTheme.pop(controller.reduceMotion), value: v.chainMultiplier > 1.01)
         .animation(SnapTheme.pop(controller.reduceMotion), value: v.tired)
-        .animation(SnapTheme.pop(controller.reduceMotion), value: v.snapGain)
-        .animation(SnapTheme.pop(controller.reduceMotion), value: v.snapLoss)
+        .animation(SnapTheme.pop(controller.reduceMotion), value: v.tag)
         .onAppear { reportAnchor(l, left: v.snapsLeft) }
         .onChange(of: info) { _, _ in
             reportAnchor(HUDLayout.make(info), left: hud.values.snapsLeft)
@@ -172,6 +170,15 @@ struct PlayLayer: View {
         let b = info.scenePoint(CGPoint(x: l.snaps.maxX, y: l.snaps.maxY))
         let row = CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
         controller.setSnapsAnchor(info.scenePoint(l.anchor(snapsLeft: left)), row: row)
+        // R6 (Scene #7): the HUD's two corners, so no bug parks under the score, the pause button or the snaps.
+        controller.setHUDKeepOut([l.score.union(l.pause), l.snaps.union(l.chain)].map { sceneRect($0) })
+    }
+
+    /// A screen rect in scene space (y up).
+    private func sceneRect(_ r: CGRect) -> CGRect {
+        let a = info.scenePoint(CGPoint(x: r.minX, y: r.minY))
+        let b = info.scenePoint(CGPoint(x: r.maxX, y: r.maxY))
+        return CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
     }
 
     /// A sting: the snaps row flashes crimson for a beat.
@@ -361,8 +368,10 @@ struct ChainChip: View {
     let multiplier: Double
     let compact: Bool
     var short = false
-    /// R4 (REVIEW-3 #10): "×1.5 held" for a beat after a clean one-bug bite.
+    /// R4 (REVIEW-3 #10): "×1.5 held" for a beat after a clean one-bug bite. R6 (#6, frame 42): the bite's pop says
+    /// "held", so the chip doesn't repeat it: it glows for that beat instead.
     var held = false
+    var glow = false
 
     var body: some View {
         HStack(spacing: 4) {
@@ -378,6 +387,8 @@ struct ChainChip: View {
         .background(Capsule().fill(LinearGradient(colors: [SnapTheme.goldLight, SnapTheme.gold], startPoint: .top,
                                                   endPoint: .bottom)))
         .overlay(Capsule().stroke(SnapTheme.goldDeep, lineWidth: 1.5))
+        .shadow(color: SnapTheme.goldLight.opacity(glow ? 0.9 : 0), radius: glow ? 10 : 0)
+        .animation(.easeOut(duration: 0.25), value: glow)
         .fixedSize()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Chain " + AppRules.multiplierText(multiplier))
@@ -422,14 +433,9 @@ struct SnapsRow: View {
                              size: layout.glyph)
                         .position(layout.glyphCenter(i))
                 }
-                // R5 (REVIEW-4 #13: "tiny next to the big score"): the numeral is set at the layout's size.
-                Text("\(shown)")
-                    .font(.system(size: layout.numeralSize, weight: .heavy, design: .rounded).monospacedDigit())
-                    .foregroundStyle(shown <= 1 || hungry ? SnapTheme.danger : SnapTheme.cream)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .scaleEffect(bump)
-                    .snapLegible()
+                // R5 (REVIEW-4 #13: "tiny next to the big score"): the numeral is set at the layout's size. R6 (#14):
+                // labelled like the score, "SNAPS" under it, where the layout found room.
+                SnapsNumeral(shown: shown, layout: layout, hot: shown <= 1 || hungry, bump: bump)
                     .frame(width: layout.numeral.width, height: layout.numeral.height,
                            alignment: layout.trailing ? .trailing : .leading)
                     .position(x: layout.numeral.midX, y: layout.numeral.midY)
@@ -438,6 +444,38 @@ struct SnapsRow: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(shown) snaps left" + (hungry ? ", hungry" : ""))
+    }
+}
+
+/// R6 (#14): the snaps numeral, labelled like the score ("14" over "SNAPS") where the layout gave it the room, else
+/// the R5 numeral alone on the lower row.
+struct SnapsNumeral: View {
+    let shown: Int
+    let layout: HUDLayout
+    let hot: Bool
+    var bump: Double = 1
+
+    var body: some View {
+        let labelSize = layout.numeralSize >= HUDLayout.numeralDuo - 0.5 ? HUDLayout.numeralLabelDuo
+                                                                          : HUDLayout.numeralLabelPhone
+        VStack(alignment: layout.trailing ? .trailing : .leading, spacing: -2) {
+            Text("\(shown)")
+                .font(.system(size: layout.numeralSize, weight: .heavy, design: .rounded).monospacedDigit())
+                .foregroundStyle(hot ? SnapTheme.danger : SnapTheme.cream)
+                .lineLimit(1)
+                .fixedSize()
+                .scaleEffect(bump, anchor: layout.trailing ? .trailing : .leading)
+                .snapLegible()
+            if layout.numeralLabeled {
+                Text(HUDLayout.numeralLabel)
+                    .font(.system(size: labelSize, weight: .heavy, design: .rounded))
+                    .kerning(0.8)
+                    .foregroundStyle(SnapTheme.mist)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .snapLegible()
+            }
+        }
     }
 }
 
@@ -472,6 +510,20 @@ struct SnapGainTag: View {
     let compact: Bool
     var loss = false
 
+    init(text: String, compact: Bool, loss: Bool = false) {
+        self.text = text
+        self.compact = compact
+        self.loss = loss
+    }
+
+    /// R6 (#6): a tag from the message queue.
+    init(tag: HUDTag, compact: Bool) {
+        switch tag {
+        case let .gain(t): self.init(text: t, compact: compact)
+        case let .loss(t): self.init(text: t, compact: compact, loss: true)
+        }
+    }
+
     var body: some View {
         Text(text)
             .font(.system(size: compact ? 15 : 18, weight: .black, design: .rounded))
@@ -496,7 +548,30 @@ struct HintPlate: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: compact ? 18 : 22, style: .continuous)
         ZStack {
-            if let hint, let text = AppRules.hudHintText(hint, touch: touch) {
+            if case let .goalDone(title)? = hint {
+                // R6: a goal's toast: "Goal done!" on its own line, the goal under it (gold-edged, good news).
+                VStack(spacing: 1) {
+                    Text(AppRules.goalDoneHeading)
+                        .font(SnapType.hint(compact))
+                        .foregroundStyle(SnapTheme.crimsonDeep)
+                    Text(title)
+                        .font(HintFit.toastFont(compact))
+                        .foregroundStyle(SnapTheme.ink)
+                        .lineLimit(HintFit.maxLines)
+                        .minimumScaleFactor(0.75)
+                }
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, HintFit.horizontalPadding)
+                .padding(.vertical, 7)
+                .background(shape.fill(SnapTheme.cream))
+                .overlay(shape.stroke(SnapTheme.gold, lineWidth: 2.5))
+                .shadow(color: SnapTheme.shadow.opacity(0.5), radius: 8, y: 3)
+                .id("goal." + title)
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(AppRules.goalDoneText(title))
+            } else if let hint, let text = AppRules.hudHintText(hint, touch: touch) {
                 let warn = AppRules.hudHintIsWarning(hint)
                 let long = AppRules.hudHintIsLong(hint)
                 Text(text)
@@ -610,30 +685,50 @@ struct PauseMenu: View {
     let info: AppCanvas
     let layout: HUDLayout
 
+    /// R6 Zen: the pause menu's way out to Results.
+    static let zenEnd = "End"
+    static func title(zen: Bool) -> String { zen ? "The bog can wait." : "The bugs will wait." }
+
     var body: some View {
         let c = info.isCompact
         let other = info.otherPage
+        let zen = controller.mode == .zen
+        let goals = controller.pauseGoals
         ZStack {
             Color.black.opacity(0.55)
                 .contentShape(Rectangle())
                 .onTapGesture {}
-            Text("The bugs will wait.")
-                .font(SnapType.title(c))
-                .foregroundStyle(SnapTheme.cream)
-                .snapLegible()
-                .multilineTextAlignment(.center)
-                .frame(width: min(other.width, 360))
-                .position(x: other.midX, y: info.size.height / 2)
-                .accessibilityHidden(true)
+            // R6: the other page has the goals under the line.
+            VStack(spacing: c ? 10 : 16) {
+                Text(Self.title(zen: zen))
+                    .font(SnapType.title(c))
+                    .foregroundStyle(SnapTheme.cream)
+                    .snapLegible()
+                    .multilineTextAlignment(.center)
+                    .accessibilityHidden(true)
+                if !goals.isEmpty {
+                    GoalsCard(lines: goals, compact: c, title: "This run's goals")
+                        .frame(maxWidth: 340)
+                }
+            }
+            .frame(width: min(other.width, 360))
+            .position(x: other.midX, y: info.size.height / 2)
             VStack(spacing: c ? 8 : 12) {
                 SnapOverline(text: "Paused", compact: c, color: SnapTheme.gold)
                 SnapButton(kind: .primary, height: c ? 56 : SnapTheme.primaryHeight, compact: c,
                            action: { controller.resume() }) {
                     Text("Resume")
                 }
-                SnapButton(kind: .secondary, height: SnapTheme.secondaryHeight, compact: c,
-                           action: { controller.restart() }) {
-                    Text(controller.restartLabel)
+                if zen {
+                    SnapButton(kind: .secondary, height: SnapTheme.secondaryHeight, compact: c,
+                               action: { controller.endZen() }) {
+                        Text(Self.zenEnd)
+                    }
+                } else {
+                    SnapButton(kind: .secondary, height: SnapTheme.secondaryHeight, compact: c,
+                               action: { controller.restart() }) {
+                        Text(controller.restartLabel)
+                    }
                 }
                 SnapButton(kind: .secondary, height: SnapTheme.secondaryHeight, compact: c,
                            action: { controller.goHome() }) {

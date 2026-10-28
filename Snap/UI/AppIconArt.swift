@@ -394,15 +394,23 @@ enum AppIconPainter {
         }
     }
 
-    /// Two little hands gripping the front lip, either side of the fly.
+    /// R6 (SCORE-R5 #18): the hands' light grey-blue, a step paler than the fly's lightest body tone.
+    static let handLight = Color(snapHex: 0xD4DCE6)
+
+    /// Two little hands gripping the front lip, either side of the fly. R6 (SCORE-R5 #18): at thumbnail size the two
+    /// dark grey (#575E6B) ovals with their dark drop shadows read as "nostrils" on the lime lip. They are now small
+    /// and pale (a light grey-blue lit from the upper left, `handLight` → `flyLight`), with only a faint green
+    /// shadow, so they sit on the margin as a highlight, never as two dark holes.
     static func hands(_ ctx: inout GraphicsContext) {
         let c = trapContext(ctx)
         for dx in handOffsets {
             let q = lipPoint(nearX: flyCenter.x + dx)
             let h = CGPoint(x: q.x, y: q.y - 4)
-            c.fill(ellipse(CGPoint(x: h.x + 2, y: h.y + 5), 18, 12), with: .color(Color(snapHex: 0x0E3A16, alpha: 0.35)))
-            c.fill(ellipse(h, 18, 12), with: .color(flyBody))
-            c.fill(ellipse(CGPoint(x: h.x - 5, y: h.y - 5), 7, 3.5), with: .color(Color.white.opacity(0.28)))
+            c.fill(ellipse(CGPoint(x: h.x + 1, y: h.y + 3), 15, 10), with: .color(Color(snapHex: 0x5E8A2A, alpha: 0.18)))
+            let pale = Gradient(colors: [handLight, flyLight])
+            c.fill(ellipse(h, 15, 10), with: .radialGradient(pale, center: CGPoint(x: h.x - 5, y: h.y - 4),
+                                                             startRadius: 1, endRadius: 18))
+            c.fill(ellipse(CGPoint(x: h.x - 4, y: h.y - 4), 6, 3), with: .color(Color.white.opacity(0.45)))
         }
     }
 }

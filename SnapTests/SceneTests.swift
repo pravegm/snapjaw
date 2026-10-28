@@ -203,9 +203,9 @@ struct SceneTests {
         #expect(BogPaint.contrast(p.ink, p.lobeOuter) > 3)
         #expect(BogPaint.contrast(p.lobeOuter, p.lobeInner) > 1.8)
         #expect(BogPaint.contrast(p.danger, p.ink) > 3)
-        // The catch spray is pale nectar, never red (4+).
+        // R6: the catch spray is nectar gold (never beige, never red: 4+).
         let j = BogEffects.juiceColor
-        #expect(j.g > j.r * 0.9 && j.g > 0.8)
+        #expect(j.r > 0.9 && j.g > 0.6 && j.b < 0.45)
     }
 
     @Test func dayLightMovesThroughTheDay() {
@@ -579,7 +579,9 @@ struct SceneTests {
         scene.show(s, events: [.snapped(report), .bugCaught(id: 0, species: .housefly, position: s.bugs[0].position),
                                .feast(count: 5, snapsBack: 2), .luckySnap(species: .ladybird)], dt: 1.0 / 120.0)
         #expect(scene.glyphFlights == 3)
-        #expect(scene.popTexts.contains("FEAST ×5 · +255"))
+        // R6: a 5-bug bite is a FEAST event: the "FEAST!" banner, with the count and points under it.
+        let texts = scene.popTexts
+        #expect(texts.contains(BogScene.feastBanner) && texts.contains("×5 · +255"))
         for _ in 0..<150 { scene.show(s, events: [], dt: 1.0 / 120.0) }
         #expect(scene.glyphsLanded == 3)
         #expect(scene.glyphFlights == 0)
@@ -1538,5 +1540,350 @@ struct SceneTests {
         #expect(shadowOver.x >= BogBugLayer.creaseShadow.x - CGFloat(0.01))
         #expect(shadowOver.y <= BogBugLayer.creaseShadow.y + CGFloat(0.01))
         #expect(shadowAway.x < CGFloat(5))
+    }
+
+    // MARK: R6
+
+    /// R6 (the Garden): every variety draws true, non-empty art: its own cut of cilia on the play lobes (inside the
+    /// canvas, B52's wider lobes too), the closed trap, the hero 3/4 trap, the snap glyph at both sizes and the SwiftUI
+    /// trap image. The cultivars differ where they should, and the scene draws the one it is given without building a
+    /// texture per frame.
+    @Test func everyVarietyDrawsNonEmptyPaths() {
+        let g = SceneTests.geometry
+        let kinds: [TrapToothKind] = [.cilia, .saw, .shark, .fused]
+        for k in kinds {
+            let box = TrapArt.toothShape(length: 30, width: 8, curl: 1, kind: k).boundingBoxOfPath
+            #expect(box.width > CGFloat(4) && box.height > CGFloat(20), "tooth \(k)")
+        }
+        for v in TrapVariety.allCases {
+            let vl = TrapArt.look(v)
+            #expect(vl.variety == v)
+            for side in [-1, 1] {
+                let teeth = TrapArt.teeth(side: side, geometry: g, variety: v)
+                #expect(teeth.count == TrapArt.teethPerSide)
+                let path = TrapArt.teethPath(side: side, geometry: g, closure01: 0, variety: v)
+                #expect(!path.isEmpty)
+                let box = path.boundingBoxOfPath
+                #expect(box.width > CGFloat(10) && box.height > CGFloat(200), "\(v) teeth \(box)")
+                #expect(box.minX >= CGFloat(-0.5) && box.maxX <= g.sceneSize.width + CGFloat(0.5), "\(v) \(box)")
+            }
+            let back = TrapPose.backCilia(v)
+            let front = TrapPose.frontCilia(v)
+            #expect(back.count == 13 && front.count == 8)
+            var hairs = CGRect.null
+            for h in back + front { hairs = hairs.union(h.path.boundingBoxOfPath) }
+            #expect(!hairs.isNull && hairs.width > CGFloat(100), "\(v) hero cilia")
+            let bounds = TrapPose.bounds(v)
+            #expect(bounds.width > CGFloat(100) && bounds.height > CGFloat(100))
+            #expect(TrapArt.trapImage(width: 240, scale: 1, variety: v) != nil, "\(v) top-down")
+            #expect(TrapArt.trapImage(style: .threeQuarter, width: 240, scale: 1, variety: v) != nil, "\(v) hero")
+            #expect(TrapArt.trapImage(style: .topDown, width: 240, scale: 1, sippingBug: .housefly, variety: v) != nil)
+            #expect(TrapArt.snapGlyph(width: 30, height: 22, scale: 2, variety: v) != nil, "\(v) glyph")
+            #expect(TrapArt.snapGlyph(width: 16, height: 12, scale: 2, variety: v) != nil, "\(v) small glyph")
+            let closed = BogArt.closedFrame(geometry: g)
+            let shut = BogPainter.image(width: closed.width, height: closed.height, scale: 1) { ctx, _ in
+                ctx.translateBy(x: -closed.minX, y: -closed.minY)
+                BogArt.drawClosedTrap(ctx, geometry: g, variety: v)
+            }
+            #expect(shut != nil, "\(v) closed")
+            let tex = BogArt.varietyToothTexSize(v)
+            #expect(tex.height >= BogArt.toothTexLength * vl.toothLength + BogArt.toothRootY)
+            #expect(vl.faceStops.count >= 2 && vl.closedStops.count >= 2)
+        }
+
+        // True cultivars.
+        let classic = TrapArt.look(.classic)
+        let red = TrapArt.look(.redDragon)
+        #expect(red.leaf.r > red.leaf.g * 2 && classic.leaf.g > classic.leaf.r)
+        #expect(red.face(at: 0.5).r < classic.face(at: 0.5).r)
+        let b52 = TrapArt.look(.b52)
+        #expect(b52.spread > CGFloat(1.01) && b52.toothWidth > CGFloat(1.5) && b52.toothLength > CGFloat(1.2))
+        let saw = TrapArt.look(.sawtooth)
+        #expect(saw.tooth == .saw && saw.toothLength < CGFloat(0.6))
+        #expect(TrapArt.look(.sharkTooth).tooth == .shark)
+        #expect(TrapArt.look(.fusedTooth).tooth == .fused)
+        let cup = TrapArt.look(.cupped)
+        #expect(cup.cupStrength > 1.5 && cup.gloss > CGFloat(1.3))
+        let gold = TrapArt.look(.goldenGlow)
+        #expect(gold.sheen != nil && gold.sparkle)
+        // Red Dragon is crimson even outside; Golden Glow's rim is gold. (The lobe's back at the outer middle, 4 pt
+        // past the margin; its rim just inside the margin.)
+        func lobe(_ v: TrapVariety) -> CGImage? {
+            BogPainter.image(width: g.sceneSize.width, height: g.sceneSize.height, scale: 1) { ctx, _ in
+                BogArt.drawLobe(ctx, side: 1, geometry: g, variety: v)
+            }
+        }
+        if let c = lobe(.classic), let r = lobe(.redDragon), let o = lobe(.goldenGlow) {
+            let y = Int(g.center.y)
+            let backX = Int(g.center.x + g.a + 4), rimX = Int(g.center.x + g.a - 3)
+            let cb = SceneTests.average(c, x: backX, yUp: y, n: 1), rb = SceneTests.average(r, x: backX, yUp: y, n: 1)
+            #expect(cb.g > cb.r, "classic back \(cb.r) \(cb.g)")
+            #expect(rb.r > rb.g * 1.5, "red dragon back \(rb.r) \(rb.g)")
+            let orim = SceneTests.pixel(o, x: rimX, yUp: y), crim = SceneTests.pixel(c, x: rimX, yUp: y)
+            #expect(orim.r > 0.7 && orim.g > 0.5 && orim.b < 0.5, "golden rim \(orim.r) \(orim.g) \(orim.b)")
+            #expect(crim.r < 0.4)
+        } else {
+            Issue.record("the lobe images did not draw")
+        }
+
+        // The scene draws the variety it is given; its textures are built at the set, never per frame.
+        let scene = BogScene(layout: SceneTests.duo)
+        let s = SceneTests.crowd()
+        scene.show(s, events: [], dt: 1.0 / 60.0)
+        let w = SceneTests.duo.size.width, h = SceneTests.duo.size.height
+        for v in TrapVariety.allCases {
+            scene.variety = v
+            scene.show(s, events: [], dt: 1.0 / 60.0)
+            let built = BogTextures.count
+            for _ in 0..<3 { scene.show(s, events: [], dt: 1.0 / 60.0) }
+            #expect(BogTextures.count == built, "\(v) built textures mid-run")
+            #expect(scene.drawnVariety == v)
+            #expect(scene.teethCount == 2 * TrapArt.teethPerSide)
+            let tips = scene.drawnToothTips
+            #expect(tips.count == 2 * TrapArt.teethPerSide)
+            var out = 0
+            for p in tips where p.x < 2 || p.x > w - 2 || p.y < 2 || p.y > h - 2 { out += 1 }
+            #expect(out == 0, "\(v): \(out) cilia leave the canvas")
+        }
+        scene.variety = .goldenGlow
+        for _ in 0..<3 { scene.show(s, events: [], dt: 1.0 / 60.0) }
+        #expect(scene.rimSparkles > 0)
+        scene.variety = .classic
+        scene.show(s, events: [], dt: 1.0 / 60.0)
+        #expect(scene.rimSparkles == 0)
+    }
+
+    /// A bite of `n` houseflies sipping in the trap, at chain `chain` (`stung`: a bee in it too), shown on `scene`.
+    /// Returns the snapshot of the bite's frame (the bugs caught).
+    static func showBite(_ scene: BogScene, bugs n: Int, chain: Double, stung: Bool = false) -> TrapSnapshot {
+        let g = SceneTests.geometry
+        var bugs: [BugState] = []
+        for i in 0..<n {
+            let sd: CGFloat = i % 2 == 0 ? -1 : 1
+            let p = CGPoint(x: g.center.x + sd * (120 + 26 * CGFloat(i)), y: g.center.y - 130 + 46 * CGFloat(i))
+            bugs.append(SceneTests.bug(i, .housefly, p, .sipping))
+        }
+        var s = TrapSnapshot(time: 1, bugs: bugs, snapsLeft: 6)
+        for _ in 0..<2 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        s.closure = Tuning.snapDepth
+        s.snapsLeft = 8
+        let report = BiteReport(caught: Array(repeating: BugSpecies.housefly, count: n), escaped: 0,
+                                stingers: stung ? [.bee] : [], points: 120 * n, countMultiplier: n,
+                                chainMultiplier: chain, snapsBack: 2, snapsLost: 0, duration: 0.1, time: 1)
+        var events: [TrapEvent] = [.snapped(report)]
+        for i in 0..<n {
+            s.bugs[i].activity = .caught(elapsed: 0)
+            events.append(.bugCaught(id: i, species: .housefly, position: s.bugs[i].position))
+        }
+        if n >= 3 && !stung { events.append(.feast(count: n, snapsBack: 2)) }
+        scene.show(s, events: events, dt: 1.0 / 120.0)
+        return s
+    }
+
+    /// R6 (FEAST): a clean bite of 5+ bugs, or one at a ×4+ chain, is an event: an 80 ms hit-stop, a bigger camera
+    /// punch, the "FEAST!" banner, the caught bugs gulped into the midrib one after another and the snaps row's refill
+    /// flourish. A 3–4 bug Feast keeps the R5 look, and a stung bite is never one.
+    @Test func theFeastIsAnEventFromFiveBugsOrAFourChain() {
+        #expect(FeastEvent.isBig(caught: 5, chainMultiplier: 1, stung: false))
+        #expect(FeastEvent.isBig(caught: 8, chainMultiplier: 1, stung: false))
+        #expect(!FeastEvent.isBig(caught: 4, chainMultiplier: 3.5, stung: false))
+        #expect(!FeastEvent.isBig(caught: 3, chainMultiplier: 1, stung: false))
+        #expect(FeastEvent.isBig(caught: 2, chainMultiplier: 4, stung: false))
+        #expect(FeastEvent.isBig(caught: 1, chainMultiplier: 5, stung: false))
+        #expect(!FeastEvent.isBig(caught: 6, chainMultiplier: 1, stung: true))
+        #expect(!FeastEvent.isBig(caught: 0, chainMultiplier: 5, stung: false))
+        #expect(!FeastEvent.isBig(caught: 2, chainMultiplier: Double.infinity, stung: false))
+        let d = FeastEvent.gulpDelays(count: 8)
+        #expect(d.count == 8)
+        var rising = true
+        for i in 1..<d.count where d[i] <= d[i - 1] { rising = false }
+        #expect(rising)
+        #expect((d.last ?? 1) + BogBugLayer.gulpTime < 0.5)
+        #expect(FeastEvent.gulpDelays(count: 0).isEmpty)
+        #expect(BogScene.bigHitStopTime > 0.079 && BogScene.bigHitStopTime < 0.081)
+
+        // Six bugs: the event.
+        let scene = BogScene(layout: SceneTests.duo)
+        var s = SceneTests.showBite(scene, bugs: 6, chain: 1.5)
+        #expect(scene.lastBiteWasFeastEvent)
+        #expect(abs(scene.lastHitStop - BogScene.bigHitStopTime) < 0.0001)
+        let banners = scene.banners
+        #expect(banners.contains(BogScene.feastBanner))
+        #expect(scene.cameraScale > CGFloat(1.05))
+        #expect(scene.rowFlourishing)
+        var queued = 0
+        for i in 0..<6 where scene.gulpQueued(ofBug: i) { queued += 1 }
+        #expect(queued == 6)
+        var midway = -1
+        for k in 1...57 {
+            for i in 0..<6 { s.bugs[i].activity = .caught(elapsed: Double(k) / 120) }
+            scene.show(s, events: [], dt: 1.0 / 120.0)
+            if k == 6 {
+                // 58 ms in: still in the 80 ms hit-stop (the R5 bite's 50 ms is over).
+                #expect(scene.inHitStop)
+            }
+            if k == 24 {
+                midway = 0
+                for i in 0..<6 where scene.gulped(ofBug: i) { midway += 1 }
+            }
+        }
+        // One after another: some are in at 0.2 s, not all; by 0.47 s every one is.
+        #expect(midway > 0 && midway < 6, "gulped at 0.2 s: \(midway)")
+        var done = 0
+        for i in 0..<6 where scene.gulped(ofBug: i) { done += 1 }
+        #expect(done == 6)
+        #expect(!scene.inHitStop)
+
+        // Three bugs: today's Feast (50 ms, no banner, no gulps).
+        let small = BogScene(layout: SceneTests.duo)
+        _ = SceneTests.showBite(small, bugs: 3, chain: 2)
+        #expect(!small.lastBiteWasFeastEvent)
+        #expect(abs(small.lastHitStop - BogScene.hitStopTime) < 0.0001)
+        #expect(small.banners.isEmpty)
+        #expect(!small.gulpQueued(ofBug: 0))
+        #expect(!small.rowFlourishing)
+        // Two bugs at ×4: the event. Six with a bee in the bite: never.
+        let chained = BogScene(layout: SceneTests.duo)
+        _ = SceneTests.showBite(chained, bugs: 2, chain: 4)
+        #expect(chained.lastBiteWasFeastEvent)
+        let stung = BogScene(layout: SceneTests.duo)
+        _ = SceneTests.showBite(stung, bugs: 6, chain: 1, stung: true)
+        #expect(!stung.lastBiteWasFeastEvent)
+        #expect(stung.banners.isEmpty)
+    }
+
+    /// REVIEW-5 #7 (10, 11, 13, 24, 33, 39, 41): no bug or halo parks in the HUD's corners, sits on the midrib while it
+    /// rests, or is cut by the screen edge. A bug flying in is never pushed before it is on screen (it never pops), and
+    /// a bug in the trap is never moved by the HUD.
+    @Test func noHaloIsClippedAndNothingParksInTheHUD() {
+        let l = SceneTests.duo
+        let g = l.geometry
+        let size = l.size
+        let keep = BogScene.defaultKeepOut(l)
+        #expect(keep.count == 2)
+        let beeR: CGFloat = 30
+        let half = BogBugLayer.footprintHalf(.bee, radius: beeR)
+        let atEdge = CGPoint(x: 12, y: 300)
+        let d = BogBugLayer.clearOffset(at: atEdge, half: half, radius: beeR, resting: true, keepOut: keep,
+                                        canvas: size, geometry: g)
+        #expect(atEdge.x + d.x - half >= BogBugLayer.edgeGap - CGFloat(0.01))
+        let off = BogBugLayer.clearOffset(at: CGPoint(x: -40, y: 300), half: half, radius: beeR, resting: false,
+                                          keepOut: keep, canvas: size, geometry: g)
+        #expect(abs(off.x) < CGFloat(0.01) && abs(off.y) < CGFloat(0.01))
+        let enter = BogBugLayer.clearOffset(at: CGPoint(x: 10, y: 300), half: half, radius: beeR, resting: false,
+                                            keepOut: keep, canvas: size, geometry: g)
+        #expect(enter.x > CGFloat(0) && enter.x <= CGFloat(10.01))
+        let bad = BogBugLayer.clearOffset(at: CGPoint(x: CGFloat.nan, y: 300), half: half, radius: beeR,
+                                          resting: true, keepOut: keep, canvas: size, geometry: g)
+        #expect(abs(bad.x) < CGFloat(0.01) && abs(bad.y) < CGFloat(0.01))
+        #expect(BogBugLayer.edgePush(-5, margin: 40, resting: true) < CGFloat(0.01))
+        #expect(BogBugLayer.edgePush(10, margin: 40, resting: true) > CGFloat(29.99))
+        // A fly parked beside SCORE is drawn clear of the HUD's corner, and on screen.
+        let fr: CGFloat = 25
+        let fh = BogBugLayer.footprintHalf(.housefly, radius: fr)
+        let corner = CGPoint(x: size.width - 60, y: size.height - 50)
+        let c = BogBugLayer.clearOffset(at: corner, half: fh, radius: fr, resting: true, keepOut: keep, canvas: size,
+                                        geometry: g)
+        let q = CGPoint(x: corner.x + c.x, y: corner.y + c.y)
+        let foot = CGRect(x: q.x - fh, y: q.y - fh, width: 2 * fh, height: 2 * fh)
+        var hits = 0
+        for k in keep where k.intersects(foot) { hits += 1 }
+        #expect(hits == 0)
+        #expect(foot.minX >= CGFloat(0) && foot.maxX <= size.width && foot.minY >= CGFloat(0)
+                && foot.maxY <= size.height)
+        // A bug resting on the midrib is drawn Core's clearance off it.
+        let mid = BogBugLayer.clearOffset(at: CGPoint(x: g.center.x + 5, y: g.center.y), half: fh, radius: fr,
+                                          resting: true, keepOut: keep, canvas: size, geometry: g)
+        let clearOfMidrib = abs(g.center.x + 5 + mid.x - g.center.x)
+        #expect(clearOfMidrib >= ScreenLayout.creaseHalfWidth + fr + CGFloat(15.9))
+        // In the trap, under the HUD's inflated corner: never moved by it.
+        let inTrap = CGPoint(x: g.center.x + 330, y: g.center.y + 180)
+        #expect(g.contains(inTrap))
+        let none = BogBugLayer.clearOffset(at: inTrap, half: fh, radius: fr, resting: false, keepOut: keep,
+                                           canvas: size, geometry: g)
+        #expect(abs(none.x) < CGFloat(0.01) && abs(none.y) < CGFloat(0.01))
+
+        // In the scene: a bee at the left edge, a fly by SCORE and a bumblebee by the pause button are all drawn whole
+        // and clear of the HUD's corners.
+        let scene = BogScene(layout: l)
+        #expect(scene.bugKeepOut == keep)
+        let s = TrapSnapshot(bugs: [
+            SceneTests.bug(1, .bee, CGPoint(x: 14, y: 320), .walking),
+            SceneTests.bug(2, .housefly, corner, .walking),
+            SceneTests.bug(3, .bumblebee, CGPoint(x: size.width - 80, y: size.height - 170), .arriving, height: 0.1),
+        ])
+        for _ in 0..<3 { scene.show(s, events: [], dt: 1.0 / 60.0) }
+        let rects = scene.bugRects
+        #expect(rects.count == 3)
+        for r in rects {
+            #expect(r.minX >= CGFloat(-0.5) && r.maxX <= size.width + CGFloat(0.5), "cut \(r)")
+            #expect(r.minY >= CGFloat(-0.5) && r.maxY <= size.height + CGFloat(0.5), "cut \(r)")
+            var inHUD = 0
+            for k in keep where k.intersects(r) { inHUD += 1 }
+            #expect(inHUD == 0, "in the HUD \(r)")
+        }
+        // The App's own plates replace the corners.
+        let plate = CGRect(x: 300, y: 20, width: 40, height: 40)
+        scene.hudKeepOut = [plate]
+        #expect(scene.bugKeepOut == [plate])
+        scene.hudKeepOut = nil
+        #expect(scene.bugKeepOut == keep)
+    }
+
+    /// REVIEW-5 #17 (19): the tired trap dims its face but keeps its green margin and back.
+    @Test func theTiredTrapKeepsItsGreenRim() {
+        let scene = BogScene(layout: SceneTests.duo)
+        var s = SceneTests.crowd()
+        s.phase = .tired(elapsed: 2)
+        for _ in 0..<240 { scene.show(s, events: [], dt: 1.0 / 60.0) }
+        #expect(scene.tiredFaceDim > CGFloat(0.3))
+        #expect(scene.marginShade < CGFloat(0.01))
+        let g = SceneTests.geometry
+        let im = BogPainter.image(width: g.sceneSize.width, height: g.sceneSize.height, scale: 1) { ctx, _ in
+            BogArt.drawLobeFaceSilhouette(ctx, side: 1, geometry: g)
+        }
+        if let im = im {
+            let y = Int(g.center.y)
+            #expect(SceneTests.pixel(im, x: Int(g.center.x + g.a * 0.5), yUp: y).a > 0.99)
+            #expect(SceneTests.pixel(im, x: Int(g.center.x + g.a - 1), yUp: y).a < 0.01)
+            #expect(SceneTests.pixel(im, x: Int(g.center.x + g.a + 4), yUp: y).a < 0.01)
+        } else {
+            Issue.record("the face silhouette did not draw")
+        }
+    }
+
+    /// REVIEW-5 #5 (16, 17, 35, 37): dusk is a peach sky with a warm sun top-left, night a deep blue (never teal), and
+    /// caught-bug juice is gold.
+    @Test func duskIsAPeachSkyAndNightIsBlue() {
+        let bog = TrapArt.palette.bog
+        let dusk = BogLight.key(at: 2)
+        let top = BogLight.litBog(bog, key: dusk, skyLevel: 1)
+        #expect(top.r > 0.8 && top.r > top.g + 0.1 && top.g > top.b, "top \(top.r) \(top.g) \(top.b)")
+        let mid = BogLight.litBog(bog, key: dusk, skyLevel: 0.5)
+        #expect(mid.r > mid.g, "mid \(mid.r) \(mid.g) \(mid.b)")
+        for clock in [3.0, 3.5, 4.0] {
+            let k = BogLight.key(at: clock)
+            for sky in [0.0, 1.0] {
+                let n = BogLight.litBog(bog, key: k, skyLevel: sky)
+                #expect(n.b > 1.5 * n.g && n.b > 2.5 * n.r, "night \(clock) \(sky): \(n.r) \(n.g) \(n.b)")
+            }
+        }
+        let scene = BogScene(layout: SceneTests.duo)
+        var s = SceneTests.crowd()
+        s.dayClock = 1
+        scene.show(s, events: [], dt: 1.0 / 60.0)
+        #expect(scene.bogSunAlpha < CGFloat(0.01))
+        s.dayClock = 2
+        for _ in 0..<120 { scene.show(s, events: [], dt: 1.0 / 60.0) }
+        #expect(scene.bogSunAlpha > CGFloat(0.3))
+        let splat = BogPainter.image(width: 96, height: 96, scale: 1) { ctx, sz in
+            BogArt.drawSplat(ctx, size: sz, seed: 0x5A1A7)
+        }
+        if let im = splat {
+            let c = SceneTests.average(im, x: 59, yUp: 37, n: 2)
+            #expect(c.r > 0.9 && c.g > 0.65 && c.b < 0.6, "splat \(c.r) \(c.g) \(c.b)")
+        } else {
+            Issue.record("the splat did not draw")
+        }
     }
 }

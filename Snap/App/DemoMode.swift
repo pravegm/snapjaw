@@ -7,12 +7,18 @@ import UIKit
 // Unknown keys are ignored. Every line CI greps starts with `SNAP-` (never rename them).
 //
 // Keys (design/ROUND-1.md "Demo mode")
-// - `screen=home|play|results|book|settings|lesson|pose|cover|icon|daily|badges`
+// - `screen=home|play|results|book|settings|lesson|pose|cover|icon|daily|badges|garden`
 //     home      Home (the title trap follows the hinge, or holds at `closure=`).
 //     play      straight into a run of `mode` (default feed). Implied by `mode=` without `screen`.
 //     results   the Results screen for `mode`: a REAL run of it played headless at launch by the pilot (`pilot=`,
 //               default casual) and recorded into the demo progress, so best, rank and Bug Book are all true.
 //     book / settings / daily   those pages.
+//     garden    R6: the Garden (the 8 trap varieties; with `progress=mid` three have grown and five are silhouettes
+//               with their rule; `late` all but Golden Glow).
+//     results   R6: also ticks the run's goals (the pilot really plays them), so Results shows the goals done, their
+//               growth and any new variety. `mode=daily` (scored) shows the streak and the Share button (with
+//               `progress=mid` or `late` the streak is 3 or 5 days). `mode=zen` plays 150 s, then ends the visit
+//               (the pause menu's End): no best, no leaderboard.
 //     lesson    the First Bite lesson (at `lessonStep=`, default 1).
 //     pose      force the pose card "Hold it open like a book" (over a run of `mode` if given, else Home).
 //     cover     force the cover-display card ("Open it up to carry on" and the score): a run of `mode` (default
@@ -22,14 +28,15 @@ import UIKit
 //     badges    R3: render the 12 Game Center achievement images, 1024 × 1024 opaque PNGs, to
 //               Documents/badges/<id>.png, one `SNAP-BADGE <id> <path>` line each, then `SNAP-T badges done <n>`
 //               (Home shows meanwhile).
-// - `mode=feed|daily|attract`     the run mode (`daily` = today's scored try; `attract`: snaps never run out).
+// - `mode=feed|daily|attract|zen` the run mode (`daily` = today's scored try; `attract`: snaps never run out;
+//                                 R6 `zen`: the Zen Bog, no snaps running out, no hunger, no leaderboard).
 // - `seed=<n>`                    the run seed (default 7 for feed/attract, so frames are stable; daily = today's).
 // - `pilot=novice|casual|expert|perfect`   Core's TrapPilot drives the trap. Without it `screen=play` takes the real
 //                                 hinge (Duo CI) or touch.
 // - `progress=fresh|mid|late`     seeded in-memory progress (fresh: nothing; mid: rank 4, 9 species, best 3,200;
 //                                 late: rank 10, 16 species, best 14,800). Demo runs never write UserDefaults.
 // - `freezeOn=landed|crowd|bee|snap|feast|sting|dusk|night|lastSnap|hungry|wilted|tired|results|firstHint|chain5|
-//             costlySting|drySnap|held`
+//             costlySting|drySnap|held|feastOpen|bigFeast|goalDone`
 //                                 stop stepping the session (the scene keeps drawing) at the first such moment, and
 //                                 print `SNAP-T freeze <tag>`. `snap` holds 0.12 s after the bite; `costlySting` (a sting
 //                                 that cost snaps) 0.2 s; feast, sting, lastSnap, wilted, chain5 (the chain's 5th step),
@@ -37,7 +44,11 @@ import UIKit
 //                                 next snap glyph drains and "Hungry… bite!" shows). `firstHint`: the opening's fold line
 //                                 ("Snap the halves together" / "Tap to snap") is on its plate. R5: `tired` holds
 //                                 1.0 s into the tired moment (`AppRules.tiredFreezeAt`: the numeral at 0, the banner
-//                                 up).
+//                                 up). R6: `bigFeast` (a FEAST event: 5+ bugs, or a Feast at ×4+) holds 0.45 s, so the
+//                                 hit-stop is over and the "FEAST!" banner and the gulp are up; `goalDone` freezes the
+//                                 moment a goal's toast ("Goal done! …") is on its plate.
+// - `variety=<raw>`               R6: draw this trap variety (`redDragon`, `b52`, …) whatever the progress has
+//                                 grown (CI frames of every variety).
 // - `firstRun=0|1`                R4: Sprout run 1's rules (14 snaps, no wilt, a free first sting). Unset: only
 //                                 `progress=fresh` plays them; every other play demo runs the standard rules.
 // - `freezeAfter=<s>`             freeze after s seconds of play (`SNAP-T freeze after`); with `freezeOn`, the moment
@@ -56,13 +67,28 @@ import UIKit
 // `SNAP-T paused closing`, `SNAP-T resumed`, `SNAP-T paused menu|background|pose`, `SNAP-T freeze <tag>`,
 // `SNAP-T frame 120`, `SNAP-T screen <route>`, `SNAP-T pose <pose>`, `SNAP-T lesson step <n> '<line>'`,
 // `SNAP-T run score=<n> bugs=<n> snaps=<n> seconds=<s>`, `SNAP-T icon ok|failed`, `SNAP-ICON <path>`.
+// R6: `SNAP-T goal done <id>`, `SNAP-T night cue nightGetsFast|lastLight`, `SNAP-T zen end bugs=<n> seconds=<s>`,
+// `SNAP-T results goals <n> growth=<n>`, `SNAP-T variety <raw>` (picked), `SNAP-T variety grown <raw,…>`,
+// `SNAP-T screen garden`.
+//
+// R6 CI frames (ROUND-6 App list):
+//   garden            `screen=garden;progress=mid` (and `progress=late`: two goal-grown cultivars, two still locked)
+//   zen play          `mode=zen;pilot=casual;progress=mid;freezeAfter=40`
+//   zen results       `screen=results;mode=zen;progress=mid`
+//   FEAST event       `mode=feed;pilot=expert;progress=mid;freezeOn=bigFeast`
+//   goal toast        `mode=feed;pilot=casual;progress=mid;freezeOn=goalDone`
+//   results + goals   `screen=results;mode=feed;pilot=casual;progress=mid`
+//   Daily + share     `screen=results;mode=daily;pilot=casual;progress=mid` (🔥 3 days, Share)
+//   a variety in play `mode=feed;pilot=casual;progress=late;variety=b52;freezeAfter=20`
 // (`SNAP-H <t> <angle>` hinge samples come from Feel's HingeReader.)
 
 struct DemoMode: Equatable {
     enum Screen: String, Equatable, CaseIterable {
         case home, play, results, book, settings, lesson, pose, cover, icon, daily, badges
+        /// R6: the Garden.
+        case garden
     }
-    enum ModeKey: String, Equatable { case feed, daily, attract }
+    enum ModeKey: String, Equatable { case feed, daily, attract, zen }
     enum Freeze: String, Equatable, CaseIterable {
         case landed, crowd, bee, snap, feast, sting, dusk, night, lastSnap, hungry, wilted, tired, results
         /// R4 (REVIEW-3 #2, #9, #10, #20): the opening's fold line on its plate; the chain's fifth step; a sting that
@@ -70,13 +96,16 @@ struct DemoMode: Equatable {
         case firstHint, chain5, costlySting, drySnap, held
         /// R5 (REVIEW-4 #3): a Feast with the trap open again (0.75 s on), for the store bite shot on phones.
         case feastOpen
+        /// R6: a FEAST event (5+ bugs, or ×4+), and a goal's live toast on its plate.
+        case bigFeast, goalDone
 
         /// Event moments hold a beat after the event; state moments freeze at once.
         var isEvent: Bool {
             switch self {
-            case .snap, .feast, .sting, .lastSnap, .hungry, .wilted, .chain5, .costlySting, .drySnap, .held, .feastOpen:
+            case .snap, .feast, .sting, .lastSnap, .hungry, .wilted, .chain5, .costlySting, .drySnap, .held, .feastOpen,
+                 .bigFeast:
                 return true
-            case .landed, .crowd, .bee, .dusk, .night, .tired, .results, .firstHint: return false
+            case .landed, .crowd, .bee, .dusk, .night, .tired, .results, .firstHint, .goalDone: return false
             }
         }
 
@@ -90,7 +119,8 @@ struct DemoMode: Equatable {
             case .feast, .sting, .lastSnap, .wilted, .chain5, .drySnap, .held: return 0.3
             case .hungry: return 0.5
             case .feastOpen: return 0.75
-            case .landed, .crowd, .bee, .dusk, .night, .tired, .results, .firstHint: return 0
+            case .bigFeast: return 0.45
+            case .landed, .crowd, .bee, .dusk, .night, .tired, .results, .firstHint, .goalDone: return 0
             }
         }
     }
@@ -116,6 +146,8 @@ struct DemoMode: Equatable {
     /// R4 (REVIEW-3 #2): `firstRun=1` plays Sprout run 1's rules (14 snaps, no wilt, a free first sting); `firstRun=0`
     /// never does. Unset: only `progress=fresh` does, so every other play demo runs the standard rules.
     var firstRun: Bool?
+    /// R6: `variety=`: the trap variety drawn (nil: the progress's chosen one).
+    var variety: TrapVariety?
 
     /// Whether a demo run gets the first-run rules.
     var playsFirstRun: Bool { AppRules.demoFirstRun(firstRun: firstRun, progress: progress) }
@@ -134,6 +166,7 @@ struct DemoMode: Equatable {
         case .feed: return .feed
         case .daily: return .daily(day: today, scored: true)
         case .attract: return .attract
+        case .zen: return .zen
         }
     }
 
@@ -175,6 +208,8 @@ struct DemoMode: Equatable {
             case "fold": config.fold = flag(value)
             case "sound": config.sound = flag(value)
             case "firstRun": config.firstRun = flag(value)
+            case "variety":
+                config.variety = TrapVariety.allCases.first { $0.rawValue.lowercased() == value.lowercased() }
             default: break
             }
         }
@@ -214,12 +249,16 @@ enum DemoPresets {
         var biggestBite: Int
         var longestChain: Int
         var dailies: [Int]
+        /// R6: goal ids done so far (Core's pool; `late` has done two of the Garden's goals).
+        var goalsDone: [String]
     }
 
     static let mid = Profile(runs: 14, rank: 4, species: 9, best: 3_200, biggestBite: 4, longestChain: 3,
-                             dailies: [2_640, 1_980])
+                             dailies: [2_640, 1_980], goalsDone: ["bite3", "spare3", "catch20", "feast2"])
     static let late = Profile(runs: 90, rank: 10, species: 16, best: 14_800, biggestBite: 6, longestChain: 7,
-                              dailies: [11_200, 9_350, 12_900, 8_740])
+                              dailies: [11_200, 9_350, 12_900, 8_740],
+                              goalsDone: ["bite4", "chain3", GoalBook.sawtoothGoal, "dragonfly3",
+                                          GoalBook.sharkToothGoal, "scarab"])
 
     static func progress(_ preset: DemoMode.Preset?, today: Int) -> ProgressData {
         switch preset ?? .fresh {
@@ -300,6 +339,18 @@ enum DemoPresets {
                                          lifetimeSpared: data.lifetimeSpared, speciesFound: data.speciesFound,
                                          alreadyEarned: [])
         data.achievements = Set(earned.map(\.id))
+        // R6: the Daily streak (the dailies are the days just before today), the goals done (no growth, so the rank
+        // stays the profile's), the goals drawn for the rank, and every grown variety already seen in the Garden.
+        data.bestStreak = p.dailies.count
+        data.chainTipSeen = p.longestChain > 0
+        data.rankBugs = data.lifetimeBugs
+        var book = GoalBookState(seed: UInt64(truncatingIfNeeded: p.runs &* 104_729 &+ p.best))
+        let done = p.goalsDone.filter { GoalBook.def($0) != nil }
+        book.everCompleted = done
+        book.recent = Array(done.suffix(Tuning.goalRecentMemory))
+        book.completedCount = done.count
+        data.goalBook = GoalBook.normalized(book, rank: data.rank)
+        data.varietiesSeen = Set(data.unlockedVarieties.map(\.rawValue))
         return data
     }
 }

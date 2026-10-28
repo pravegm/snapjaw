@@ -131,29 +131,26 @@ final class GameController: ObservableObject, SceneDriver {
     private var bannerText: String?
     private var passedBest = false
     private var appActive = true
-    /// R3: "Bees cost a snap!" shows until this session time (Sprout's free first sting).
-    private var beesToastUntil: Double = -1
     /// R3: Core's `hungry` fired and no bite or wilt has followed yet.
     private var hungryOn = false
     /// R3: the first Feast's one-time "+1 snap" label.
     private var feastsAtStart = 0
     private var snapGainShown = false
-    private var snapGainUntil: Double = -1
-    private var snapGainLabel = ""
     /// R4 (QA-2 #2–#4): what the snaps row last showed (it only ever moves toward Core's count), and Core's count
     /// on the last frame (a Feast's refund against the cap).
     private var shownSnaps: Int?
     private var lastCoreSnaps = 0
     /// R4 (REVIEW-3 #3): the free sting's green row flash and its "free!" tag.
     private var freeFlashUntil: Double = -1
-    /// R4 (REVIEW-3 #10): the one-time chain tag (a player's first chain step ever) and the "×1.5 held" chip.
+    /// R4 (REVIEW-3 #10): the one-time chain tag (R6 #14: the chain explainer, once ever) and the "held" chip glow.
     private var chainTagEligible = false
-    private var chainTagUntil: Double = -1
-    private var chainTagMultiplier = 1.5
     private var chainHeldUntil: Double = -1
-    /// R5 (REVIEW-4 #7): a costly sting's "−2 snaps" at the row.
-    private var snapLossUntil: Double = -1
-    private var snapLossLabel = ""
+    /// R6 (#6): one message at a time (every toast and tag; Core's hints when it's empty).
+    private var messages = MessageQueue()
+    /// R6: this run's goals, ticked live.
+    private var goalRun = GoalRun()
+    /// R6 Garden: the variety the scene last drew.
+    private var drawnVariety: TrapVariety?
 
     init(store: ProgressStore, settings: SettingsStore) {
         self.store = store
@@ -295,9 +292,9 @@ final class GameController: ObservableObject, SceneDriver {
                     stingCost += cost
                 }
                 // Sprout's free first sting (REVIEW-3 #3): the hint slot says what it would have cost, and the row
-                // flashes green with "free!".
+                // flashes green. R6 (#6, frame 43): the plate alone says it (no "free!" tag beside it).
                 if AppRules.isFreeSting(event, mode: session.mode) {
-                    beesToastUntil = snapshot.time + Self.toastSeconds
+                    messages.post(.plate(.beesCost), seconds: Self.toastSeconds, now: snapshot.time, interrupt: true)
                     freeFlashUntil = snapshot.time + Self.freeFlashSeconds
                     snapped = true
                     AppTrace.t("SNAP-T toast bees-cost")
@@ -309,24 +306,25 @@ final class GameController: ObservableObject, SceneDriver {
                 let full = session.mode != .lesson
                     && AppRules.refundHitTheCap(before: lastCoreSnaps, after: snapshot.snapsLeft, back: back,
                                                 max: snapshot.snapsMax)
-                if full {
+                if full && session.mode != .zen {
                     // ROUND-4: a Feast at the cap says "+1 (full)" (the numeral never dips).
-                    snapGainUntil = snapshot.time + Self.snapGainSeconds
-                    snapGainLabel = AppRules.snapGainText(back, full: true)
+                    messages.post(.tag(.gain(AppRules.snapGainText(back, full: true))), seconds: Self.snapGainSeconds,
+                                  now: snapshot.time, interrupt: true)
                     snapped = true
-                } else if back > 0 && !snapGainShown && feastsAtStart == 0 && session.mode != .lesson {
+                } else if back > 0 && !snapGainShown && feastsAtStart == 0 && session.mode != .lesson
+                            && session.mode != .zen {
                     // The first Feast ever: its flying glyph is labelled once (REVIEW-2 #12).
                     snapGainShown = true
-                    snapGainUntil = snapshot.time + Self.snapGainSeconds
-                    snapGainLabel = AppRules.snapGainText(back)
+                    messages.post(.tag(.gain(AppRules.snapGainText(back))), seconds: Self.snapGainSeconds,
+                                  now: snapshot.time, interrupt: true)
                     snapped = true
                 }
             case let .chainUp(_, multiplier):
-                // REVIEW-3 #10: a player's first chain step ever is named, once, in the hint slot.
+                // REVIEW-3 #10, R6 (#14): the chain chip is explained once ever, at a player's first chain step.
                 if chainTagEligible && session.mode != .lesson {
                     chainTagEligible = false
-                    chainTagUntil = snapshot.time + Self.toastSeconds
-                    chainTagMultiplier = multiplier
+                    store.markChainTipSeen()
+                    messages.post(.plate(.chainTag(multiplier)), seconds: Self.toastSeconds, now: snapshot.time)
                     snapped = true
                     AppTrace.t("SNAP-T toast chain")
                 }
@@ -338,11 +336,28 @@ final class GameController: ObservableObject, SceneDriver {
             chainHeldUntil = snapshot.time + Self.chainHeldSeconds
             snapped = true
         }
-        if stingCost > 0 && session.mode != .lesson {
+        if stingCost > 0 && session.mode != .lesson && session.mode != .zen {
             // R5 (REVIEW-4 #7): "−1 snap" / "−2 snaps" at the row (one tag for the bite's whole cost).
-            snapLossUntil = snapshot.time + Self.snapGainSeconds
-            snapLossLabel = AppRules.snapLossText(stingCost)
+            messages.post(.tag(.loss(AppRules.snapLossText(stingCost))), seconds: Self.snapGainSeconds,
+                          now: snapshot.time, interrupt: true)
             snapped = true
+        }
+        // R6: the goals tick live: a toast each (through the queue) and Feel's chime, after `handle` (above), so a
+        // goal a bite completed chimes once the bite's sounds are over.
+        let done = goalRun.note(events)
+        for g in done {
+            messages.post(.plate(.goalDone(g.title)), seconds: AppRules.goalToastSeconds, now: snapshot.time)
+            feedback.goalCompleted(bonus: goalRun.completed.count >= GoalBridge.slots && g.id == done.last?.id)
+            snapped = true
+            AppTrace.t("SNAP-T goal done " + g.id)
+        }
+        // R6 (Core #19): the night's telegraph ("The night gets fast…", "Last light…") as a toast, in its turn.
+        for event in events {
+            guard case let .waveStarted(index, _) = event, let cue = TrapRules.nightCue(wave: index, mode: session.mode)
+            else { continue }
+            messages.post(.plate(.nightCue(cue)), seconds: Self.toastSeconds, now: snapshot.time)
+            snapped = true
+            AppTrace.t("SNAP-T night cue " + cue.rawValue)
         }
         if AppTrace.enabled && now - lastTrapLog >= Self.trapLogInterval {
             lastTrapLog = now
@@ -403,6 +418,12 @@ final class GameController: ObservableObject, SceneDriver {
         setInput(kind)
         // QA-1 #8: a run that moved onto the hinge times its snaps from now on.
         if kind == .hinge { tally.hingeTiming = true }
+        // R6 (#13, REVIEW-5 P1-4): the lesson's words follow the first hinge sample at once (the Duo's lines, never a
+        // frame of "tap").
+        if let script = lessonScript {
+            if lessonHingeLike() { lessonHasPose = true }
+            publishLesson(script)
+        }
         refreshIdleTimer()
     }
 
@@ -468,6 +489,8 @@ final class GameController: ObservableObject, SceneDriver {
         newScene.driver = self
         scene = newScene
         sceneGeneration += 1
+        drawnVariety = nil
+        applyVariety()
         newScene.reset()
         if let p = snapsAnchor { SceneHooks.setSnapsAnchor(newScene, p) }
         SceneHooks.setSnapsRow(newScene, snapsRow)
@@ -495,8 +518,8 @@ final class GameController: ObservableObject, SceneDriver {
         if background, isLiveRun, !isDemo, let session, !recorded {
             // A kill in the background must not lose the run: keep its result so far until we're back.
             let partial = tally.result(mode: session.mode, seed: session.seed, snapshot: session.snapshot)
-            if ProgressRules.worthRecording(partial) {
-                store.saveCheckpoint(partial)
+            if ProgressRules.worthRecording(partial, goals: goalRun.report) {
+                store.saveCheckpoint(partial, goals: goalRun.report)
                 checkpointSaved = true
             }
             if !isShut { openMenu() }
@@ -606,6 +629,11 @@ final class GameController: ObservableObject, SceneDriver {
         guard p.x.isFinite, p.y.isFinite, p != snapsAnchor else { return }
         snapsAnchor = p
         SceneHooks.setSnapsAnchor(scene, p)
+    }
+
+    /// R6 (Scene #7): the play HUD's corners in scene space (PlayLayer reports them with the snaps anchor).
+    func setHUDKeepOut(_ rects: [CGRect]) {
+        SceneHooks.setHUDKeepOut(scene, rects)
     }
 
     // MARK: - Home's live bog
@@ -739,10 +767,59 @@ final class GameController: ObservableObject, SceneDriver {
         start(.daily(day: today, scored: false))
     }
 
+    /// R6: Home's Zen Bog.
+    func playZen() {
+        feedback.uiConfirm()
+        start(.zen)
+    }
+
     /// Results' Again (a Daily is always practised: `AppRules.againMode`).
     func again() {
         feedback.uiConfirm()
         start(summary.map { AppRules.againMode($0.result.mode) } ?? .feed)
+    }
+
+    /// R6 Zen: the pause menu's End. The visit is filed as a finished run (no best, no leaderboard; the Bug Book and
+    /// the goals count) and Results shows it.
+    func endZen() {
+        guard mode == .zen, let session, !recorded else { return }
+        feedback.uiConfirm()
+        clearRunPauses()
+        let result = tally.result(mode: .zen, seed: session.seed, snapshot: session.snapshot)
+        recorded = true
+        checkpointSaved = false
+        endWatchTask?.cancel()
+        let outcome = store.record(result, today: today, goals: goalRun.report)
+        GameCenterManager.shared.report(result: result, outcome: outcome, progress: store.data)
+        AppTrace.t("SNAP-T zen end bugs=\(result.bugsCaught) seconds=\(Int(result.seconds.isFinite ? result.seconds : 0))")
+        summary = makeSummary(result, outcome: outcome)
+        refreshIdleTimer()
+        showResults()
+    }
+
+    /// R6: the goals as the pause menu shows them (this run's progress, ticked live).
+    var pauseGoals: [GoalLine] {
+        guard route == .playing else { return [] }
+        return goalRun.lines
+    }
+
+    /// R6 Garden: the variety drawn (demo `variety=` wins).
+    var trapVariety: TrapVariety { demo?.variety ?? store.data.chosenVariety }
+
+    /// R6 Garden: picks a grown variety; the scene, Home and Results draw it from now on.
+    func chooseVariety(_ v: TrapVariety) {
+        guard store.chooseVariety(v) else { return }
+        feedback.uiTap()
+        AppTrace.t("SNAP-T variety \(v.rawValue)")
+        applyVariety()
+    }
+
+    /// The scene draws the chosen variety (set only when it changes).
+    private func applyVariety() {
+        let v = trapVariety
+        guard v != drawnVariety else { return }
+        drawnVariety = v
+        SceneHooks.setVariety(scene, v)
     }
 
     func openMenu() {
@@ -767,7 +844,7 @@ final class GameController: ObservableObject, SceneDriver {
             startLesson(replay: lessonReplay)
         case let .daily(day, _):
             start(.daily(day: day, scored: false))
-        case .feed, .attract:
+        case .feed, .attract, .zen:
             start(mode)
         }
     }
@@ -788,11 +865,16 @@ final class GameController: ObservableObject, SceneDriver {
         sceneHeld = false
         scene?.isPaused = false
         feedback.silence()
+        feedback.zen = false
+        messages.clear()
+        goalRun = GoalRun()
         hud.update(HUDValues())
         shownSnaps = nil
+        applyVariety()
         if freshBog { makeHomeSession() }
-        // QA-2 #7: Home has no snaps row.
+        // QA-2 #7: Home has no snaps row. R6: Home's HUD corners are the Scene's defaults.
         SceneHooks.setShowsEconomy(scene, false)
+        SceneHooks.setHUDKeepOut(scene, nil)
         // A snap made on a menu is never delivered on Home's first frame either.
         if hinge.hasHinge { hinge.reset(at: CACurrentMediaTime()) }
         setRoute(.home)
@@ -949,19 +1031,26 @@ final class GameController: ObservableObject, SceneDriver {
         homeSession = nil
         wilts = 0
         stings = 0
-        beesToastUntil = -1
         hungryOn = false
         feastsAtStart = store.data.feasts
         snapGainShown = false
-        snapGainUntil = -1
         shownSnaps = nil
         lastCoreSnaps = newSession.snapshot.snapsLeft
         freeFlashUntil = -1
-        chainTagEligible = store.data.longestChain == 0 && m != .lesson
-        chainTagUntil = -1
+        // R6 (#14): the chain explainer shows once ever (a persisted flag, so a seeded demo profile can show it too).
+        chainTagEligible = !store.data.chainTipSeen && m != .lesson && m != .attract
         chainHeldUntil = -1
-        snapLossUntil = -1
-        snapLossLabel = ""
+        messages.clear()
+        // R6: the run plays the goals Home showed (written now); Feel's Zen bed for the Zen Bog only.
+        switch m {
+        case .feed, .daily, .zen:
+            goalRun = GoalRun(book: store.prepareGoals(), mode: m,
+                              startPhase: WaveFactory.phase(forWave: max(options.firstWave, 1)))
+        case .attract, .lesson:
+            goalRun = GoalRun()
+        }
+        feedback.zen = FeedbackDirector.wantsZen(m)
+        applyVariety()
         touch = TouchTrapSource()
         fixedSource.closure = demo?.closure ?? 0
         pilotRun = demo?.pilot.map { PilotRun(skill: $0, seed: runSeed &+ 101) }
@@ -980,7 +1069,8 @@ final class GameController: ObservableObject, SceneDriver {
         lastHint = nil
         bannerText = AppRules.startBanner(m, touch: touchWording)
         scene?.reset()
-        SceneHooks.setShowsEconomy(scene, true)
+        // R6 Zen: no snaps row, so no economy glyphs either.
+        SceneHooks.setShowsEconomy(scene, m != .zen)
         setRoute(m == .lesson ? .lesson : .playing)
         publishHUD(newSession.snapshot, now: CACurrentMediaTime(), force: true)
         refreshIdleTimer()
@@ -1010,7 +1100,7 @@ final class GameController: ObservableObject, SceneDriver {
     /// unless `firstRun=1` or `progress=fresh` (REVIEW-3 #2: every CI run was a Sprout run 1, so hunger and the costly
     /// sting were never seen); those play run 1.
     private func runRules(for m: RunMode) -> (startSnaps: Int?, sproutRun: Int?) {
-        let sprout = AppRules.startSnaps(mode: m, lifetimeBugs: store.data.lifetimeBugs)
+        let sprout = AppRules.startSnaps(mode: m, lifetimeBugs: store.data.growth)
         guard let demo else {
             return (sprout, AppRules.sproutFeedRun(mode: m, feedRuns: store.data.feedRuns))
         }
@@ -1034,7 +1124,7 @@ final class GameController: ObservableObject, SceneDriver {
 
     private func seed(for mode: RunMode) -> UInt64 {
         switch mode {
-        case .feed:
+        case .feed, .zen:
             if let s = demo?.seed { return s }
             if isDemo { return DemoMode.defaultSeed }
             return UInt64.random(in: 1...UInt64.max)
@@ -1059,11 +1149,11 @@ final class GameController: ObservableObject, SceneDriver {
         recorded = true
         checkpointSaved = false
         let partial = tally.result(mode: session.mode, seed: session.seed, snapshot: session.snapshot)
-        guard ProgressRules.worthRecording(partial) else {
+        guard ProgressRules.worthRecording(partial, goals: goalRun.report) else {
             store.clearCheckpoint()
             return
         }
-        let outcome = store.recordAbandoned(partial, today: today)
+        let outcome = store.recordAbandoned(partial, today: today, goals: goalRun.report)
         GameCenterManager.shared.report(result: partial, outcome: outcome, progress: store.data)
         AppTrace.t("SNAP-T abandoned score=\(partial.score) bugs=\(partial.bugsCaught)")
     }
@@ -1091,7 +1181,9 @@ final class GameController: ObservableObject, SceneDriver {
         var steps = 0
         let open = TrapInput()
         while !session.isFinished && steps < 600 {
-            for e in session.step(dt: AppRules.maxStep, input: open) { tally.note(e) }
+            let events = session.step(dt: AppRules.maxStep, input: open)
+            for e in events { tally.note(e) }
+            _ = goalRun.note(events)
             steps += 1
         }
         AppTrace.t("SNAP-T ending finished headless steps=\(steps)")
@@ -1104,7 +1196,7 @@ final class GameController: ObservableObject, SceneDriver {
         recorded = true
         checkpointSaved = false
         endWatchTask?.cancel()
-        let outcome = store.record(result, today: today)
+        let outcome = store.record(result, today: today, goals: goalRun.report)
         GameCenterManager.shared.report(result: result, outcome: outcome, progress: store.data)
         AppTrace.t("SNAP-T run score=\(result.score) bugs=\(result.bugsCaught) snaps=\(result.snaps) "
                    + "seconds=\(Int(result.seconds.isFinite ? result.seconds : 0))")
@@ -1133,9 +1225,15 @@ final class GameController: ObservableObject, SceneDriver {
         clearRunPauses()
         feedback.silence()
         setRoute(.results)
-        if summary.outcome.rankedUp || !summary.outcome.newSpecies.isEmpty || summary.outcome.showsNewBest {
-            feedback.celebrate()
+        let o = summary.outcome
+        let celebrated = o.rankedUp || !o.newSpecies.isEmpty || o.showsNewBest
+        if celebrated { feedback.celebrate() }
+        if !o.newVarieties.isEmpty {
+            // R6: a new trap in the Garden gets Feel's fanfare (after the rank-up's own, if there is one).
+            feedback.varietyUnlocked(after: celebrated ? 0.8 : 0)
+            AppTrace.t("SNAP-T variety grown " + o.newVarieties.map(\.rawValue).joined(separator: ","))
         }
+        if !o.goalsDone.isEmpty { AppTrace.t("SNAP-T results goals \(o.goalsDone.count) growth=\(o.goalGrowth)") }
         if demo?.freezeOn == .results { AppTrace.t("SNAP-T freeze results") }
     }
 
@@ -1155,6 +1253,9 @@ final class GameController: ObservableObject, SceneDriver {
         case .lesson:
             title = "First Bite"
             again = "Feed"
+        case .zen:
+            title = "Zen Bog"
+            again = "Back to the bog"
         }
         let rank = outcome.rankAfter
         let next = rank + 1 < PlantRanks.count ? PlantRanks.title(rank + 1) : nil
@@ -1177,18 +1278,26 @@ final class GameController: ObservableObject, SceneDriver {
         if route == .lesson, let h = core, !AppRules.lessonShowsHint(h) { core = nil }
         if let h = core, AppRules.hintText(h, touch: touchWording) == nil { core = nil }
         let live = AppRules.isLive(s.phase)
-        var hint: HUDHint? = core.map { HUDHint.trap($0) }
-        if s.time < beesToastUntil {
-            // The free sting's toast wins over everything for its beat.
-            hint = .beesCost
-        } else if s.time < chainTagUntil {
-            hint = .chainTag(chainTagMultiplier)
-        } else if AppRules.showsFoldHint(mode: s.mode, wave: s.wave, snapsMade: tally.snaps, time: s.time,
-                                         after: Self.bannerSeconds, coreHint: core) {
-            hint = .foldInput
+        // R6 (#6): one message at a time. The queue's toast or tag, else the state hint (Core's, or the opening's
+        // fold line); a warning keeps a waiting toast's clock still.
+        var state: HUDHint? = core.map { HUDHint.trap($0) }
+        if state == nil && AppRules.showsFoldHint(mode: s.mode, wave: s.wave, snapsMade: tally.snaps, time: s.time,
+                                                  after: Self.bannerSeconds, coreHint: core) {
+            state = .foldInput
         }
-        if isPaused || frozen || !live { hint = nil }
+        let warning = core.map { AppRules.hintIsWarning($0) } ?? false
+        var message = messages.shown(now: s.time, hint: state, warning: warning)
+        if let m = message, AppRules.hidesMessage(m, paused: isPaused, frozen: frozen, live: live) { message = nil }
+        var hint: HUDHint?
+        var tag: HUDTag?
+        switch message {
+        case let .plate(h)?: hint = h
+        case let .tag(t)?: tag = t
+        case nil: break
+        }
         var values = HUDValues()
+        values.tag = tag
+        values.zen = s.mode == .zen
         values.score = s.score
         values.best = s.best
         values.snapsMax = s.snapsMax
@@ -1196,7 +1305,7 @@ final class GameController: ObservableObject, SceneDriver {
         values.chainMultiplier = s.chainMultiplier
         values.chainHeld = live && s.time < chainHeldUntil && s.chainMultiplier > 1.01
         values.hint = hint
-        values.banner = hint == nil && s.time < Self.bannerSeconds && !isPaused ? bannerText : nil
+        values.banner = message == nil && s.time < Self.bannerSeconds && !isPaused ? bannerText : nil
         values.passedBest = passedBest
         values.dayPhase = s.dayPhase
         values.lesson = route == .lesson
@@ -1220,9 +1329,11 @@ final class GameController: ObservableObject, SceneDriver {
         // QA-2 #10 (Core R4): keyed on Core's own `hungry` hint, which stays up through a dry snap or a bee bite until a
         // catch or the wilt, and drops while the clock is paused (an empty or bee-only trap). R5: never beside a halo.
         values.hungry = live && !isPaused && s.hint == .hungry && !haloInTrap
-        if hint != nil || values.banner != nil { values.popRects = SceneHooks.livePopRects(scene) }
-        values.snapGain = s.time < snapGainUntil && live ? snapGainLabel : nil
-        values.snapLoss = s.time < snapLossUntil && !isPaused ? snapLossLabel : nil
+        if hint != nil || values.banner != nil {
+            values.popRects = SceneHooks.livePopRects(scene)
+            // R6 (#6, frame 43): and the bugs in the trap (a plate never covers its subject).
+            values.subjectRects = AppRules.subjectRects(s)
+        }
         if route == .lesson {
             values.lessonSnaps = lessonDisplay?.showsSnaps ?? false
             values.ringSnaps = lessonDisplay?.isFinal ?? false
@@ -1235,7 +1346,7 @@ final class GameController: ObservableObject, SceneDriver {
         let urgent = force || hint != lastHint || values.tired != hud.values.tired
             || values.snapsLeft != hud.values.snapsLeft || values.rowFlashing != hud.values.rowFlashing
             || values.freeFlash != hud.values.freeFlash || values.chainHeld != hud.values.chainHeld
-            || values.snapLoss != hud.values.snapLoss
+            || values.tag != hud.values.tag
         guard urgent || now - lastHUD >= Self.hudInterval else { return }
         lastHUD = now
         lastHint = hint
@@ -1294,9 +1405,18 @@ final class GameController: ObservableObject, SceneDriver {
             start(d.runMode(today: day))
             if let session {
                 var t = tally
-                DemoRunner.playToEnd(session, skill: d.pilot ?? .casual, seed: session.seed, onEvent: { e in t.note(e) })
+                var g = goalRun
+                // R6: the goals tick as the pilot really plays (Results shows them done, with their growth).
+                let zen = session.mode == .zen
+                DemoRunner.play(session, skill: d.pilot ?? .casual, seed: session.seed,
+                                seconds: zen ? Self.zenResultsSeconds : 900,
+                                onEvent: { e in t.note(e) },
+                                onStep: { events, _ in _ = g.note(events) })
                 tally = t
-                if session.isFinished {
+                goalRun = g
+                if zen {
+                    endZen()
+                } else if session.isFinished {
                     handleFinished(immediate: true)
                 } else {
                     goHome()
@@ -1311,6 +1431,9 @@ final class GameController: ObservableObject, SceneDriver {
         case .daily:
             goHome()
             setRoute(.daily)
+        case .garden:
+            goHome()
+            setRoute(.garden)
         case .lesson:
             let step = LessonScript.Step(rawValue: d.lessonStep ?? 1) ?? .pose
             startLesson(replay: false, at: step)
@@ -1343,6 +1466,8 @@ final class GameController: ObservableObject, SceneDriver {
 
     /// Demo `screen=cover`: session seconds played before the cover card shows.
     static let coverPlaySeconds: Double = 24
+    /// R6 demo `screen=results;mode=zen`: session seconds of the Zen Bog played before End.
+    static let zenResultsSeconds: Double = 150
 
     private func demoAfterStep(_ s: TrapSnapshot, events: [TrapEvent]) {
         guard let demo, !frozen else { return }
@@ -1426,6 +1551,11 @@ final class GameController: ObservableObject, SceneDriver {
             return events.contains(.drySnap)
         case .held:
             return AppRules.chainHeld(events, chain: s.chain)
+        case .bigFeast:
+            return AppRules.isBigFeast(events)
+        case .goalDone:
+            if case .goalDone? = hint { return true }
+            return false
         }
     }
 

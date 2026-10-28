@@ -46,15 +46,20 @@ final class BogLight {
         // dusky sage, with a rose lift and a peach sky glow from the top on the bog only (under the trap). Over the
         // trap there is only a faint rose haze, a deep warm overlay and a faint rim (kept off the margin: no salmon
         // ring).
-        Key(env: RGBA(1.0, 0.74, 0.82), haze: RGBA(1, 0.68, 0.62), hazeAlpha: 0.1, bug: RGBA(1, 0.72, 0.66),
+        // R6 (#5): a real peach dusk. The multiply cuts the bog's green harder (0.62) and keeps its blue, a peach lift
+        // warms it all over, and the peach sky glow from the top is stronger (0.52): the top of the bog reads peach
+        // (≈ #E1B084), the bottom a warm dusky green. A warm sun glow sits top-left (`sun`, `sunAlpha`), on the bog only.
+        Key(env: RGBA(1.0, 0.62, 0.7), haze: RGBA(1, 0.7, 0.6), hazeAlpha: 0.1, bug: RGBA(1, 0.72, 0.62),
             bugAmount: 0.14, lobe: RGBA(0.85, 0.35, 0.22), rim: RGBA(1, 0.7, 0.62), rimAlpha: 0.12,
-            lift: RGBA(1, 0.6, 0.62), liftAlpha: 0.12, sky: RGBA(1, 0.62, 0.5), skyAlpha: 0.34),
-        Key(env: RGBA(0.42, 0.55, 0.98), haze: RGBA(0.3, 0.42, 0.95), hazeAlpha: 0.08, bug: RGBA(0.3, 0.38, 0.75),
+            lift: RGBA(1, 0.58, 0.5), liftAlpha: 0.14, sky: RGBA(1, 0.6, 0.44), skyAlpha: 0.52),
+        // R6 (#5): a blue night, not teal: the multiply keeps only a little red and green, and a faint blue lift and
+        // sky glow from the top make the bog a deep moonlit blue (≈ #0B2B4A bottom → #1A3E77 top).
+        Key(env: RGBA(0.28, 0.4, 1.0), haze: RGBA(0.3, 0.42, 0.95), hazeAlpha: 0.08, bug: RGBA(0.3, 0.38, 0.75),
             bugAmount: 0.3, lobe: RGBA(0.05, 0.04, 0.1), rim: RGBA(0.66, 0.76, 1), rimAlpha: 0.3,
-            lift: RGBA(0.4, 0.5, 1), liftAlpha: 0, sky: RGBA(0.4, 0.5, 1), skyAlpha: 0),
-        Key(env: RGBA(0.36, 0.46, 0.9), haze: RGBA(0.25, 0.32, 0.85), hazeAlpha: 0.07, bug: RGBA(0.26, 0.32, 0.7),
+            lift: RGBA(0.22, 0.32, 0.9), liftAlpha: 0.07, sky: RGBA(0.3, 0.4, 1), skyAlpha: 0.1),
+        Key(env: RGBA(0.24, 0.34, 0.95), haze: RGBA(0.25, 0.32, 0.85), hazeAlpha: 0.07, bug: RGBA(0.26, 0.32, 0.7),
             bugAmount: 0.36, lobe: RGBA(0.04, 0.03, 0.08), rim: RGBA(0.62, 0.72, 1), rimAlpha: 0.28,
-            lift: RGBA(0.4, 0.5, 1), liftAlpha: 0, sky: RGBA(0.4, 0.5, 1), skyAlpha: 0),
+            lift: RGBA(0.2, 0.28, 0.85), liftAlpha: 0.06, sky: RGBA(0.28, 0.36, 0.95), skyAlpha: 0.08),
     ]
 
     /// R5 (#9, tests): the bog colour `c` as lit by `k` at sky level `skyLevel` (0 the bottom of the screen … 1 the
@@ -130,6 +135,8 @@ final class BogLight {
     let lift: SKSpriteNode
     /// R5 (#9): scene z 6.5 (additive, over the bog only, a ramp from the top): the dusk's peach/rose sky.
     let sky: SKSpriteNode
+    /// R6 (#5): scene z 6.6 (additive, over the bog only): the dusk's warm sun glow, top-left.
+    let sun: SKSpriteNode
     /// Scene z 21 (additive sky haze).
     let haze: SKSpriteNode
     /// Scene z 21.5: dew twinkles (day) and the bog's fireflies (night).
@@ -158,6 +165,11 @@ final class BogLight {
     private(set) var liftRGBA = RGBA(1, 1, 1)
     /// R5 (#9): the sky glow's alpha now (tests: a peach dusk on the bog).
     private(set) var skyAlpha: CGFloat = 0
+    /// R6 (#5): the dusk sun glow's alpha now (tests).
+    private(set) var sunAlpha: CGFloat = 0
+    /// R6 (#5): the sun glow's colour and its strength at full dusk.
+    static let sunColor = RGBA(1, 0.62, 0.34)
+    static let sunPeak: CGFloat = 0.42
     private var pulseLevel: CGFloat = 0
     private var twinkles: [(SKSpriteNode, CGFloat)] = []
     private var flies: [(core: SKSpriteNode, glow: SKSpriteNode, home: CGPoint, phase: CGFloat)] = []
@@ -168,11 +180,13 @@ final class BogLight {
         let lf = SKSpriteNode(color: .white, size: CGSize(width: 10, height: 10))
         let sk = SKSpriteNode(texture: BogTextures.haze, size: CGSize(width: 10, height: 10))
         let h = SKSpriteNode(texture: BogTextures.haze, size: CGSize(width: 10, height: 10))
+        let sn = SKSpriteNode(texture: BogTextures.glow, size: CGSize(width: 10, height: 10))
         let s = SKNode()
         let v = SKSpriteNode(texture: BogTextures.vignette, size: CGSize(width: 10, height: 10))
         tint = t
         lift = lf
         sky = sk
+        sun = sn
         haze = h
         sparkleRoot = s
         vignette = v
@@ -187,6 +201,12 @@ final class BogLight {
         sk.zPosition = 6.5
         sk.alpha = 0
         sk.isHidden = true
+        sn.blendMode = .add
+        sn.color = BogPaint.ui(BogLight.sunColor)
+        sn.colorBlendFactor = 1
+        sn.zPosition = 6.6
+        sn.alpha = 0
+        sn.isHidden = true
         h.blendMode = .add
         h.colorBlendFactor = 1
         h.zPosition = 21
@@ -211,6 +231,10 @@ final class BogLight {
         sky.position = CGPoint(x: size.width / 2, y: size.height - (size.height * 0.75 - pad) / 2)
         vignette.size = size
         vignette.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        // The sun sits just off the top-left corner (the light comes from there all day).
+        let sr = size.height * 1.5
+        sun.size = CGSize(width: sr * 1.5, height: sr)
+        sun.position = CGPoint(x: size.width * 0.08, y: size.height * 1.02)
 
         for (n, _) in twinkles { n.removeFromParent() }
         for f in flies {
@@ -295,6 +319,9 @@ final class BogLight {
             sky.color = BogPaint.ui(RGBA(k.sky.r, k.sky.g, k.sky.b, 1))
             sky.alpha = skyAlpha
             sky.isHidden = skyAlpha < 0.003
+            sunAlpha = BogLight.sunPeak * dusk
+            sun.alpha = sunAlpha
+            sun.isHidden = sunAlpha < 0.003
             haze.color = BogPaint.ui(RGBA(k.haze.r, k.haze.g, k.haze.b, 1))
             haze.alpha = CGFloat(k.hazeAlpha)
             bugTint = BogPaint.ui(RGBA(k.bug.r, k.bug.g, k.bug.b, 1))

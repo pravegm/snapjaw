@@ -169,8 +169,9 @@ struct TrapPilot {
             if TrapPilot.isArriving(a) { v.arriving += 1 }
             var sipping: Bool = false
             if case .sipping = a { sipping = true }
+            // R6: the session's pace wave (the Zen Bog never speeds up).
             let r: Double = TrapRules.reaction(info, sipping: sipping, flying: TrapRules.isFlying(a), onRim: b.onRim,
-                                               wave: snap.wave)
+                                               wave: TrapRules.paceWave(snap.wave, mode: snap.mode))
             if d <= r {
                 v.catchable += 1
                 sum += info.points

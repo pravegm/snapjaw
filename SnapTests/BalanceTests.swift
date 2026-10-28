@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import Snap
 
-// MARK: - Headless balance playtest (Round 5)
+// MARK: - Headless balance playtest (Round 6)
 //
 // Every PilotSkill plays real TrapSessions (mode .feed, SNAP_BAL_SEEDS seeds, default 16; CI sets 8) at 60 Hz, the
 // pilot fed the previous frame's snapshot the way GameController feeds it. Each run is capped at 10 min. R4: every
@@ -11,20 +11,25 @@ import Testing
 // any balance test asks, and the whole table is printed then as ONE block between "SNAP-BAL ==== table" and
 // "SNAP-BAL ==== end", so it sits at the start of the balance section of the CI log:
 //   SNAP-BAL skill=casual score=5206 p10=… p90=… seconds=147.4 snaps=24.5 caught=70.5 stings=2.5 maxStings=6 …
-// tools/balance-sim.js (a line-by-line port) predicts on these 16 seeds (design/notes/core-R5.md):
+// tools/balance-sim.js (a line-by-line port) predicts on these 16 seeds (design/notes/core-R6.md):
 //   novice  230 score      /  48 s / 10.5 snaps / 1 sting (median) / 0 wilts
 //   casual  4,875          / 141 s / 24 snaps   / 3 stings / longest chain 5 / 0 wilts
-//   expert  25,210         / 335 s / 43 snaps   / 0 stings / 2 wilts
-//   perfect 42,133         / 393 s / 43 snaps   / never stung / 2 wilts
+//   expert  25,210         / 327 s / 42.5 snaps / 0 stings / 3 wilts
+//   perfect 42,133         / 354 s / 41.5 snaps / never stung / 4 wilts
+//   R6 (#19): the last light (Feed, wave 85 on: the hunger clock ticks whatever is in the trap) ends every run, so the
+//   expert / perfect without pilotGiveUp end too: 427 / 432 s, none capped (R5: 14 of 16 capped at 600 s).
+//   R6 Zen Bog (SessionOptions.for(.zen), 600 s): never tires or wilts, snaps never change; casual catches ~325 bugs,
+//   perfect ~500, and both still catch ≥ 50 in the last 2 minutes (the day loops, so the night never outruns them).
 //   Sprout run 1 (SessionOptions.sprout(feedRun: 1): 14 snaps, no wilting, the first sting free, a calm morning):
 //   novice 101 s, casual 166 s. R5 taper: novice Sprout run 2 (13 snaps, free sting, calm) 100 s; run 3 (12, calm) 90 s.
-//   R5 (REVIEW-4 P2): expert / perfect without Tuning.pilotGiveUp (TrapPilot.givesUp false, reported only): 14 of 16
-//   capped at 600 s, 8 / 5 wilts. SNAP_BAL_NOGIVEUP=0 skips those runs.
-// (8 seeds: casual 128 s, chain 5, 0 wilts; expert 2 wilts; perfect 389 s, 2.5 wilts; novice Sprout runs 1 / 2 / 3
-// 98 / 95 / 85 s.)
+//   R5 (REVIEW-4 P2): expert / perfect without Tuning.pilotGiveUp (TrapPilot.givesUp false). SNAP_BAL_NOGIVEUP=0
+//   skips those runs. R6: asserted never capped (64-seed sim max < 550 s).
+// (8 seeds: casual 128 s, chain 5, 0 wilts; expert 327 s, 3 wilts; perfect 350 s, 4 wilts; novice Sprout runs
+// 1 / 2 / 3 98 / 95 / 85 s; without pilotGiveUp expert 425 s, perfect 446 s, none capped.)
 // R4 targets (asserted on medians): perfect runs 4–8 min (240–480 s) with ≤ 5 wilts; expert ≤ 6 wilts; casual runs
 // 100–240 s and 18–45 snaps, with a longest chain of 3–6 and ≤ 2 wilts; the novice and casual pilots' Sprout run 1
-// lasts ≥ 90 s and never wilts; R5: the novice's Sprout run 2 lasts ≥ 75 s and run 3 ≥ 60 s; plus R1's: novice < casual < expert ≤ perfect, perfect never stung, novice stung (R3:
+// lasts ≥ 90 s and never wilts; R5: the novice's Sprout run 2 lasts ≥ 75 s and run 3 ≥ 60 s; R6: expert ≤ 360 s and
+// no run without pilotGiveUp capped; plus R1's: novice < casual < expert ≤ perfect, perfect never stung, novice stung (R3:
 // median ≥ 0.5). The late night (reactions × 0.96 per wave to 0.2, lingers × 0.92 to 0.2) ends every run, so no skill
 // may hit the 10-minute cap.
 
@@ -98,6 +103,14 @@ final class SnapBalanceMemo: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return sprout[skill] ?? []
+    }
+
+    /// R6: the expert / perfect runs without Tuning.pilotGiveUp (empty when SNAP_BAL_NOGIVEUP=0).
+    func noGiveUpRuns(_ skill: PilotSkill) -> [SnapBalanceRun] {
+        build()
+        lock.lock()
+        defer { lock.unlock() }
+        return stubbornRuns[skill] ?? []
     }
 
     /// R5: the novice's Sprout run `run` (2 or 3) on every seed.
@@ -287,6 +300,61 @@ enum SnapBalanceHarness {
                               beesSpared: r.beesSpared, wilts: wilts, capped: capped)
     }
 
+    /// R6: what a Zen Bog run did in `seconds` (SessionOptions.for(.zen), 60 Hz).
+    struct ZenRun {
+        var finished: Bool
+        var tired: Bool
+        var snapsChanged: Int
+        var wilts: Int
+        var caught: Int
+        var caughtLate: Int
+        var stings: Int
+        var longestChain: Int
+        var morningsAfterNight: Int
+    }
+
+    /// R6: a Zen Bog run of `seconds`; `caughtLate` counts the catches in the last `lateSeconds`.
+    static func runZen(_ skill: PilotSkill, seed: UInt64, seconds: Double, lateSeconds: Double) -> ZenRun {
+        let geometry = TrapGeometry(sceneSize: CGSize(width: ScreenLayout.canvasWidth, height: ScreenLayout.canvasHeight))
+        let session = TrapSession(mode: .zen, seed: seed, best: 1, geometry: geometry,
+                                  options: SessionOptions.for(.zen))
+        var pilot = TrapPilot(skill: skill, seed: seed &* 7 &+ 1)
+        let start: Int = session.snapshot.snapsLeft
+        var t: Double = 0
+        var frames: Int = 0
+        var tired: Bool = false
+        var changed: Int = 0
+        var wilts: Int = 0
+        var caught: Int = 0
+        var late: Int = 0
+        var mornings: Int = 0
+        var lastPhase: DayPhase = .morning
+        let maxFrames: Int = Int((seconds / frameDt).rounded())
+        let lateFrom: Int = maxFrames - Int((lateSeconds / frameDt).rounded())
+        while !session.isFinished && frames < maxFrames {
+            let out: PilotOutput = pilot.step(dt: frameDt, time: t, snapshot: session.snapshot)
+            for e in session.step(dt: frameDt, input: out.input) {
+                switch e {
+                case .tired: tired = true
+                case .wilted: wilts += 1
+                case .bugCaught:
+                    caught += 1
+                    if frames >= lateFrom { late += 1 }
+                case .dayPhaseChanged(let ph):
+                    if ph == .morning && lastPhase == .night { mornings += 1 }
+                    lastPhase = ph
+                default: break
+                }
+            }
+            if session.snapshot.snapsLeft != start { changed += 1 }
+            t += frameDt
+            frames += 1
+        }
+        let r: RunResult = session.partialResult()
+        return ZenRun(finished: session.isFinished, tired: tired, snapsChanged: changed, wilts: wilts, caught: caught,
+                      caughtLate: late, stings: r.stings, longestChain: r.longestChain, morningsAfterNight: mornings)
+    }
+
     static func percentile(_ values: [Double], _ p: Double) -> Double {
         if values.isEmpty { return 0 }
         let sorted: [Double] = values.sorted()
@@ -403,6 +471,42 @@ struct BalanceTests {
         #expect(runs.count == SnapBalanceHarness.seedCount)
         #expect(seconds >= target, "Sprout run \(run) seconds \(seconds), target \(target): \(line)")
         #expect(capped == 0, "\(line)")
+    }
+
+    /// R6 (#19, REVIEW-5 P2-5): an expert run lasts at most about 6 minutes (median).
+    @Test func expertRunLength() {
+        let runs: [SnapBalanceRun] = SnapBalanceMemo.shared.runs(.expert)
+        let line: String = SnapBalanceHarness.report(.expert, runs)
+        let seconds: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in r.seconds }
+        #expect(seconds <= 360, "expert seconds \(seconds): \(line)")
+    }
+
+    /// R6 (#19): the last light ends even a hand that never gives up waiting (R5: 14 of 16 such runs hit the cap).
+    @Test(arguments: SnapBalanceMemo.giveUpSkills)
+    func patientRunsEnd(skill: PilotSkill) {
+        if !SnapBalanceMemo.reportsNoGiveUp { return }
+        let runs: [SnapBalanceRun] = SnapBalanceMemo.shared.noGiveUpRuns(skill)
+        let line: String = "nogiveup " + SnapBalanceHarness.report(skill, runs)
+        let capped: Int = runs.filter { (r: SnapBalanceRun) -> Bool in r.capped }.count
+        #expect(runs.count == SnapBalanceHarness.seedCount)
+        #expect(capped == 0, "\(line)")
+    }
+
+    /// R6: the Zen Bog never ends, never wilts and never changes its snaps; its day loops, so after 10 minutes the
+    /// pilot still catches (the sim: ≥ 50 in the last 2 minutes for casual, ≥ 89 for perfect; asserted ≥ 10).
+    @Test(arguments: [PilotSkill.casual, PilotSkill.perfect])
+    func zenBogNeverEnds(skill: PilotSkill) {
+        var i: Int = 0
+        while i < 2 {
+            let z = SnapBalanceHarness.runZen(skill, seed: SnapBalanceHarness.seed(i), seconds: 600, lateSeconds: 120)
+            let line: String = "SNAP-BAL zen \(skill.rawValue) seed=\(SnapBalanceHarness.seed(i)) caught=\(z.caught) late=\(z.caughtLate) stings=\(z.stings) chain=\(z.longestChain) loops=\(z.morningsAfterNight)"
+            print(line)
+            #expect(!z.finished && !z.tired, "\(line)")
+            #expect(z.snapsChanged == 0 && z.wilts == 0, "\(line)")
+            #expect(z.caughtLate >= 10, "\(line)")
+            #expect(z.morningsAfterNight >= 1, "\(line)")
+            i += 1
+        }
     }
 
     @Test func perfectRunLength() {

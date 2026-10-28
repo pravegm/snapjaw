@@ -62,3 +62,16 @@
 41-play-dry-snap|screen=play;seed=7;pilot=novice;freezeOn=drySnap|90|A dry snap: nothing caught, the chain broken|SNAP-T freeze drySnap
 42-play-held|screen=play;seed=7;wave=6;pilot=casual;freezeOn=held|150|A 1-bug clean bite holding the chain: "×1.5 held"|SNAP-T freeze held
 43-play-sprout-first-sting|screen=play;seed=7;wave=15;pilot=novice;progress=fresh;firstRun=1;freezeOn=sting|120|Sprout run 1: the free first sting, "Bees and wasps cost snaps. This one's free!" in the hint slot, the row flashing green|SNAP-T event stung
+# R6 (ROUND-6): goals, the Garden, Zen, the Daily streak and share, FEAST as an event, the varieties
+44-garden-mid|screen=garden;progress=mid|8|The Garden: 8 flytrap varieties, three grown, the rest silhouettes with their unlock rule|SNAP-T screen garden
+45-garden-late|screen=garden;progress=late|8|The Garden late on: most varieties grown, two still locked|SNAP-T screen garden
+46-zen-play|screen=play;mode=zen;pilot=casual;progress=mid;freezeAfter=40|60|Zen Bog: a relaxed bog, no snaps running out, no hunger|SNAP-T freeze
+47-zen-results|screen=results;mode=zen;progress=mid|20|Zen Results: bugs, Bug Book, goals; no leaderboard|SNAP-T canvas
+48-big-feast|screen=play;mode=feed;pilot=expert;progress=mid;freezeOn=bigFeast|240|A FEAST event: 5+ bugs, the gold burst, the "FEAST!" banner, the gulp|SNAP-T freeze bigFeast
+49-goal-done|screen=play;mode=feed;pilot=casual;progress=mid;freezeOn=goalDone|240|A goal completed mid-run: the goal toast on its plate|SNAP-T freeze goalDone
+50-results-goals|screen=results;pilot=casual;progress=mid|240|Results with the run's goals ticked and the growth|SNAP-T canvas
+51-daily-share|screen=results;mode=daily;pilot=casual;progress=mid|240|Daily Results: the streak (fire, 3 days) and the Share button|SNAP-T canvas
+52-home-goals|screen=home;progress=mid|8|Home with the goals card, the streak, Zen and Garden buttons|SNAP-T canvas
+53-variety-red-dragon|screen=play;seed=7;wave=6;pilot=perfect;progress=mid;variety=redDragon;freezeOn=crowd|60|Red Dragon variety in play: crimson inside and out|SNAP-T freeze crowd
+54-variety-b52|screen=play;seed=7;wave=6;pilot=perfect;progress=mid;variety=b52;freezeOn=crowd|60|B52 variety in play: big lobes, chunky cilia|SNAP-T freeze crowd
+55-variety-golden|screen=play;seed=7;wave=6;pilot=perfect;progress=late;variety=goldenGlow;freezeOn=crowd|60|Golden Glow variety: the gold sheen|SNAP-T freeze crowd

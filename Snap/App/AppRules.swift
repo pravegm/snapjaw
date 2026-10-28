@@ -99,10 +99,24 @@ enum AppRules {
     /// R4 (REVIEW-3 #10): the card's chain line.
     static let chainLesson = "Big bites in a row build a chain."
 
-    /// R4 (REVIEW-3 #10): the one-time tag on a player's first chain step ("Chain ×1.5! Keep the big bites coming").
+    /// R4 (REVIEW-3 #10): the one-time tag on a player's first chain step. R6 (#14, SCORE-R5 D2 #2): it explains the
+    /// chip: "Chain ×1.5! Big bites in a row multiply."
     static func chainTagText(_ multiplier: Double) -> String {
-        "Chain " + multiplierText(multiplier) + "! Keep the big bites coming"
+        "Chain " + multiplierText(multiplier) + "! Big bites in a row multiply."
     }
+
+    /// R6: a goal's live toast ("Goal done! A 5-bug bite").
+    static func goalDoneText(_ title: String) -> String { goalDoneHeading + " " + title }
+    /// R6 (Core #19): the late night's telegraph.
+    static func nightCueText(_ c: NightCue) -> String {
+        switch c {
+        case .nightGetsFast: return "The night gets fast…"
+        case .lastLight: return "Last light…"
+        }
+    }
+
+    /// R6: how long a goal toast stays (session s; its clock stands still under a warning).
+    static let goalToastSeconds: Double = 2.6
 
     /// The plate's words for an App hint (Core's, the first wave's fold line, the free sting's toast, the first chain
     /// tag). Pure; tested.
@@ -113,6 +127,8 @@ enum AppRules {
         case .foldInput: return touch ? "Tap to snap" : "Snap the halves together"
         case .beesCost: return freeStingCopy
         case let .chainTag(m): return chainTagText(m)
+        case let .goalDone(t): return goalDoneText(t)
+        case let .nightCue(c): return nightCueText(c)
         }
     }
 
@@ -120,15 +136,15 @@ enum AppRules {
     static func hudHintIsWarning(_ hint: HUDHint) -> Bool {
         switch hint {
         case let .trap(h): return hintIsWarning(h)
-        case .foldInput, .beesCost, .chainTag: return false
+        case .foldInput, .beesCost, .chainTag, .goalDone, .nightCue: return false
         }
     }
 
     /// The App's two-sentence toasts set a size smaller (`HintFit.font(compact:long:)`), so they fit three lines.
     static func hudHintIsLong(_ hint: HUDHint) -> Bool {
         switch hint {
-        case .trap, .foldInput: return false
-        case .beesCost, .chainTag: return true
+        case .trap, .foldInput, .nightCue: return false
+        case .beesCost, .chainTag, .goalDone: return true
         }
     }
 
@@ -142,6 +158,8 @@ enum AppRules {
         var out: [(text: String, long: Bool, lesson: Bool)] = []
         var hints: [HUDHint] = core.map { HUDHint.trap($0) } + [.foldInput, .beesCost]
         hints += chainTagSamples.map { HUDHint.chainTag($0) }
+        // R6: the late night's two cues (the goal toasts have their own plate: `goalToastTitles`).
+        hints += [HUDHint.nightCue(.nightGetsFast), HUDHint.nightCue(.lastLight)]
         for touch in [false, true] {
             for h in hints {
                 guard let t = hudHintText(h, touch: touch), !out.contains(where: { $0.text == t }) else { continue }
@@ -156,6 +174,11 @@ enum AppRules {
     /// Every line the hint plate can show, on both inputs.
     static var allHintCopy: [String] { allHintLines.map(\.text) }
 
+    /// R6: every goal title a toast can show (Core's whole pool). The plate sets "Goal done!" on its own line and the
+    /// title under it in the toast size (`HintPlate`).
+    static var goalToastTitles: [String] { GoalBridge.allIDs.map { GoalBridge.title($0) } }
+    static let goalDoneHeading = "Goal done!"
+
     /// R4 (REVIEW-3 #9): how long the first-wave line may wait for its chance (session s after the run-start line).
     static let foldHintWindow: Double = 40
 
@@ -165,7 +188,7 @@ enum AppRules {
     static func showsFoldHint(mode: RunMode, wave: Int, snapsMade: Int, time: Double, after banner: Double,
                               coreHint: TrapHint?) -> Bool {
         switch mode {
-        case .feed, .daily: break
+        case .feed, .daily, .zen: break
         case .attract, .lesson: return false
         }
         return wave <= 2 && snapsMade == 0 && time >= banner && time < banner + foldHintWindow && coreHint == nil
@@ -182,8 +205,9 @@ enum AppRules {
     /// The lesson shows only the hints it teaches with ("Bee! Wait…" in the bee step, "Now!" when the crowd sips).
     static func lessonShowsHint(_ hint: TrapHint) -> Bool {
         switch hint {
-        case .beeInside, .crowd: return true
-        case .bendALittle, .quick, .openUp, .lastSnap, .hungry: return false
+        // R6 (#6, frame 07): the bee step's card already says "Never eat a bee. Wait…", so the plate stays quiet.
+        case .crowd: return true
+        case .beeInside, .bendALittle, .quick, .openUp, .lastSnap, .hungry: return false
         }
     }
 
@@ -239,7 +263,8 @@ enum AppRules {
         guard case let .stung(_, _, cost) = event, cost <= 0 else { return false }
         switch mode {
         case .feed, .daily: return true
-        case .attract, .lesson: return false
+        // R6: in the Zen Bog every sting is free (it only breaks the chain), so there's no "this one's free".
+        case .attract, .lesson, .zen: return false
         }
     }
 
@@ -340,8 +365,23 @@ enum AppRules {
 
     /// R5 (ROUND-5, player 7's ask): the Daily's one-line share, e.g. "Snapjaw Daily Bog #301 · 4,210 · biggest bite
     /// 6 🪤" (day 0 is 1 Jan, bog #1; no link until launch). Pure; tested.
-    static func dailyShareText(day: Int, score: Int, biggestBite: Int, brand: String = AppBrand.name) -> String {
-        brand + " Daily Bog #\(max(day, 0) + 1) · " + formatted(max(score, 0)) + " · biggest bite \(max(biggestBite, 0)) 🪤"
+    /// R6: with the streak ("… · biggest bite 6 · 🔥 4 days 🪤") once there is one.
+    static func dailyShareText(day: Int, score: Int, biggestBite: Int, streak: Int = 0,
+                               brand: String = AppBrand.name) -> String {
+        var line = brand + " Daily Bog #\(max(day, 0) + 1) · " + formatted(max(score, 0))
+            + " · biggest bite \(max(biggestBite, 0))"
+        if let s = ProgressRules.streakText(streak) { line += " · " + s }
+        return line + " 🪤"
+    }
+
+    /// R6: a FEAST event (ROUND-6 decision 5): a clean bite of 5 or more bugs, or one at ×4 chain or more; a bite with
+    /// a stinger never is (founder rule). The Scene's own rule (`FeastEvent.isBig`), so the freeze lands on the bite
+    /// that shows the banner. Pure; tested.
+    static func isBigFeast(_ events: [TrapEvent]) -> Bool {
+        events.contains { e in
+            if case let .snapped(r) = e { return FeastEvent.isBig(r) }
+            return false
+        }
     }
 
     /// A Feast's refund ran into the cap: the row was (or became) full. `before`: the snaps before the bite. Pure;
@@ -424,9 +464,13 @@ enum AppRules {
         switch mode {
         case .feed: return touch ? "Tap to snap. Spare bees." : "Wait for a crowd. Spare bees."
         case let .daily(day, scored): return scored ? dailyTitle(day: day) : "Practice: no score today"
+        case .zen: return zenBanner
         case .attract, .lesson: return nil
         }
     }
+
+    /// R6: the Zen Bog's opening line.
+    static let zenBanner = "Zen Bog. No rush at all."
 
     /// "×1.5" (one decimal only when it has one).
     static func multiplierText(_ m: Double) -> String {
@@ -613,6 +657,31 @@ enum AppRules {
         return out
     }
 
+    /// R6 (#6): the queue's message is hidden while paused or frozen; once the trap is tired only a tag at the row
+    /// (the last bite's cost) still shows. Pure; tested.
+    static func hidesMessage(_ m: HUDMessage, paused: Bool, frozen: Bool, live: Bool) -> Bool {
+        if paused || frozen { return true }
+        if live { return false }
+        if case .tag = m { return false }
+        return true
+    }
+
+    /// R6 (#6, frame 43: the plate sat on the trap's flies): the boxes (scene space) round every bug in play on the
+    /// trap, a little grown and snapped out to 16 pt so the HUD republishes only when one really moves. Pure; tested.
+    static func subjectRects(_ s: TrapSnapshot, pad: CGFloat = 8) -> [CGRect] {
+        var out: [CGRect] = []
+        for b in s.bugs where b.inTrap && inPlay(b.activity) && b.activity != .arriving {
+            let r = BugCatalog.info(b.species).radius + pad
+            guard b.position.x.isFinite, b.position.y.isFinite, r.isFinite else { continue }
+            let x0 = ((b.position.x - r) / 16).rounded(.down) * 16
+            let y0 = ((b.position.y - r) / 16).rounded(.down) * 16
+            let x1 = ((b.position.x + r) / 16).rounded(.up) * 16
+            let y1 = ((b.position.y + r) / 16).rounded(.up) * 16
+            out.append(CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0))
+        }
+        return out
+    }
+
     /// The Scene's live pops, rounded out to 8 pt so the HUD republishes only when one really moves. Pure; tested.
     static func roundedRects(_ rects: [CGRect]) -> [CGRect] {
         rects.compactMap { r -> CGRect? in
@@ -658,11 +727,36 @@ enum AppRules {
         return "\(formatted(gap)) short of your best"
     }
 
+    // MARK: R6 (#16): the next Bug Book page
+
+    /// The page to aim for next: the unfound species that comes earliest in the day (Bug Book order breaks ties);
+    /// nil when the Book is full. Pure; tested.
+    static func nextBookTarget(_ data: ProgressData) -> BugSpecies? {
+        let open = BugSpecies.allCases.filter { !data.isFound($0) }
+        return open.min { a, b in
+            let pa = BugCatalog.info(a).firstPhase.rawValue + (a.isProtected ? 1 : 0)
+            let pb = BugCatalog.info(b).firstPhase.rawValue + (b.isProtected ? 1 : 0)
+            if pa != pb { return pa < pb }
+            return (BugSpecies.allCases.firstIndex(of: a) ?? 0) < (BugSpecies.allCases.firstIndex(of: b) ?? 0)
+        }
+    }
+
+    /// Results' line for it, from the Book's own clue ("Something new comes out at dusk."). Pure; tested.
+    static func nextBookLine(_ s: BugSpecies) -> String {
+        if s.isProtected { return "Spare a striped one to fill its page." }
+        switch BugCatalog.info(s).firstPhase {
+        case .morning: return "Something new buzzes by in the morning."
+        case .noon: return "Something new turns up at noon."
+        case .dusk: return "Something new comes out at dusk."
+        case .night: return "Something new comes out at night."
+        }
+    }
+
     /// Results' Again: a Daily is always practised (one scored try a day).
     static func againMode(_ mode: RunMode) -> RunMode {
         switch mode {
         case let .daily(day, _): return .daily(day: day, scored: false)
-        case .feed, .attract: return mode
+        case .feed, .attract, .zen: return mode
         case .lesson: return .feed
         }
     }

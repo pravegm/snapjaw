@@ -176,8 +176,10 @@ extension AppCanvas {
     func trapOutline() -> [CGPoint] {
         let g = layout.geometry
         var pts: [CGPoint] = []
-        pts.reserveCapacity(1_900)
-        let rx = g.a + Self.leafBack
+        pts.reserveCapacity(14_000)
+        // R6: B52's lobes are drawn wider about the midrib (`TrapLook.spread`).
+        let spread = max(TrapVariety.allCases.map { TrapArt.look($0).spread }.max() ?? 1, 1)
+        let rx = g.a * spread + Self.leafBack
         let ry = g.b + Self.leafBack
         let n = 720
         for i in 0..<n {
@@ -185,8 +187,10 @@ extension AppCanvas {
             pts.append(screenPoint(CGPoint(x: g.center.x + rx * cos(t), y: g.center.y + ry * sin(t))))
         }
         let steps = 20
+        // R6: every variety's cilia (B52's are longer and its lobes wider), so the HUD sits in the same place
+        // whichever trap the Garden picked.
         for side in [-1, 1] {
-            for tooth in TrapArt.teeth(side: side, geometry: g) {
+            for tooth in TrapVariety.allCases.flatMap({ TrapArt.teeth(side: side, geometry: g, variety: $0) }) {
                 let dx = cos(tooth.angle)
                 let dy = sin(tooth.angle)
                 // The tooth's own x axis once placed (`TrapArt.toothTransform` rotates by angle − π/2).
@@ -260,6 +264,9 @@ struct HUDLayout: Equatable {
     var numeral: CGRect
     /// R5 (REVIEW-4 #13): the numeral's type size (it was 15/17 pt beside a 32/40 pt score).
     var numeralSize: CGFloat
+    /// R6 (#14): the numeral stands above the rows with "SNAPS" under it. False: there was no room off the cilia, so
+    /// it sits on the lower row's inner side as in R5 (no caption).
+    var numeralLabeled = false
     /// The glyph's width (its height is `glyphAspect` of that).
     var glyph: CGFloat
     var hint: CGRect
@@ -284,13 +291,27 @@ struct HUDLayout: Equatable {
     static let glyphPhone: CGFloat = 16
     /// Glyphs shrink towards this when a row would touch the cilia.
     static let glyphMin: CGFloat = 12
-    /// The numeral's box (fixed: "14" never clips). R5 (REVIEW-4 #13): wider and taller for the bigger numeral.
-    static let snapNumeralW: CGFloat = 36
-    static let numeralDuo: CGFloat = 24
-    static let numeralPhone: CGFloat = 20
-    /// The numeral box's height: the lower row's glyph plus a little (the digits' cap height fits it; the box stays in
-    /// the band the cilia check clears).
+    /// The numeral's box (fixed: "14" never clips). R5 (REVIEW-4 #13): wider and taller for the bigger numeral. R6
+    /// (#14, SCORE-R5 D2 #2: "label the snaps like the score"): a bigger numeral with "SNAPS" under it, in the outer
+    /// corner just above the rows (the score's mirror), so the rows keep their full glyphs.
+    static let snapNumeralW: CGFloat = 52
+    static let snapNumeralWPhone: CGFloat = 44
+    static let numeralDuo: CGFloat = 30
+    static let numeralPhone: CGFloat = 24
+    /// R5's numeral (the fallback on the lower row): its box and type size.
+    static let snapNumeralWRow: CGFloat = 36
+    static let numeralRowDuo: CGFloat = 24
+    static let numeralRowPhone: CGFloat = 20
+    /// The "SNAPS" caption under it (the score's caption size).
+    static let numeralLabelDuo: CGFloat = 12
+    static let numeralLabelPhone: CGFloat = 11
+    static let numeralLabel = "SNAPS"
+    /// R5's numeral box height (a row's glyph plus a little): the block is never shorter.
     static func numeralHeight(glyph g: CGFloat) -> CGFloat { g * glyphAspect + 3 }
+    /// R6: the numeral block's height (the digits, then the caption).
+    static func numeralBlockHeight(compact: Bool) -> CGFloat {
+        compact ? numeralPhone * 1.05 + numeralLabelPhone + 1 : numeralDuo * 1.05 + numeralLabelDuo + 1
+    }
     /// The trap's face ends at radius 1.
     static let clearRadius: CGFloat = 1.0
     /// The hint plate: three short lines at most. Never narrower than `hintMin`.
@@ -351,37 +372,86 @@ struct HUDLayout: Equatable {
         // shrink (rarely) until every row clears the cilia.
         let rows = max((slotCount + snapColumns - 1) / snapColumns, 1)
         let bottomY = c.size.height - max(c.insets.bottom, 0) - (fold ? 10 : 4)
-        func rowRects(_ g: CGFloat) -> [CGRect] {
+        /// `numeralOnRow`: R5's lower row also holds the numeral, on its inner side.
+        func rowRects(_ g: CGFloat, numeralOnRow: Bool) -> [CGRect] {
             let gh = g * glyphAspect
             var out: [CGRect] = []
             for r in 0..<rows {
                 let fromBottom = CGFloat(rows - 1 - r)
                 let y = bottomY - gh - fromBottom * (gh + snapRowGap)
-                let w = rowsWidth(glyph: g) + (r == rows - 1 ? snapNumeralW + 4 : 0)
+                let w = rowsWidth(glyph: g) + (numeralOnRow && r == rows - 1 ? snapNumeralWRow + 4 : 0)
                 out.append(box(textOuter, y, w, gh))
             }
             return out
         }
-        var glyph: CGFloat = compact ? glyphPhone : glyphDuo
-        var rects = rowRects(glyph)
-        while glyph > glyphMin && rects.contains(where: { room(textOuter, $0.minY, $0.height) < $0.width }) {
-            glyph -= 1
-            rects = rowRects(glyph)
+        /// The glyph size (shrunk only if a row would touch the cilia) and its rows.
+        func fitRows(numeralOnRow: Bool) -> (glyph: CGFloat, rects: [CGRect]) {
+            var g: CGFloat = compact ? glyphPhone : glyphDuo
+            var rs = rowRects(g, numeralOnRow: numeralOnRow)
+            while g > glyphMin && rs.contains(where: { room(textOuter, $0.minY, $0.height) < $0.width }) {
+                g -= 1
+                rs = rowRects(g, numeralOnRow: numeralOnRow)
+            }
+            return (g, rs)
         }
-        let lower = rects.last ?? box(textOuter, bottomY - 14, 200, 14)
-        let numeralH = numeralHeight(glyph: glyph)
-        let numeral = CGRect(x: right ? lower.minX : lower.maxX - snapNumeralW,
-                             y: min(lower.midY - numeralH / 2, bottomY - numeralH), width: snapNumeralW, height: numeralH)
-        let snaps = rects.reduce(numeral) { $0.union($1) }
-
-        // The chain chip: above the snaps.
         let chainH: CGFloat = compact ? 28 : 32
-        let chainY = (rects.first?.minY ?? bottomY) - 8 - chainH
-        let chainRoom = room(textOuter, chainY, chainH)
         let fullW = compact ? chainFullPhone : chainFullDuo
         let shortW = compact ? chainShortPhone : chainShortDuo
-        let chainCompact = chainRoom < fullW
-        let chain = box(textOuter, chainY, chainCompact ? shortW : fullW, chainH)
+        /// The chain chip in the first of `spots` (edge, top) with room off the cilia: "Chain ×2" if any has room
+        /// for it, else "×2"; nil when none has room even for that.
+        func chainSpot(_ spots: [(CGFloat, CGFloat)]) -> (rect: CGRect, compact: Bool)? {
+            for (edge, top) in spots where room(edge, top, chainH) >= fullW {
+                return (box(edge, top, fullW, chainH), false)
+            }
+            for (edge, top) in spots where room(edge, top, chainH) >= shortW {
+                return (box(edge, top, shortW, chainH), true)
+            }
+            return nil
+        }
+
+        // R6 (#14): the numeral with "SNAPS" under it in the outer corner just above the rows, the chain chip beside
+        // it (or above it). Only where all of it clears the cilia; else R5's layout (the numeral on the lower row).
+        let six = fitRows(numeralOnRow: false)
+        let blockW = compact ? snapNumeralWPhone : snapNumeralW
+        let blockH = max(numeralBlockHeight(compact: compact), numeralHeight(glyph: six.glyph))
+        let sixTop = six.rects.first?.minY ?? bottomY
+        let block = box(textOuter, sixTop - 3 - blockH, blockW, blockH)
+        let blockFits = room(textOuter, block.minY, block.height) >= blockW
+        let spots: [(CGFloat, CGFloat)] = [(right ? block.minX - 8 : block.maxX + 8, block.midY - chainH / 2),
+                                           (textOuter, block.minY - 6 - chainH)]
+        let sixChain = blockFits ? chainSpot(spots) : nil
+
+        let glyph: CGFloat
+        let rects: [CGRect]
+        let numeral: CGRect
+        let chain: CGRect
+        let chainCompact: Bool
+        let numeralSize: CGFloat
+        let labeled: Bool
+        if let sixChain {
+            glyph = six.glyph
+            rects = six.rects
+            numeral = block
+            chain = sixChain.rect
+            chainCompact = sixChain.compact
+            numeralSize = compact ? numeralPhone : numeralDuo
+            labeled = true
+        } else {
+            let five = fitRows(numeralOnRow: true)
+            glyph = five.glyph
+            rects = five.rects
+            let row = five.rects.last ?? box(textOuter, bottomY - 14, 200, 14)
+            let nh = numeralHeight(glyph: five.glyph)
+            numeral = CGRect(x: right ? row.minX : row.maxX - snapNumeralWRow, y: min(row.midY - nh / 2, bottomY - nh),
+                             width: snapNumeralWRow, height: nh)
+            let chainY = (five.rects.first?.minY ?? bottomY) - 8 - chainH
+            chainCompact = room(textOuter, chainY, chainH) < fullW
+            chain = box(textOuter, chainY, chainCompact ? shortW : fullW, chainH)
+            numeralSize = compact ? numeralRowPhone : numeralRowDuo
+            labeled = false
+        }
+        let lower = rects.last ?? box(textOuter, bottomY - 14, 200, 14)
+        let snaps = rects.reduce(numeral) { $0.union($1) }
 
         // The hint: the inner top of the HUD page (off the thumbs, the crease and the score).
         let hintH = compact ? hintHeightPhone : hintHeightDuo
@@ -403,7 +473,7 @@ struct HUDLayout: Equatable {
         let tiredH: CGFloat = compact ? 76 : 90
         let tired = CGRect(x: page.midX - tiredW / 2, y: c.size.height / 2 - tiredH / 2, width: tiredW, height: tiredH)
         return HUDLayout(pause: pause, back: back, score: score, chain: chain, chainCompact: chainCompact, snaps: snaps,
-                         snapRowRects: rects, numeral: numeral, numeralSize: compact ? numeralPhone : numeralDuo,
+                         snapRowRects: rects, numeral: numeral, numeralSize: numeralSize, numeralLabeled: labeled,
                          glyph: glyph, hint: hint, lessonHint: lessonHint,
                          lesson: lesson, card: card, tired: tired, snapRows: rows, trailing: right)
     }
@@ -429,10 +499,18 @@ struct HUDLayout: Equatable {
     /// R4 (REVIEW-3 #3): where the hint plate goes this frame: its own slot (the inner top), else the other one (the
     /// inner bottom) when a live pop is under it, else nowhere until the pop has gone (a plate never covers a pop).
     /// `low`: the plate sits in the lower slot. Pure; tested.
-    static func hintSlot(primary: CGRect, alternate: CGRect, pops: [CGRect]) -> (rect: CGRect, low: Bool)? {
-        if !pops.contains(where: { $0.intersects(primary) }) { return (primary, false) }
-        if !pops.contains(where: { $0.intersects(alternate) }) { return (alternate, true) }
-        return nil
+    /// R6 (#6, frame 43: the plate sat on the trap's flies): `subjects` are the bugs on the trap; a slot that covers
+    /// none is preferred (the plate's own slot first), else the one covering fewer. Pops are never covered.
+    static func hintSlot(primary: CGRect, alternate: CGRect, pops: [CGRect],
+                         subjects: [CGRect] = []) -> (rect: CGRect, low: Bool)? {
+        let open = [(primary, false), (alternate, true)].filter { slot in
+            !pops.contains(where: { $0.intersects(slot.0) })
+        }
+        guard !open.isEmpty else { return nil }
+        func covered(_ r: CGRect) -> Int { subjects.filter { $0.intersects(r) }.count }
+        var best = open[0]
+        for slot in open.dropFirst() where covered(slot.0) < covered(best.0) { best = slot }
+        return (best.0, best.1)
     }
 
     /// Every rect the play HUD draws text or glyphs in (the fold-clear test).

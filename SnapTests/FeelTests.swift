@@ -121,6 +121,26 @@ private func feelBite(caught: [BugSpecies], stingers: [BugSpecies] = []) -> Bite
                duration: 0.1, time: 12)
 }
 
+/// R6: a bite of `caught` houseflies scored at `chain` (for the FEAST CHOMP's rule).
+private func feelChainBite(caught: Int, chain: Double) -> BiteReport {
+    BiteReport(caught: Array(repeating: BugSpecies.housefly, count: max(caught, 0)), escaped: 0, stingers: [],
+               points: 100, countMultiplier: max(caught, 1), chainMultiplier: chain,
+               snapsBack: caught >= 5 ? 2 : (caught >= 3 ? 1 : 0), snapsLost: 0, duration: 0.1, time: 20)
+}
+
+/// R6: a whole bite frame's events: the bite, one `bugCaught` per bug and (3+) the Feast.
+private func feelBiteFrame(caught: Int, chain: Double) -> [TrapEvent] {
+    var events: [TrapEvent] = [.snapped(feelChainBite(caught: caught, chain: chain))]
+    for index in 0..<max(caught, 0) {
+        events.append(.bugCaught(id: index + 1, species: .housefly,
+                                 position: CGPoint(x: 200 + 60 * CGFloat(index), y: 300)))
+    }
+    if caught >= 3 {
+        events.append(.feast(count: caught, snapsBack: caught >= 5 ? 2 : 1))
+    }
+    return events
+}
+
 private func feelBuzzers(_ count: Int, flying: Bool = true) -> [Buzzer] {
     var buzzers: [Buzzer] = []
     for index in 0..<count {
@@ -489,6 +509,23 @@ struct FeelTests {
         for phase in DayPhase.allCases {
             recipes.append(FeelSoundBook.dayChime(phase, dice: &dice))
         }
+        // R6: the FEAST CHOMP and its parts, the goal chime and the variety fanfare.
+        for caught in 0...9 {
+            recipes.append(FeelSoundBook.feastChomp(caught: caught, dice: &dice))
+        }
+        for index in 0..<12 {
+            recipes.append(FeelSoundBook.crunch(index: index, pan: 0.3, cascade: true, dice: &dice))
+            recipes.append(FeelSoundBook.crunch(index: index, pan: -0.3, light: true, cascade: true, dice: &dice))
+        }
+        recipes.append(FeelSoundBook.feastSting(dice: &dice))
+        recipes.append(FeelSoundBook.feastSting(delay: Float.nan, dice: &dice))
+        recipes.append(FeelSoundBook.burp(dice: &dice))
+        recipes.append(FeelSoundBook.burp(delay: -1, dice: &dice))
+        recipes.append(FeelSoundBook.goalChime(dice: &dice))
+        recipes.append(FeelSoundBook.goalChime(bonus: true, delay: FeelSoundBook.goalAfterBite, dice: &dice))
+        recipes.append(FeelSoundBook.goalChime(delay: Float.nan, dice: &dice))
+        recipes.append(FeelSoundBook.varietyFanfare(dice: &dice))
+        recipes.append(FeelSoundBook.varietyFanfare(delay: 0.8, dice: &dice))
         for species in BugSpecies.allCases {
             recipes.append(FeelSoundBook.landingTik(species, inTrap: true, pan: 0.2, dice: &dice))
             recipes.append(FeelSoundBook.landingTik(species, inTrap: false, pan: -0.2, dice: &dice))
@@ -2045,6 +2082,342 @@ struct FeelTests {
                 #expect(note.time >= 0)
             }
         }
+    }
+
+    // MARK: - R6: the FEAST CHOMP
+
+    @Test func aFeastChompIsABiggerEventThanAnyChomp() {
+        // Who gets it: a bite of 5+ bugs, or one at ×4+ chain; never a dry snap. A 3–4 bug Feast keeps the CHOMP.
+        #expect(FeelSoundBook.feastChompCount == 5)
+        #expect(FeelSoundBook.isFeastChomp(feelChainBite(caught: 5, chain: 1)))
+        #expect(FeelSoundBook.isFeastChomp(feelChainBite(caught: 8, chain: 1.5)))
+        #expect(FeelSoundBook.isFeastChomp(feelChainBite(caught: 1, chain: 4)))
+        #expect(FeelSoundBook.isFeastChomp(feelChainBite(caught: 2, chain: 5)))
+        #expect(FeelSoundBook.isFeastChomp(feelChainBite(caught: 4, chain: 3.5)) == false)
+        #expect(FeelSoundBook.isFeastChomp(feelChainBite(caught: 3, chain: 1)) == false)
+        #expect(FeelSoundBook.isFeastChomp(feelChainBite(caught: 0, chain: 5)) == false)
+        #expect(FeelSoundBook.isFeastChomp(feelChainBite(caught: 2, chain: Double.nan)) == false)
+
+        var dice = FeelDice(seed: 71)
+        for n in [1, 5, 8, 12] {
+            let feastSound = FeelSoundBook.feastChomp(caught: n, dice: &dice)
+            let plainSound = FeelSoundBook.chomp(caught: min(n, 8), dice: &dice)
+            var subs = 0
+            var squelchAt: Float = -1
+            var runNotes = 0
+            var choir = 0
+            var burps = 0
+            var gulps = 0
+            for command in feastSound {
+                #expect(command.gain > 0)
+                #expect(command.gain <= 0.4)
+                #expect(command.delay >= 0)
+                #expect(command.delay < 3)
+                switch command {
+                case .tone(let spec):
+                    if spec.start < 70 && spec.delay < 0.01 { subs += 1 }
+                    if spec.vibratoRate > 4 && spec.vibratoRate < 7
+                        && abs(spec.delay - FeelSoundBook.feastStingAt) < 1e-6 {
+                        choir += 1
+                    }
+                    if abs(spec.delay - FeelSoundBook.burpAt) < 1e-6 && spec.vibratoRate > 20 && spec.end < spec.start {
+                        burps += 1
+                    }
+                    if abs(spec.delay - FeelSoundBook.gulpAt) < 0.05 { gulps += 1 }
+                case .ring(let spec):
+                    if spec.kind == .marimba && spec.delay >= FeelSoundBook.feastStingAt - 1e-6
+                        && spec.delay < FeelSoundBook.burpAt {
+                        runNotes += 1
+                    }
+                case .squelch(let spec):
+                    squelchAt = spec.delay
+                case .noise, .drop, .fm, .bed, .buzz, .stopAll:
+                    break
+                }
+            }
+            #expect(subs == 1, "a deeper body")
+            #expect(squelchAt >= FeelSoundBook.feastHitStop - 1e-6, "the wet tail waits out the FEAST hit-stop")
+            #expect(runNotes >= 4, "the sting's marimba run")
+            #expect(choir >= 3, "the sting's choir")
+            #expect(burps == 1, "a burp")
+            #expect(gulps == 0, "the burp replaces the plain gulp")
+            // The plain CHOMP has no sub body.
+            var plainSubs = 0
+            for command in plainSound {
+                if case .tone(let spec) = command, spec.start < 70 { plainSubs += 1 }
+            }
+            #expect(plainSubs == 0)
+            // Under the master: heavier than the plain CHOMP's slam, but by at most a quarter.
+            let impact = feastSound.filter { $0.delay < 0.01 }.map { $0.gain }.reduce(0, +)
+            let plainImpact = plainSound.filter { $0.delay < 0.01 }.map { $0.gain }.reduce(0, +)
+            #expect(impact > plainImpact)
+            #expect(impact <= plainImpact * 1.25, "impact \(impact) against \(plainImpact)")
+        }
+
+        // The cascade: one countable crunch per bug, wider apart than a plain bite's, rising, all before the sting.
+        for index in 0..<10 {
+            #expect(FeelSoundBook.cascadeDelay(index: index + 1) > FeelSoundBook.cascadeDelay(index: index))
+        }
+        #expect(FeelSoundBook.cascadeDelay(index: 0) >= FeelSoundBook.feastHitStop)
+        #expect(FeelSoundBook.cascadeSpacing > FeelSoundBook.crunchSpacing)
+        #expect(FeelSoundBook.cascadeDelay(index: 7) + 0.03 < FeelSoundBook.feastStingAt)
+        #expect(FeelSoundBook.feastStingAt > FeelSoundBook.popAt + 0.12, "the sting after the snaps' pops")
+        #expect(FeelSoundBook.burpAt > FeelSoundBook.feastStingAt + 0.2)
+        var crunchDice = FeelDice(seed: 72)
+        let lowCrunch = FeelSoundBook.crunch(index: 0, pan: 0, cascade: true, dice: &crunchDice)
+        let highCrunch = FeelSoundBook.crunch(index: 7, pan: 0, cascade: true, dice: &crunchDice)
+        func shellPitch(_ commands: [FeelSynthCommand]) -> Float {
+            for command in commands {
+                if case .ring(let spec) = command { return spec.fundamental }
+            }
+            return 0
+        }
+        #expect(shellPitch(highCrunch) > shellPitch(lowCrunch), "the cascade rises")
+        #expect(abs((lowCrunch.first?.delay ?? -1) - FeelSoundBook.cascadeDelay(index: 0)) < 1e-6)
+        // The shift helper never moves a voice before 0.
+        let moved = FeelSynthCommand.ring(FeelRingSpec(.wood, fundamental: 900, decay: 0.01, gain: 0.1, delay: 0.02))
+        #expect(abs(moved.delayed(by: 0.03).delay - 0.05) < 1e-6)
+        #expect(moved.delayed(by: -1).delay == 0)
+        #expect(abs(moved.delayed(by: Float.nan).delay - 0.02) < 1e-6)
+    }
+
+    @Test func aWholeFeastFrameStaysUnderTheMasterPeak() {
+        // An 8-bug FEAST CHOMP with its full cascade, the Feast sparkle and two pops, a Golden Scarab, the chain's ×5
+        // flare and a new best, over the playing bed with all five marimba voices and a buzzing crowd.
+        let synth = FeelSynth(sampleRate: 48_000)
+        let telemetry = TrapTelemetry(closure: 2, creeping: false, buzzers: feelBuzzers(8), chain: 9, dayClock: 3.4,
+                                      playing: true)
+        var bed = FeelSoundBook.playBed(telemetry: telemetry, master: FeelAudioEngine.masterGain, ambience: 1)
+        bed.glide = 0.01
+        synth.send(.bed(bed))
+        var mixer = FeelBuzzMixer()
+        let targets = mixer.update(buzzers: telemetry.buzzers, share: 1, now: 0)
+        for (slot, target) in targets.enumerated() {
+            synth.send(.buzz(slot: slot, buzz: target))
+        }
+        _ = feelRender(synth, seconds: 0.5)
+        var dice = FeelDice(seed: 73)
+        var bite: [FeelSynthCommand] = FeelSoundBook.feastChomp(caught: 8, dice: &dice)
+        for index in 0..<8 {
+            bite += FeelSoundBook.crunch(index: index, pan: 0.1, light: index >= FeedbackDirector.feastFullCrunches,
+                                         cascade: true, dice: &dice)
+        }
+        bite += FeelSoundBook.feast(count: 8, snapsBack: 2, dice: &dice)
+        bite += FeelSoundBook.lucky(.goldenScarab, delay: FeelSoundBook.luckyAt, dice: &dice)
+        bite += FeelSoundBook.chainUp(count: 8, delay: FeelSoundBook.chainAt, dice: &dice)
+        bite += FeelSoundBook.chainFlare(delay: FeelSoundBook.chainAt + FeelSoundBook.flareAfter, dice: &dice)
+        bite += FeelSoundBook.newBest(delay: FeedbackDirector.newBestAt)
+        #expect(bite.count < FeelSynth.voiceCount)
+        for command in bite { synth.send(command) }
+        let result = feelRender(synth, seconds: 3)
+        let ceilingOut: Float = tanh(FeelSynth.ceiling)
+        #expect(result.finite)
+        #expect(result.peak < 1.0)
+        #expect(result.peak <= ceilingOut + 0.001, "under the master's peak: \(result.peak)")
+        #expect(synth.peak < 1.0)
+        #expect(result.hot < 0.05, "never a wall of limiter: \(result.hot)")
+        #expect(synth.droppedVoices == 0)
+        // Alone, it is as loud as the output stage allows: the biggest moment in the game.
+        var aloneDice = FeelDice(seed: 74)
+        let alone = feelPeakAlone(FeelSoundBook.feastChomp(caught: 5, dice: &aloneDice), seconds: 1.8)
+        #expect(alone.finite)
+        #expect(alone.peak > 0.3)
+    }
+
+    @Test func aFeastChompHapticIsHeavierAndLongerThanAnyChomp() {
+        func energy(_ cue: FeelHapticCue) -> Double {
+            cue.notes.map { Double($0.intensity) * max($0.duration, 0.01) }.reduce(0, +)
+        }
+        let biggest = FeelHapticBook.chomp(caught: 8)
+        for n in [1, 5, 8, 20] {
+            let cue = FeelHapticBook.feastChomp(caught: n)
+            #expect(energy(cue) > energy(biggest))
+            #expect(cue.length > biggest.length)
+            #expect(cue.curve.isEmpty, "it merges with the frame's other cues")
+            let hold = cue.notes.first { $0.kind == .continuous && $0.time == 0 }
+            #expect(hold != nil)
+            if let hold {
+                #expect(hold.intensity >= 1 - 1e-6)
+                #expect(abs(hold.duration - Double(FeelSoundBook.feastHitStop)) < 1e-9)
+            }
+            // The double slam: two full-strength taps, the second as the hit-stop ends.
+            let slams = cue.notes.filter { $0.kind == .transient && $0.intensity >= 1 - 1e-6 }
+            #expect(slams.count == 2)
+            if slams.count == 2 {
+                #expect(abs(slams[1].time - Double(FeelSoundBook.feastHitStop)) < 1e-9)
+            }
+            // One keen tap per bug on the cascade (up to 8), then the sting's and the burp's.
+            let stingStart = Double(FeelSoundBook.feastStingAt)
+            let crunches = cue.notes.filter { $0.kind == .transient && $0.sharpness >= 1 - 1e-6 && $0.time < stingStart }
+            #expect(crunches.count == min(n, 8))
+            #expect(cue.notes.contains { $0.time >= Double(FeelSoundBook.burpAt) - 1e-9 })
+            for note in cue.notes {
+                #expect(note.intensity >= 0 && note.intensity <= 1)
+                #expect(note.sharpness >= 0 && note.sharpness <= 1)
+                #expect(note.time >= 0)
+            }
+        }
+    }
+
+    @Test func theDirectorPlaysTheFeastChompOnlyForABigBite() {
+        let director = FeedbackDirector()
+        director.soundOn = false
+        director.hapticsOn = false
+        let playing = TrapTelemetry(closure: 0, creeping: false, buzzers: [], chain: 0, dayClock: 1, playing: true)
+        let before = director.hapticPatterns
+        director.handle(feelBiteFrame(caught: 5, chain: 1.5), telemetry: playing)
+        #expect(director.feastChomps == 1)
+        #expect(director.chomps == 1)
+        #expect(director.hapticPatterns == before + 1, "one merged pattern for the whole frame")
+        director.handle(feelBiteFrame(caught: 3, chain: 2), telemetry: playing)
+        #expect(director.feastChomps == 1, "a 3-bug Feast keeps the plain CHOMP")
+        #expect(director.chomps == 2)
+        director.handle(feelBiteFrame(caught: 1, chain: 4), telemetry: playing)
+        #expect(director.feastChomps == 2, "a ×4 chain bite is a FEAST")
+        director.handle(feelBiteFrame(caught: 0, chain: 5) + [.drySnap], telemetry: playing)
+        #expect(director.feastChomps == 2)
+        #expect(director.chomps == 3)
+    }
+
+    // MARK: - R6: goals and the Garden
+
+    @Test func aGoalChimesAfterItsBiteAndANewVarietyGetsAFanfare() {
+        // The pure timing: after a plain bite's chain chime and pops; after a FEAST CHOMP's burp; at once otherwise.
+        #expect(abs(FeelSoundBook.goalDelay(sinceBite: 0, feast: false) - FeelSoundBook.goalAfterBite) < 1e-6)
+        #expect(abs(FeelSoundBook.goalDelay(sinceBite: 0, feast: true) - FeelSoundBook.feastChompLength) < 1e-6)
+        #expect(abs(FeelSoundBook.goalDelay(sinceBite: 0.2, feast: false) - (FeelSoundBook.goalAfterBite - 0.2)) < 1e-5)
+        #expect(FeelSoundBook.goalDelay(sinceBite: 5, feast: true) == 0)
+        #expect(FeelSoundBook.goalDelay(sinceBite: Double.infinity, feast: false) == 0)
+        #expect(FeelSoundBook.goalDelay(sinceBite: Double.nan, feast: false) == 0)
+        #expect(abs(FeelSoundBook.goalDelay(sinceBite: -1, feast: false) - FeelSoundBook.goalAfterBite) < 1e-6)
+        #expect(FeelSoundBook.goalAfterBite > FeelSoundBook.chainAt + 0.1)
+        #expect(FeelSoundBook.goalAfterBite >= FeelSoundBook.popAt + 0.12 - 1e-6)
+        #expect(FeelSoundBook.feastChompLength >= FeelSoundBook.burpAt + FeelSoundBook.burpPopAfter)
+
+        // The sounds: heard, small beside the CHOMP; the bonus has a third note; the fanfare is the longer moment.
+        var dice = FeelDice(seed: 75)
+        let chompAlone = feelPeakAlone(FeelSoundBook.chomp(caught: 1, dice: &dice), seconds: 0.6)
+        let chime = FeelSoundBook.goalChime(dice: &dice)
+        let bonusChime = FeelSoundBook.goalChime(bonus: true, dice: &dice)
+        let fanfareSound = FeelSoundBook.varietyFanfare(dice: &dice)
+        #expect(bonusChime.count > chime.count)
+        func lastStart(_ commands: [FeelSynthCommand]) -> Float {
+            commands.map { $0.delay }.max() ?? 0
+        }
+        #expect(lastStart(fanfareSound) > lastStart(bonusChime))
+        for cue in [chime, bonusChime, fanfareSound] {
+            let alone = feelPeakAlone(cue, seconds: 1.6)
+            #expect(alone.finite)
+            #expect(alone.peak > 0.005)
+            #expect(alone.peak * 1.3 < chompAlone.peak)
+            #expect((cue.map { $0.gain }.max() ?? 1) < 0.2)
+        }
+        let late = FeelSoundBook.goalChime(delay: 0.62, dice: &dice)
+        #expect(late.allSatisfy { $0.delay >= 0.62 - 1e-6 })
+
+        // The haptics.
+        let goalTouch = FeelHapticBook.goal()
+        let bonusTouch = FeelHapticBook.goal(bonus: true)
+        let fanfareTouch = FeelHapticBook.fanfare()
+        #expect(bonusTouch.notes.count > goalTouch.notes.count)
+        #expect(fanfareTouch.length > goalTouch.length)
+        #expect(FeelHapticBook.goal(at: 0.62).notes.allSatisfy { $0.time >= 0.62 - 1e-9 })
+        for cue in [goalTouch, bonusTouch, fanfareTouch, FeelHapticBook.goal(at: Double.nan),
+                    FeelHapticBook.fanfare(at: -3)] {
+            #expect(!cue.notes.isEmpty)
+            for note in cue.notes {
+                #expect(note.intensity >= 0 && note.intensity <= 1)
+                #expect(note.sharpness >= 0 && note.sharpness <= 1)
+                #expect(note.time >= 0)
+            }
+        }
+
+        // The director: at once with no bite; after the bite's sounds when a bite just landed.
+        let director = FeedbackDirector()
+        director.soundOn = false
+        director.hapticsOn = false
+        director.goalCompleted()
+        #expect(director.goalChimes == 1)
+        #expect(director.lastGoalChimeAt == 0, "no bite: at once")
+        let playing = TrapTelemetry(closure: 0, creeping: false, buzzers: [], chain: 0, dayClock: 1, playing: true)
+        director.handle(feelBiteFrame(caught: 1, chain: 1), telemetry: playing)
+        director.goalCompleted()
+        #expect(director.lastGoalChimeAt > 0.3, "after the bite: \(director.lastGoalChimeAt)")
+        #expect(director.lastGoalChimeAt <= FeelSoundBook.goalAfterBite + 1e-6)
+        director.handle(feelBiteFrame(caught: 6, chain: 2), telemetry: playing)
+        director.goalCompleted(bonus: true)
+        #expect(director.goalChimes == 3)
+        #expect(director.lastGoalChimeAt > FeelSoundBook.goalAfterBite + 0.2, "after the FEAST's burp")
+        director.varietyUnlocked()
+        director.varietyUnlocked(after: Double.nan)
+        director.varietyUnlocked(after: 0.8)
+        #expect(director.fanfares == 3)
+    }
+
+    // MARK: - R6: the Zen Bog
+
+    @Test func zenIsAGentleBedWithNoHungerOrWarnings() {
+        #expect(FeelSoundBook.isZen(.zen))
+        #expect(FeedbackDirector.wantsZen(.zen))
+        let others: [RunMode] = [.feed, .daily(day: 300, scored: true), .daily(day: 300, scored: false), .attract,
+                                 .lesson]
+        for mode in others {
+            #expect(FeelSoundBook.isZen(mode) == false)
+            #expect(FeedbackDirector.wantsZen(mode) == false)
+        }
+
+        // The bed: softer everywhere, the creep groan still there, the master unchanged.
+        let telemetry = TrapTelemetry(closure: 18, creeping: true, buzzers: feelBuzzers(4), chain: 9, dayClock: 3.4,
+                                      playing: true)
+        let loud = FeelSoundBook.playBed(telemetry: telemetry, master: 1, ambience: 1)
+        let soft = FeelSoundBook.playBed(telemetry: telemetry, master: 1, ambience: 1, zen: true)
+        #expect(soft.music > 0)
+        #expect(soft.music < loud.music)
+        #expect(soft.musicVoices <= FeelSoundBook.zenMaxMusicVoices)
+        #expect(soft.musicVoices < loud.musicVoices)
+        #expect(soft.wind < loud.wind)
+        #expect(soft.frogs < loud.frogs)
+        #expect(soft.dripRate < loud.dripRate)
+        #expect(soft.crickets < loud.crickets)
+        #expect(soft.groan > 0, "the creep still speaks")
+        #expect(soft.groan < loud.groan)
+        #expect(soft.master == loud.master)
+        func bedRMS(_ wanted: FeelBed) -> Double {
+            let synth = FeelSynth(sampleRate: 48_000)
+            var settled = wanted
+            settled.glide = 0.01
+            synth.send(.bed(settled))
+            return feelRender(synth, seconds: 2).rms
+        }
+        let loudRMS = bedRMS(loud)
+        let softRMS = bedRMS(soft)
+        #expect(softRMS > 0.001, "still a living bog")
+        #expect(softRMS < loudRMS)
+
+        // The director: no hunger, no warnings, no "oops"; the CHOMP and the FEAST are unchanged.
+        let director = FeedbackDirector()
+        director.soundOn = false
+        director.hapticsOn = false
+        director.zen = FeedbackDirector.wantsZen(.zen)
+        let playing = TrapTelemetry(closure: 0, creeping: false, buzzers: [], chain: 0, dayClock: 1, playing: true)
+        director.handle([.hungry(secondsLeft: 3)], telemetry: playing)
+        director.handle([.wilted(snapsLeft: 3), .lastSnap], telemetry: playing)
+        director.handle([.snapped(feelBite(caught: [], stingers: [.bee])), .stung(id: 4, species: .bee, cost: 0),
+                         .chainBroken(count: 3)], telemetry: playing)
+        director.handle([.tired], telemetry: TrapTelemetry(playing: false))
+        #expect(director.rumbles == 0)
+        #expect(director.droops == 0)
+        #expect(director.yawns == 0)
+        #expect(director.oopses == 0)
+        #expect(director.hushed == 5)
+        director.handle(feelBiteFrame(caught: 5, chain: 1), telemetry: playing)
+        #expect(director.chomps == 1)
+        #expect(director.feastChomps == 1)
+        // Back to a Feed run: everything speaks again.
+        director.zen = FeedbackDirector.wantsZen(.feed)
+        director.handle([.hungry(secondsLeft: 3)], telemetry: playing)
+        #expect(director.rumbles == 1)
+        #expect(director.hushed == 5)
     }
 
     @Test func aRefusedAudioStartIsNotAnEngineFailure() {

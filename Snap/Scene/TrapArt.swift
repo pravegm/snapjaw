@@ -363,7 +363,11 @@ enum TrapArt {
 
     /// The cilia on one lobe, evenly spaced by arc length along the margin from near the top of the midrib, round the
     /// outer side, to near its bottom. Longest at the outer middle, shorter towards the midrib's ends.
-    static func teeth(side: Int, geometry g: TrapGeometry) -> [TrapTooth] {
+    /// R6: `variety` scales their length and width (`TrapLook.toothLength/toothWidth`), and the tips stay 4 pt inside
+    /// the canvas with the lobe drawn `TrapLook.spread` wider about the midrib (B52).
+    static func teeth(side: Int, geometry g: TrapGeometry, variety: TrapVariety = .classic) -> [TrapTooth] {
+        let vl = look(variety)
+        let lf = vl.toothLength, wf = vl.toothWidth, spread = max(vl.spread, 0.5)
         let s: CGFloat = side < 0 ? -1 : 1
         let gapT: CGFloat = 0.22
         let t0 = CGFloat.pi / 2 - gapT, t1 = -CGFloat.pi / 2 + gapT   // the right side, top to bottom
@@ -402,15 +406,18 @@ enum TrapArt {
             let angle = atan2(ny, s * nx)
             let bulge = sin(CGFloat.pi * u)
             // R3: long, thin cilia (60–80 in all), the tip kept 4 pt inside the canvas.
-            var length: CGFloat = 34 + 30 * bulge
+            let base: CGFloat = (34 + 30 * bulge) * lf
+            var length = base
             let dx = cos(angle), dy = sin(angle)
             let margin: CGFloat = 4
-            if dx < -0.0001 { length = min(length, (root.x - margin) / -dx) }
-            if dx > 0.0001 { length = min(length, (g.sceneSize.width - margin - root.x) / dx) }
+            // (x in the drawn, spread frame: the root and the tip are both scaled about the centre.)
+            let relX = root.x - g.center.x
+            if dx < -0.0001 { length = min(length, (relX + (g.center.x - margin) / spread) / -dx) }
+            if dx > 0.0001 { length = min(length, ((g.sceneSize.width - margin - g.center.x) / spread - relX) / dx) }
             if dy < -0.0001 { length = min(length, (root.y - margin) / -dy) }
             if dy > 0.0001 { length = min(length, (g.sceneSize.height - margin - root.y) / dy) }
-            length = max(length, 18)
-            out.append(TrapTooth(root: root, angle: angle, length: length, width: 3.6 + 1.1 * bulge,
+            length = max(length, min(18, base))
+            out.append(TrapTooth(root: root, angle: angle, length: length, width: (3.6 + 1.1 * bulge) * wf,
                                  curl: i % 2 == 0 ? 1 : -1))
         }
         return out
@@ -442,14 +449,17 @@ enum TrapArt {
     }
 
     /// Every tooth on one lobe at `closure01` (they lean over the margin as it grows; see the type's notes).
-    static func teethPath(side: Int, geometry g: TrapGeometry, closure01: CGFloat) -> CGPath {
+    static func teethPath(side: Int, geometry g: TrapGeometry, closure01: CGFloat,
+                          variety: TrapVariety = .classic) -> CGPath {
         let p = CGMutablePath()
         let c = min(max(closure01, 0), 1)
         let lean = toothLean(closure01: c)
         let k = 1 - lobeSquash * c
-        for tooth in teeth(side: side, geometry: g) {
-            let shape = toothShape(length: tooth.length, width: tooth.width, curl: tooth.curl)
-            p.addPath(shape, transform: toothTransform(tooth, geometry: g, lean: lean, squash: k))
+        let kind = look(variety).tooth
+        let spread = spreadTransform(variety, geometry: g)
+        for tooth in teeth(side: side, geometry: g, variety: variety) {
+            let shape = toothShape(length: tooth.length, width: tooth.width, curl: tooth.curl, kind: kind)
+            p.addPath(shape, transform: toothTransform(tooth, geometry: g, lean: lean, squash: k).concatenating(spread))
         }
         return p
     }
