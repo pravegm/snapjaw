@@ -1609,7 +1609,7 @@ struct RoundSixTests {
         #expect(warned == .plate(.trap(.beeInside)))
         let still = q.shown(now: 3.0, hint: nil)
         #expect(still == .plate(.goalDone("A 3-bug bite")))
-        let next = q.shown(now: 4.0, hint: nil)
+        let next = q.shown(now: 4.6, hint: nil)   // the toast ran 1.6 → 3.6, plus the 0.9 s the warning covered (CI 40667000285)
         #expect(next == .plate(.chainTag(1.5)))
         let hint = q.shown(now: 7, hint: .trap(.crowd))
         #expect(hint == .plate(.trap(.crowd)))
