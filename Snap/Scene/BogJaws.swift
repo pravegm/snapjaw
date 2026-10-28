@@ -128,9 +128,18 @@ final class BogJaws {
     private(set) var rimLightAlpha: CGFloat = 0
     var reduceMotion = false
 
+    /// R4 (#6): the closed trap's one x scale (1 = the squeezed lobes' width, `TrapArt.slamSqueeze` of the open trap).
+    static let holdWidthScale: CGFloat = 1
+    /// When the slam's hold ends and the release begins (session seconds after the bite).
+    static let holdEnd: Double = 0.18
+    /// QA-2 #8: how fast the hunger droop lets go after a wilt (per second: ~0.6 s from full).
+    static let droopRelease: CGFloat = 1 / 0.6
+
     private var slamClock: Double = -1
     private var springClock: Double = -1
     private var rumbleClock: Double = -1
+    private var toothTintNight: CGFloat = -1
+    private var toothTintColor = UIColor(red: 0.07, green: 0.2, blue: 0.1, alpha: 1)
 
     init() {
         let r = SKNode()
@@ -180,6 +189,10 @@ final class BogJaws {
 
     /// The closed trap's opacity now (tests: it shows in the bite's hold).
     var closedAlpha: CGFloat { closed.isHidden ? 0 : closed.alpha }
+    /// R4 (#6): the closed trap's drawn width now (scene points; 0 when hidden). One width through every hold.
+    var closedWidth: CGFloat { closed.isHidden ? 0 : closed.frame.width }
+    /// R4 (#6): the closed trap's global z (caught bugs sink just under it).
+    var closedZ: CGFloat { root.zPosition + closed.zPosition }
 
     /// R3 (#1, tests): the frame (scene space, unshaken) of everything the trap draws now that is visible: the lobes and
     /// their layers, the teeth, the midrib and the closed trap (not the fold band, the shadow or the petiole).
@@ -293,7 +306,11 @@ final class BogJaws {
         }
         tiredLevel = BogMath.approach(tiredLevel, BogMath.clamp01(target), rate: 1.2, dt: CGFloat(dt))
         let h = CGFloat(hunger.isFinite ? hunger : 0)
-        droop = BogMath.smoothstep(0.7, 1, BogMath.clamp01(h))
+        // QA-2 #8: the droop follows hunger up at once, but a wilt (hunger 1 → 0) lets it go over ~0.6 s, never in
+        // one frame.
+        let droopTarget = BogMath.smoothstep(0.7, 1, BogMath.clamp01(h))
+        droop = droopTarget >= droop ? droopTarget
+            : BogMath.approach(droop, droopTarget, rate: BogJaws.droopRelease, dt: CGFloat(dt))
 
         // R3 (#17): hungry teeth lean 20° (and tired ones 40°).
         let leanDeg = max(Double(cc) * TrapArt.toothMaxLean, TrapArt.slamLean * Double(slamLevel))
@@ -316,9 +333,14 @@ final class BogJaws {
         overlayAlpha = min(max(tintAlpha, 0), 0.25)
         overlayColor = tint
         rimLightAlpha = min(max(rimAlpha, 0), 0.8) * (1 - 0.7 * shut)
-        // At night the teeth go a deep blue-grey (never violet: the cream tips stay readable).
-        let toothTint = UIColor(red: 0.07 * (1 - night) + 0.1 * night, green: 0.2 * (1 - night) + 0.12 * night,
-                                blue: 0.1 * (1 - night) + 0.2 * night, alpha: 1)
+        // At night the teeth go a deep blue-grey (never violet: the cream tips stay readable). QA-2 #19: one UIColor
+        // per change of the night level, not per frame.
+        if abs(night - toothTintNight) > 0.002 {
+            toothTintNight = night
+            toothTintColor = UIColor(red: 0.07 * (1 - night) + 0.1 * night, green: 0.2 * (1 - night) + 0.12 * night,
+                                     blue: 0.1 * (1 - night) + 0.2 * night, alpha: 1)
+        }
+        let toothTint = toothTintColor
         // The open cilia fold in and hide under the closed trap as it shuts.
         let teethAlpha = 1 - BogMath.smoothstep(0.25, 0.75, slamLevel)
         let wiltA = 0.15 * droop + 0.12 * tiredLevel
@@ -348,13 +370,15 @@ final class BogJaws {
                 t.isHidden = teethAlpha < 0.01
             }
         }
-        // The closed trap: it fades in over the squeezed lobes, never wider than they are (so never outside the open
-        // outline), and droops with them.
-        let show = BogMath.smoothstep(0.3, 0.85, slamLevel)
+        // The closed trap: it fades in over the squeezing lobes and droops with them. R4 (#6): always one width (the
+        // squeezed lobes', `TrapArt.slamSqueeze`), never stretched; on the way out it fades in the first ~70 ms of the
+        // release while the lobes spring open from under it.
+        let releasing = slamClock >= BogJaws.holdEnd
+        let show = releasing ? BogMath.smoothstep(0.72, 0.95, slamLevel) : BogMath.smoothstep(0.3, 0.85, slamLevel)
         if show > 0.005 {
             closed.isHidden = false
             closed.alpha = show
-            closed.xScale = min(max(lobeScale / TrapArt.slamSqueeze, 1), 1.8)
+            closed.xScale = BogJaws.holdWidthScale * (1 - 0.02 * droop)
             closed.yScale = lobeYScale
         } else if !closed.isHidden {
             closed.isHidden = true

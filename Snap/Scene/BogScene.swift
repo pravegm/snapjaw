@@ -52,9 +52,17 @@ final class BogScene: SKScene {
     var drawnClosure: Double?
 
     /// Where the HUD's snaps row is, in scene space (the glyph a Feast wins flies there; a sting cracks one there; a
-    /// wilt droops one there). The App sets it from `HUDLayout` (the row's leftmost live glyph). nil = a fallback
-    /// near the bottom of the HUD half.
+    /// wilt droops one there). The App sets it from `HUDLayout` (QA-2 #6: the glyph that changes,
+    /// `glyphCenter(snapsLeft − 1)`). nil = a fallback near the bottom of the HUD half.
     var hudSnapsAnchor: CGPoint?
+
+    /// QA-2 #6: the whole snaps row (scene space), when the App knows it: a sting's crimson flash covers it, centred.
+    /// nil = the R3 fallback (300 × 96 pt, 90 pt right of the anchor).
+    var hudSnapsRowRect: CGRect?
+
+    /// QA-2 #7: false on Home (no snaps row there): no Feast glyph flights, no sting crack or row flash, no wilt glyph
+    /// or "Too slow!" pop. The bite, its pops and "Bzzt!" still show. Default true (play, the lesson).
+    var showsEconomy = true
 
     // MARK: Read-outs (tests, the App, demo frames)
 
@@ -96,6 +104,36 @@ final class BogScene: SKScene {
     var popTexts: [String] { pops.activeTexts }
     /// The active pops' text boxes (scene space, unshaken).
     var popRects: [CGRect] { pops.activeRects }
+    /// R4 (#3) for the App: every live pop's footprint for the rest of its life, in scene space (origin bottom-left,
+    /// y up, as drawn now: the camera punch and the shake included). Each is the pop's box at its pop-in overshoot,
+    /// swept up its whole rise, plus its shadow and `BogPops.clearance` (6 pt). Pops still waiting on their delay are
+    /// included. Keep the hint/toast plate off every one (`overlapsLivePop`); re-check on each HUD publish (pops live
+    /// ≤ 1.6 s).
+    var livePopRects: [CGRect] {
+        let k = world.xScale
+        let o = world.position, sh = shaker.position
+        return pops.liveRects.map { r in
+            CGRect(x: o.x + k * (sh.x + r.minX), y: o.y + k * (sh.y + r.minY), width: r.width * k,
+                   height: r.height * k)
+        }
+    }
+    /// R4 (#3): whether `rect` (scene space) touches any live pop.
+    func overlapsLivePop(_ rect: CGRect) -> Bool {
+        livePopRects.contains { $0.intersects(rect) }
+    }
+    /// R4 (#6): the closed trap's drawn width now (one width through every hold; 0 when hidden) and its global z.
+    var closedTrapWidth: CGFloat { jaws.closedWidth }
+    var closedTrapZ: CGFloat { jaws.closedZ }
+    /// R4 (#6, tests): bug `id`'s global z and drawn scale.
+    func drawnZ(ofBug id: Int) -> CGFloat? { bugs.drawnZ(id) }
+    func drawnScale(ofBug id: Int) -> CGFloat? { bugs.drawnScale(id) }
+    /// R4 (#7): the light's key clock now (`BogLight.lightClock`, eased), and the bog lift (noon white, dusk peach).
+    var lightClock: Double { light.shownClock }
+    var bogLiftAlpha: CGFloat { light.liftAlpha }
+    var bogLiftColor: RGBA { light.liftRGBA }
+    /// QA-2 #2/#6 (tests): the sting cost the numeral is waiting on, and where the row flash is.
+    var pendingCrackCost: Int { economy.pendingCrackCost }
+    var rowFlashCenter: CGPoint { economy.rowFlashCenter }
     var activeEffects: Int { effects.activeCount }
     /// The economy: glyphs flying now, glyphs landed this session, a crack or a wilt showing.
     var glyphFlights: Int { economy.activeFlights }
@@ -151,6 +189,12 @@ final class BogScene: SKScene {
     private var shakeAmp: CGFloat = 0
     private var shakeClock: Double = 0
     private var hitStop: Double = 0
+    /// QA-2 #2: the snaps left on the frame drawn before this one (nil after a reset), so the glyphs and the crack
+    /// show only the change that really happened.
+    private var lastSnapsLeft: Int?
+    /// QA-2 #19: reused per frame (no allocations in the frame loop).
+    private var byId: [Int: BugState] = [:]
+    private var riders: [SKNode] = []
 
     init(layout: ScreenLayout) {
         let worldN = SKNode()
@@ -193,6 +237,7 @@ final class BogScene: SKScene {
         backdrop.zPosition = 0
         shaker.addChild(backdrop)
         shaker.addChild(light.tint)
+        shaker.addChild(light.lift)
         shaker.addChild(jaws.root)
         shaker.addChild(surface.root)
         shaker.addChild(effects.decalRoot)
@@ -206,6 +251,7 @@ final class BogScene: SKScene {
         shaker.addChild(pops.root)
         addChild(economy.root)
         addChild(light.vignette)
+        riders = [surface.root, surface.glowRoot, effects.decalRoot]
 
         // Build every texture the frame loop can ask for now, not mid-run.
         let layer = bugs
@@ -256,6 +302,7 @@ final class BogScene: SKScene {
         shaker.position = .zero
         placeCamera()
         hasSnapshot = false
+        lastSnapsLeft = nil
     }
 
     // MARK: Frame loop
@@ -299,7 +346,8 @@ final class BogScene: SKScene {
         let s = snapshot
         let g = layout.geometry
         light.update(clock: s.dayClock, time: wallTime, fxDt: fxDt)
-        handle(events, s, g)
+        handle(events, s, g, before: lastSnapsLeft ?? s.snapsLeft)
+        lastSnapsLeft = s.snapsLeft
         // The hit-stop: the bugs, FX and pops hold for 50 ms of session time; the jaws slam through it.
         let holding = hitStop > 0
         var momentDt = fxDt
@@ -316,7 +364,7 @@ final class BogScene: SKScene {
         // R3 (#1): the nectar, the hairs and the glistens ride the bite's squeeze (about the midrib) and sink under the
         // closed trap, so nothing is left lying on the bog outside it.
         let k = jaws.slamScale
-        for n in [surface.root, surface.glowRoot, effects.decalRoot] {
+        for n in riders {
             n.xScale = k
             n.position = CGPoint(x: g.center.x * (1 - k), y: 0)
         }
@@ -374,10 +422,21 @@ final class BogScene: SKScene {
 
     // MARK: Events
 
-    private func handle(_ events: [TrapEvent], _ s: TrapSnapshot, _ g: TrapGeometry) {
+    /// QA-2 #2/#3: how many of a bite's `snapsBack` glyphs stand for snaps Core really added (`before` → `after`):
+    /// none at the cap or in a run that doesn't spend snaps (the lesson, Home).
+    static func countedFlights(snapsBack: Int, before: Int, after: Int) -> Int {
+        min(max(snapsBack, 0), max(after - before, 0))
+    }
+
+    /// QA-2 #2: the snaps a frame's stings really cost (their summed costs, clamped to the real drop).
+    static func shownStingCost(costs: Int, before: Int, after: Int) -> Int {
+        min(max(costs, 0), max(before - after, 0))
+    }
+
+    private func handle(_ events: [TrapEvent], _ s: TrapSnapshot, _ g: TrapGeometry, before: Int) {
         guard !events.isEmpty else { return }
         let pal = TrapArt.palette
-        var byId: [Int: BugState] = [:]
+        byId.removeAll(keepingCapacity: true)
         for b in s.bugs { byId[b.id] = b }
         var caughtPoints: [CGPoint] = []
         var caughtRadius: CGFloat = 0
@@ -527,13 +586,20 @@ final class BogScene: SKScene {
             if hero {
                 effects.sparkBurst(at: a, count: 12, color: BogPaint.ui(TrapArt.sipRing), speed: 240, size: 22)
             }
-            if r.snapsBack > 0 {
-                economy.fly(count: r.snapsBack, from: a, to: snapsAnchor)
+            if r.snapsBack > 0 && showsEconomy {
+                // QA-2 #2/#3: every glyph flies, but only the snaps Core really added hold the numeral back (at the
+                // cap, or in the lesson, the number never dips).
+                economy.fly(count: r.snapsBack,
+                            counted: BogScene.countedFlights(snapsBack: r.snapsBack, before: before, after: s.snapsLeft),
+                            from: a, to: snapsAnchor)
             }
         }
         // "Bzzt!" above the bee's ring (R3 #14: never over the bee; under the ring when there's no room above), on
-        // its own half; the snap it cost cracks on the HUD's row under a crimson flash.
+        // its own half; the snaps they cost crack on the HUD's row under a crimson flash (QA-2 #2: once, for the
+        // summed cost, clamped to the real drop, so the numeral only ever goes down).
+        var stingCosts = 0
         for (p, species, cost) in stings {
+            stingCosts += max(cost, 0)
             var size: CGFloat = 40
             let text = species == .wasp && !heroSaidStung ? "Stung!" : "Bzzt!"
             let r = bugs.radius(species)
@@ -552,14 +618,17 @@ final class BogScene: SKScene {
             } else {
                 pops.pop(text, at: c, size: size, fill: yellow, stroke: BogPaint.ui(pal.ink), rise: 36)
             }
-            if cost > 0 { economy.crack(at: snapsAnchor, cost: cost) }
+        }
+        let lost = BogScene.shownStingCost(costs: stingCosts, before: before, after: s.snapsLeft)
+        if lost > 0 && showsEconomy {
+            economy.crack(at: snapsAnchor, cost: lost, row: hudSnapsRowRect)
         }
         if dry && bite != nil {
             effects.puff(from: CGPoint(x: g.center.x, y: g.center.y - g.b * 0.6),
                          to: CGPoint(x: g.center.x, y: g.center.y + g.b * 0.6), count: 5,
                          color: UIColor(white: 0.85, alpha: 1), size: 34)
         }
-        if wilted {
+        if wilted && showsEconomy {
             // R3 (#15): "Too slow! −1 snap", a crimson tag just over the snaps row, and the glyph droops off it.
             let anchor = snapsAnchor
             var size: CGFloat = 28

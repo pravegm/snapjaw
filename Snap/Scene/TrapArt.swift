@@ -81,13 +81,33 @@ enum TrapArt {
     static let lobeOutline = RGBA(hex: 0x10301A)
     /// R3: the crimson core of the face (between the oxblood midrib and the crimson margin).
     static let lobeCore = RGBA(hex: 0x9A1A33)
-    /// R3: the warm yellow-green blush in the last ~10 % before the margin.
-    static let blush = RGBA(hex: 0xB9C04A)
+    /// R4 (#5): the oxblood the face starts from at the midrib; the face runs from it to `palette.lobeOuter` across the
+    /// whole lobe.
+    static let lobeMidrib = RGBA(hex: 0x892934)
+    /// R4 (#5): the yellow-green blush, only in the last `blushStart`…1 of the face's radius, at most `blushAlpha`.
+    static let blush = RGBA(hex: 0xB8C25A)
+    static let blushAlpha: Double = 0.38
+    static let blushStart: CGFloat = 0.905
+    /// R4 (#5): the face's stops by distance from the midrib (0 on it … 1 at the margin), as drawn under the blush.
+    static let faceStops: [(CGFloat, RGBA)] = [
+        (0, RGBA(hex: 0x6E1426)), (0.16, RGBA(hex: 0x892934)), (0.5, RGBA(hex: 0xA22239)),
+        (0.8, RGBA(hex: 0xB6273F)), (0.92, RGBA(hex: 0xC02A42)), (1, RGBA(hex: 0xA42440)),
+    ]
     /// R3: the leaf's back, seen only as a thin lip beyond the margin, and its shaded edge.
     static let leaf = RGBA(hex: 0x2F5F2B)
     static let leafDark = RGBA(hex: 0x173D19)
-    /// The thin dark-green lip between the face and the back (no lime rind).
-    static let lip = RGBA(hex: 0x1A4720)
+    /// R4 (#6): the closed trap's lobes, from the outer edge (0) to the seam (1): leaf green over the outer ~70 %
+    /// (darker at the edge, lit on the bulge), crimson only in the last ~22 % by the seam, then the dark interior.
+    static let closedStops: [(CGFloat, RGBA)] = [
+        (0, RGBA(hex: 0x173D19)), (0.18, RGBA(hex: 0x2F5F2B)), (0.45, RGBA(hex: 0x41763A)),
+        (0.66, RGBA(hex: 0x2F5F2B)), (0.76, RGBA(hex: 0x5A2A22)), (0.82, RGBA(hex: 0x9A1A33)),
+        (0.9, RGBA(hex: 0xC02A42)), (0.96, RGBA(hex: 0x5C0B1E)), (1, RGBA(hex: 0x1C0309)),
+    ]
+    /// Where the crimson starts on the closed lobe (fraction from the outer edge towards the seam; tests).
+    static let closedCrimsonFrom: CGFloat = 0.76
+
+    /// The thin green lip between the face and the back (no lime rind; R4: a touch more leaf so the margin reads green).
+    static let lip = RGBA(hex: 0x2E5A22)
     /// R3: the cilia, from a green base to a cream tip (`palette.teeth`).
     static let ciliaBase = RGBA(hex: 0x6A9A40)
     static let ciliaMid = RGBA(hex: 0xCFE39A)

@@ -22,6 +22,8 @@ import UIKit
 /// Sprout's run 1) plays a gentle "oops" instead. The chain's first `chainUp` at ×5 flares once (a bright rising
 /// chord), and the wilt's droop is two sad little sighs.
 ///
+/// R4 (QA-2 #9): the loss blip lands with the HUD numeral's drop (`FeelSoundBook.numeralDropAt`), not 0.26 s after it.
+///
 /// Battery: with `idle` set (menus), or after `idleDelay` s with no play and no events, the engines idle by themselves
 /// (the haptic player stops, the audio engine naps once quiet). A playing frame, an event, a menu sound or Home's
 /// creaking trap wakes them. If the frames stop without a `silence()` (the app went away), a watchdog fades the
@@ -156,6 +158,8 @@ final class FeedbackDirector: FeedbackSink {
     private(set) var lossBlips = 0
     private(set) var oopses = 0
     private(set) var flares = 0
+    /// R4 (QA-2 #9): when the last loss blip was scheduled (s after its frame), for tests.
+    private(set) var lastLossBlipAt: Float = -1
     /// The multiplier of the last `chainUp` (1 after a break), so the ×5 flare plays once per climb.
     private var lastChainMultiplier: Double = 1
     /// Haptic patterns built (one per frame with cues, after merging), for diagnostics and tests.
@@ -341,8 +345,10 @@ final class FeedbackDirector: FeedbackSink {
                 index += 1
             }
         }
+        // R4 (QA-2 #9): a costly sting's loss blip lands with the HUD numeral's drop, not after the spit.
+        let lossAt: Float = biting ? FeelSoundBook.numeralDropAt : FeelSoundBook.numeralDropAt - FeelSoundBook.hitStop
         // A costly sting's blip must be over before the chain's "bwoop" (and the warnings) speak.
-        let afterLoss: Float = stingCost > 0 ? verdictAt + FeelSoundBook.lostLength : 0
+        let afterLoss: Float = stingCost > 0 ? lossAt + FeelSoundBook.lostLength : 0
         frameCues = []
         defer { flushHaptics() }
         var caught = 0
@@ -461,12 +467,14 @@ final class FeedbackDirector: FeedbackSink {
                 playHaptic(FeelHapticBook.newBest(at: Double(delay)))
             }
         }
-        // R3: the sting's verdict, once per frame, after the last "Bzzt!".
+        // R3: the sting's verdict, once per frame. R4 (QA-2 #9): the loss lands as the numeral drops (on the "Bzzt!"'s
+        // tail); the free sting's "oops" still waits for the spit (nothing drops).
         if stung {
             if stingCost > 0 {
                 lossBlips += 1
-                audio.play(FeelSoundBook.snapLost(cost: stingCost, delay: verdictAt, dice: &dice))
-                playHaptic(FeelHapticBook.snapLost(at: Double(verdictAt)))
+                lastLossBlipAt = lossAt
+                audio.play(FeelSoundBook.snapLost(cost: stingCost, delay: lossAt, dice: &dice))
+                playHaptic(FeelHapticBook.snapLost(at: Double(lossAt)))
             } else {
                 oopses += 1
                 audio.play(FeelSoundBook.oops(delay: verdictAt, dice: &dice))

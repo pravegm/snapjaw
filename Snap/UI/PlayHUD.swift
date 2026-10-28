@@ -23,25 +23,32 @@ struct PlayLayer: View {
         let paused = controller.isMenuOpen || controller.isClosingPaused
         let lesson = controller.route == .lesson ? controller.lessonDisplay : nil
         let showsCard = lesson.map { !$0.isFinal } ?? false
-        let hintRect = showsCard ? l.lessonHint : l.hint
+        // R4 (REVIEW-3 #3): the plate never covers a live pop (it moves to the inner bottom, or waits a beat).
+        let slot: (rect: CGRect, low: Bool)? = showsCard
+            ? (rect: l.lessonHint, low: true)
+            : HUDLayout.hintSlot(primary: l.hint, alternate: l.lessonHint, pops: v.popRects.map { info.screenRect($0) })
+        let hintRect = slot?.rect ?? l.hint
         let inner: HorizontalAlignment = l.trailing ? .leading : .trailing
-        let hintAlign = Alignment(horizontal: inner, vertical: showsCard ? .bottom : .top)
+        let hintAlign = Alignment(horizontal: inner, vertical: (slot?.low ?? false) ? .bottom : .top)
         let showsSnaps = !v.lesson || v.lessonSnaps
         ZStack {
             if let lesson, !paused, !lesson.isFinal, !v.lessonTargets.isEmpty {
-                LessonPointer(targets: v.lessonTargets, info: info,
+                LessonPointer(targets: v.lessonTargets, avoid: v.lessonAvoid, info: info,
                               from: CGPoint(x: l.lesson.midX, y: l.lesson.minY + max(lessonCardHeight, 60)),
                               reduceMotion: controller.reduceMotion)
                     .allowsHitTesting(false)
             }
             if !v.lesson {
-                ScoreBlock(score: v.score, best: v.best, passedBest: v.passedBest, trailing: l.trailing, compact: c)
+                // R4 (REVIEW-3 #13: "DAILY BOG · 28 OCT" ran under Pause, on the phone and the Duo): the Daily's name
+                // is the score's own caption line, inside the score's box.
+                ScoreBlock(score: v.score, best: v.best, passedBest: v.passedBest, trailing: l.trailing, compact: c,
+                           daily: paused ? nil : controller.dailyMarker)
                     .frame(width: l.score.width, height: l.score.height,
                            alignment: l.trailing ? .topTrailing : .topLeading)
                     .position(x: l.score.midX, y: l.score.midY)
                     .allowsHitTesting(false)
                 if v.chainMultiplier > 1.01 {
-                    ChainChip(multiplier: v.chainMultiplier, compact: c, short: l.chainCompact)
+                    ChainChip(multiplier: v.chainMultiplier, compact: c, short: l.chainCompact, held: v.chainHeld)
                         .scaleEffect(chainBump ? 1.22 : 1, anchor: l.trailing ? .trailing : .leading)
                         .frame(width: l.chain.width, height: l.chain.height,
                                alignment: l.trailing ? .trailing : .leading)
@@ -57,6 +64,15 @@ struct PlayLayer: View {
                     .frame(width: l.snaps.width + 12, height: l.snaps.height + 12)
                     .position(x: l.snaps.midX, y: l.snaps.midY)
                     .allowsHitTesting(false)
+                // R4 (REVIEW-3 #3): the free sting: the row flashes green, "nothing lost".
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(SnapTheme.lime.opacity(v.freeFlash ? 0.5 : 0))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(SnapTheme.limeLight.opacity(v.freeFlash ? 0.9 : 0), lineWidth: 2))
+                    .animation(.easeOut(duration: 0.2), value: v.freeFlash)
+                    .frame(width: l.snaps.width + 12, height: l.snaps.height + 12)
+                    .position(x: l.snaps.midX, y: l.snaps.midY)
+                    .allowsHitTesting(false)
                 SnapsRow(left: v.snapsLeft, layout: l, size: info.size, hunger: v.hunger, hungry: v.hungry,
                          reduceMotion: controller.reduceMotion)
                     .allowsHitTesting(false)
@@ -69,24 +85,17 @@ struct PlayLayer: View {
                         .position(x: l.chain.midX, y: l.chain.minY - (c ? 14 : 18))
                         .allowsHitTesting(false)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
+                } else if v.freeFlash {
+                    SnapGainTag(text: "free!", compact: c)
+                        .position(x: l.chain.midX, y: l.chain.minY - (c ? 14 : 18))
+                        .allowsHitTesting(false)
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
             }
-            if !paused {
+            if !paused && slot != nil {
                 HintPlate(hint: v.hint, banner: v.banner, touch: controller.hintTouch, compact: c)
                     .frame(width: hintRect.width, height: hintRect.height, alignment: hintAlign)
                     .position(x: hintRect.midX, y: hintRect.midY)
-                    .allowsHitTesting(false)
-            }
-            if let marker = controller.dailyMarker, !paused, !v.lesson {
-                Text(marker.uppercased())
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
-                    .kerning(0.8)
-                    .foregroundStyle(SnapTheme.goldLight)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .snapLegible()
-                    .frame(width: l.score.width, alignment: l.trailing ? .trailing : .leading)
-                    .position(x: l.score.midX, y: l.score.maxY + 6)
                     .allowsHitTesting(false)
             }
             if v.tired {
@@ -152,7 +161,10 @@ struct PlayLayer: View {
 
     /// The Scene's economy glyphs (Feast flights, the sting crack, the wilt droop) land on the row's live edge.
     private func reportAnchor(_ l: HUDLayout, left: Int) {
-        controller.setSnapsAnchor(info.scenePoint(l.anchor(snapsLeft: left)))
+        let a = info.scenePoint(CGPoint(x: l.snaps.minX, y: l.snaps.minY))
+        let b = info.scenePoint(CGPoint(x: l.snaps.maxX, y: l.snaps.maxY))
+        let row = CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
+        controller.setSnapsAnchor(info.scenePoint(l.anchor(snapsLeft: left)), row: row)
     }
 
     /// A sting: the snaps row flashes crimson for a beat.
@@ -183,6 +195,8 @@ struct PlayLayer: View {
 /// and an arrow from the lesson card to each. Still in demo captures and under Reduce Motion.
 struct LessonPointer: View {
     let targets: [LessonTarget]
+    /// R4 (REVIEW-3 #19): other bugs (scene space) the arrow's last stretch must miss (the bee step's flies).
+    var avoid: [CGPoint] = []
     let info: AppCanvas
     /// The bottom centre of the lesson card (screen).
     let from: CGPoint
@@ -197,6 +211,7 @@ struct LessonPointer: View {
         let points = all.filter { bounds.contains($0.0) }
         let ringR = max(28, 46 * info.scale)
         let origin = from
+        let others = avoid.map { info.screenPoint($0) }
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: still)) { context in
             let t = still ? 0.25 : context.date.timeIntervalSinceReferenceDate
             let pulse = CGFloat((sin(t * 2 * Double.pi / Self.period) + 1) / 2)
@@ -208,18 +223,20 @@ struct LessonPointer: View {
                     g.stroke(ring, with: .color(Color.black.opacity(0.35)), lineWidth: 6)
                     g.stroke(ring, with: .color(color.opacity(0.6 + 0.4 * Double(pulse))),
                              style: StrokeStyle(lineWidth: 3.5, dash: bee ? [8, 6] : []))
-                    // The arrow: from the card toward the ring, stopping short of it.
+                    // The arrow: from the card toward the ring, stopping short of it. R4: it comes in on the side
+                    // that misses the other bugs, so its head lands on the ring, never on a fly.
                     let dx = p.x - origin.x
                     let dy = p.y - origin.y
                     let len = (dx * dx + dy * dy).squareRoot()
                     guard len > r + 40 else { continue }
-                    let ux = dx / len
-                    let uy = dy / len
-                    let start = CGPoint(x: origin.x + ux * 10, y: origin.y + uy * 10)
-                    let tip = CGPoint(x: p.x - ux * (r + 6), y: p.y - uy * (r + 6))
+                    let path = Self.approach(to: p, ring: r, from: origin, avoid: bee ? others : [])
+                    let ux = path.dir.x
+                    let uy = path.dir.y
+                    let tip = path.tip
+                    let start = CGPoint(x: origin.x + dx / len * 10, y: origin.y + dy / len * 10)
                     var shaft = Path()
                     shaft.move(to: start)
-                    shaft.addLine(to: tip)
+                    shaft.addQuadCurve(to: tip, control: path.control)
                     g.stroke(shaft, with: .color(Color.black.opacity(0.3)),
                              style: StrokeStyle(lineWidth: 6, lineCap: .round))
                     g.stroke(shaft, with: .color(color.opacity(0.85)),
@@ -237,6 +254,54 @@ struct LessonPointer: View {
         .frame(width: info.size.width, height: info.size.height)
         .accessibilityHidden(true)
     }
+
+    /// How close (pt) another bug may come to the arrow's last stretch.
+    static let avoidClear: CGFloat = 44
+    /// The last stretch: from the ring out this far, straight at the bug.
+    static let leadIn: CGFloat = 70
+
+    /// The distance from `p` to the segment a–b. Pure.
+    static func distance(_ p: CGPoint, toSegment a: CGPoint, _ b: CGPoint) -> CGFloat {
+        let vx = b.x - a.x
+        let vy = b.y - a.y
+        let l2 = vx * vx + vy * vy
+        guard l2 > 0.0001 else { return hypot(p.x - a.x, p.y - a.y) }
+        let t = min(max(((p.x - a.x) * vx + (p.y - a.y) * vy) / l2, 0), 1)
+        return hypot(p.x - (a.x + vx * t), p.y - (a.y + vy * t))
+    }
+
+    /// The arrow's approach to a ring of radius `ring` round `p` from `origin`: the tip on the ring's edge, the
+    /// control point of the curve (`leadIn` further out, so the last stretch points straight at the bug) and the unit
+    /// direction the head points. The straightest approach whose last stretch clears every `avoid` point by
+    /// `avoidClear`, else the one that clears them most. Pure; tested.
+    static func approach(to p: CGPoint, ring: CGFloat, from origin: CGPoint,
+                         avoid: [CGPoint]) -> (tip: CGPoint, control: CGPoint, dir: CGPoint) {
+        let base = atan2(Double(origin.y - p.y), Double(origin.x - p.x))
+        var best: (tip: CGPoint, control: CGPoint, dir: CGPoint)?
+        var bestClear = -CGFloat.infinity
+        for offset in [0.0, 0.6, -0.6, 1.1, -1.1, 1.6, -1.6] {
+            let a = base + offset
+            let ox = CGFloat(cos(a))
+            let oy = CGFloat(sin(a))
+            let tip = CGPoint(x: p.x + ox * (ring + 6), y: p.y + oy * (ring + 6))
+            let control = CGPoint(x: p.x + ox * (ring + leadIn), y: p.y + oy * (ring + leadIn))
+            let candidate = (tip: tip, control: control, dir: CGPoint(x: -ox, y: -oy))
+            var clear = CGFloat.infinity
+            for q in avoid {
+                clear = min(clear, distance(q, toSegment: tip, control))
+            }
+            if clear >= avoidClear { return candidate }
+            if clear > bestClear {
+                bestClear = clear
+                best = candidate
+            }
+        }
+        if let best { return best }
+        let ox = CGFloat(cos(base))
+        let oy = CGFloat(sin(base))
+        return (CGPoint(x: p.x + ox * (ring + 6), y: p.y + oy * (ring + 6)),
+                CGPoint(x: p.x + ox * (ring + leadIn), y: p.y + oy * (ring + leadIn)), CGPoint(x: -ox, y: -oy))
+    }
 }
 
 
@@ -249,6 +314,15 @@ struct ScoreBlock: View {
     let passedBest: Bool
     let trailing: Bool
     let compact: Bool
+    /// The Daily's "Daily Bog · 28 Oct" (nil outside a Daily).
+    var daily: String? = nil
+
+    /// The line under the score: "NEW BEST", the Daily's name, "BEST 3,200" or "PROTEIN". Pure; tested.
+    static func caption(passedBest: Bool, best: Int, daily: String?) -> String {
+        if passedBest { return "NEW BEST" }
+        if let daily { return daily.uppercased() }
+        return best > 0 ? "BEST " + AppRules.formatted(best) : "PROTEIN"
+    }
 
     var body: some View {
         VStack(alignment: trailing ? .trailing : .leading, spacing: 0) {
@@ -260,7 +334,7 @@ struct ScoreBlock: View {
                 .contentTransition(.numericText(value: Double(score)))
                 .animation(.easeOut(duration: 0.25), value: score)
                 .snapLegible()
-            Text(passedBest ? "NEW BEST" : (best > 0 ? "BEST " + AppRules.formatted(best) : "PROTEIN"))
+            Text(Self.caption(passedBest: passedBest, best: best, daily: daily))
                 .font(.system(size: compact ? 11 : 12, weight: .heavy, design: .rounded))
                 .kerning(0.8)
                 .foregroundStyle(passedBest ? SnapTheme.gold : SnapTheme.mist)
@@ -279,12 +353,14 @@ struct ChainChip: View {
     let multiplier: Double
     let compact: Bool
     var short = false
+    /// R4 (REVIEW-3 #10): "×1.5 held" for a beat after a clean one-bug bite.
+    var held = false
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "link")
                 .font(.system(size: compact ? 12 : 14, weight: .heavy))
-            Text((short ? "" : "Chain ") + AppRules.multiplierText(multiplier))
+            Text(AppRules.chainChipText(multiplier, short: short, held: held))
                 .font(.system(size: compact ? 14 : 17, weight: .heavy, design: .rounded).monospacedDigit())
                 .lineLimit(1)
         }
@@ -411,8 +487,9 @@ struct HintPlate: View {
         ZStack {
             if let hint, let text = AppRules.hudHintText(hint, touch: touch) {
                 let warn = AppRules.hudHintIsWarning(hint)
+                let long = AppRules.hudHintIsLong(hint)
                 Text(text)
-                    .font(SnapType.hint(compact))
+                    .font(long ? HintFit.toastFont(compact) : SnapType.hint(compact))
                     .foregroundStyle(warn ? SnapTheme.cream : SnapTheme.ink)
                     .multilineTextAlignment(.center)
                     .lineLimit(HintFit.maxLines)
@@ -453,16 +530,23 @@ enum HintFit {
     static let maxLines = 3
     static let horizontalPadding: CGFloat = 12
 
-    static func font(compact: Bool) -> UIFont {
-        let size: CGFloat = compact ? 19 : 23
+    /// R4: the App's two-sentence toasts (the free sting, the first chain) are set this size.
+    static func toastSize(_ compact: Bool) -> CGFloat { compact ? 14 : 18 }
+
+    static func toastFont(_ compact: Bool) -> Font {
+        .system(size: toastSize(compact), weight: .heavy, design: .rounded)
+    }
+
+    static func font(compact: Bool, long: Bool = false) -> UIFont {
+        let size: CGFloat = long ? toastSize(compact) : (compact ? 19 : 23)
         let base = UIFont.systemFont(ofSize: size, weight: .heavy)
         guard let rounded = base.fontDescriptor.withDesign(.rounded) else { return base }
         return UIFont(descriptor: rounded, size: size)
     }
 
     /// The lines `text` wraps to on a plate `plateWidth` wide.
-    static func lines(_ text: String, plateWidth: CGFloat, compact: Bool) -> Int {
-        let f = font(compact: compact)
+    static func lines(_ text: String, plateWidth: CGFloat, compact: Bool, long: Bool = false) -> Int {
+        let f = font(compact: compact, long: long)
         let w = max(plateWidth - 2 * horizontalPadding, 1)
         let rect = (text as NSString).boundingRect(with: CGSize(width: w, height: .greatestFiniteMagnitude),
                                                    options: [.usesLineFragmentOrigin, .usesFontLeading],
@@ -471,16 +555,16 @@ enum HintFit {
     }
 
     /// The widest single word (a word wider than the plate would be broken or cut).
-    static func longestWord(_ text: String, compact: Bool) -> CGFloat {
-        let f = font(compact: compact)
+    static func longestWord(_ text: String, compact: Bool, long: Bool = false) -> CGFloat {
+        let f = font(compact: compact, long: long)
         let widths = text.split(separator: " ").map { (String($0) as NSString).size(withAttributes: [.font: f]).width }
         return widths.max() ?? 0
     }
 
     /// Fits in `maxLines` lines with every word whole.
-    static func fits(_ text: String, plateWidth: CGFloat, compact: Bool) -> Bool {
-        lines(text, plateWidth: plateWidth, compact: compact) <= maxLines
-            && longestWord(text, compact: compact) <= plateWidth - 2 * horizontalPadding
+    static func fits(_ text: String, plateWidth: CGFloat, compact: Bool, long: Bool = false) -> Bool {
+        lines(text, plateWidth: plateWidth, compact: compact, long: long) <= maxLines
+            && longestWord(text, compact: compact, long: long) <= plateWidth - 2 * horizontalPadding
     }
 }
 
@@ -691,14 +775,15 @@ struct LessonFinalCard: View {
     /// The HUD hugs the right edge (the pointer arrow aims at the snaps' corner).
     var trailing = true
 
-    static let rules = "Every snap costs one. Three bugs in one bite give one back. Bees cost one more. "
-        + "Wait too long and a snap wilts."
+    /// R4 (REVIEW-3 #10): the chain is named on the card.
+    static let rules = "Every snap costs one. Three bugs in one bite give one back. Bees and wasps cost more. "
+        + "Wait too long and a snap wilts. " + AppRules.chainLesson
     static let snapsLine = "These are your snaps"
 
     var body: some View {
         VStack(spacing: compact ? 8 : 14) {
             SnapOverline(text: "First Bite done", compact: compact, color: SnapTheme.gold)
-            Text(LessonScript.line(.done, touch: controller.touchWording))
+            Text(LessonScript.line(.done, touch: controller.lessonTouch))
                 .font(SnapType.title(compact))
                 .foregroundStyle(SnapTheme.cream)
                 .multilineTextAlignment(.center)

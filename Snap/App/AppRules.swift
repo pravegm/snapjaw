@@ -94,49 +94,81 @@ enum AppRules {
         }
     }
 
-    /// The plate's words for an App hint (Core's, the first wave's fold line, the free sting's toast). Pure; tested.
+    /// R4 (REVIEW-3 #3, the founder's copy): Sprout's free first sting, in the hint slot.
+    static let freeStingCopy = "Bees and wasps cost snaps. This one's free!"
+    /// R4 (REVIEW-3 #10): the card's chain line.
+    static let chainLesson = "Big bites in a row build a chain."
+
+    /// R4 (REVIEW-3 #10): the one-time tag on a player's first chain step ("Chain ×1.5! Keep the big bites coming").
+    static func chainTagText(_ multiplier: Double) -> String {
+        "Chain " + multiplierText(multiplier) + "! Keep the big bites coming"
+    }
+
+    /// The plate's words for an App hint (Core's, the first wave's fold line, the free sting's toast, the first chain
+    /// tag). Pure; tested.
     static func hudHintText(_ hint: HUDHint, touch: Bool) -> String? {
         switch hint {
         case let .trap(h): return hintText(h, touch: touch)
         // ROUND-3 founder call: the Duo's fold is the input, so the first wave says so (phones keep the tap).
         case .foldInput: return touch ? "Tap to snap" : "Snap the halves together"
-        case .beesCost: return "Bees cost a snap!"
+        case .beesCost: return freeStingCopy
+        case let .chainTag(m): return chainTagText(m)
         }
     }
 
+    /// The free sting is good news (cream plate, R4); the crimson plate is for real warnings.
     static func hudHintIsWarning(_ hint: HUDHint) -> Bool {
         switch hint {
         case let .trap(h): return hintIsWarning(h)
-        case .foldInput: return false
-        case .beesCost: return true
+        case .foldInput, .beesCost, .chainTag: return false
         }
     }
 
-    /// Every line the hint plate can show, on both inputs (REVIEW-2 #3: the no-truncation test renders each one).
-    static var allHintCopy: [String] {
+    /// The App's two-sentence toasts set a size smaller (`HintFit.font(compact:long:)`), so they fit three lines.
+    static func hudHintIsLong(_ hint: HUDHint) -> Bool {
+        switch hint {
+        case .trap, .foldInput: return false
+        case .beesCost, .chainTag: return true
+        }
+    }
+
+    /// The chain tags the HUD can show (the first chain step's multipliers), for the fit tests.
+    static let chainTagSamples: [Double] = [1.5, 2, 2.5]
+
+    /// Every line the hint plate can show, on both inputs, with whether it is set in the toast size (REVIEW-2 #3: the
+    /// no-truncation test renders each one). `lesson`: it can show in the lesson (on the inner-bottom plate).
+    static var allHintLines: [(text: String, long: Bool, lesson: Bool)] {
         let core: [TrapHint] = [.bendALittle, .quick, .openUp, .beeInside, .crowd, .lastSnap, .hungry]
-        var out: [String] = []
+        var out: [(text: String, long: Bool, lesson: Bool)] = []
+        var hints: [HUDHint] = core.map { HUDHint.trap($0) } + [.foldInput, .beesCost]
+        hints += chainTagSamples.map { HUDHint.chainTag($0) }
         for touch in [false, true] {
-            for h in core {
-                if let t = hintText(h, touch: touch), !out.contains(t) { out.append(t) }
-            }
-            for h in [HUDHint.foldInput, HUDHint.beesCost] {
-                if let t = hudHintText(h, touch: touch), !out.contains(t) { out.append(t) }
+            for h in hints {
+                guard let t = hudHintText(h, touch: touch), !out.contains(where: { $0.text == t }) else { continue }
+                var lesson = false
+                if case let .trap(c) = h { lesson = lessonShowsHint(c) }
+                out.append((text: t, long: hudHintIsLong(h), lesson: lesson))
             }
         }
         return out
     }
 
-    /// The first wave's "Snap the halves together" (phones: "Tap to snap"): Feed and the Daily only, in the first
-    /// wave, before the run's first snap, once the run-start line has gone, and never over one of Core's hints.
-    /// Pure; tested.
+    /// Every line the hint plate can show, on both inputs.
+    static var allHintCopy: [String] { allHintLines.map(\.text) }
+
+    /// R4 (REVIEW-3 #9): how long the first-wave line may wait for its chance (session s after the run-start line).
+    static let foldHintWindow: Double = 40
+
+    /// The opening's "Snap the halves together" (phones: "Tap to snap"): Feed and the Daily only, before the run's
+    /// first snap, once the run-start line has gone, and never over one of Core's hints. R4 (REVIEW-3 #9: frame 10 was
+    /// wave 2 with no plate): the first two waves, within `foldHintWindow` s. Pure; tested.
     static func showsFoldHint(mode: RunMode, wave: Int, snapsMade: Int, time: Double, after banner: Double,
                               coreHint: TrapHint?) -> Bool {
         switch mode {
         case .feed, .daily: break
         case .attract, .lesson: return false
         }
-        return wave <= 1 && snapsMade == 0 && time >= banner && coreHint == nil
+        return wave <= 2 && snapsMade == 0 && time >= banner && time < banner + foldHintWindow && coreHint == nil
     }
 
     /// Warnings get the crimson plate; the rest the cream one.
@@ -168,19 +200,31 @@ enum AppRules {
     /// default (nil). Only Feed: the Daily is everyone's bog, so it stays the same for every player. Pure; tested.
     static let sproutStartSnaps = 12
 
+    /// R4 (founder call, REVIEW-3 #11): Sprout's first Feed run starts full, at the most snaps the trap can hold. The
+    /// lesson shows this same row (REVIEW-3 #19), so the count the player learns is the count they get.
+    static var firstRunSnaps: Int { min(max(Tuning.firstRunSnaps, 1), Tuning.maxSnaps) }
+
     static func startSnaps(mode: RunMode, lifetimeBugs: Int) -> Int? {
         guard case .feed = mode else { return nil }
         return PlantRanks.rank(forLifetimeBugs: max(lifetimeBugs, 0)) == 0 ? sproutStartSnaps : nil
     }
 
-    /// Sprout's very first Feed run (ROUND-3 founder call, REVIEW-2 #9): it never wilts and its first bee is free.
-    /// Pure; tested.
-    static func isSproutFirstRun(mode: RunMode, runs: Int, lifetimeBugs: Int) -> Bool {
+    /// The player's very first Feed run (ROUND-3 founder call, REVIEW-2 #9): 14 snaps, it never wilts and its first bee
+    /// is free. R4 (QA-2 #11): counted on Feed runs only, so a player whose first run was the Daily (which stays
+    /// standard for fairness) still gets the perks on their first Feed run. Pure; tested.
+    static func isSproutFirstRun(mode: RunMode, feedRuns: Int) -> Bool {
         guard case .feed = mode else { return false }
-        return runs <= 0 && PlantRanks.rank(forLifetimeBugs: max(lifetimeBugs, 0)) == 0
+        return feedRuns <= 0
     }
 
-    /// A sting that cost nothing in a scored run (Sprout's free first bee): the "Bees cost a snap!" toast. The lesson's
+    /// Demo play rules (REVIEW-3 #2): standard unless `firstRun=1`, or `progress=fresh` (a true first launch). `nil`:
+    /// not a demo, use the store. Pure; tested.
+    static func demoFirstRun(firstRun: Bool?, progress: DemoMode.Preset?) -> Bool {
+        if let firstRun { return firstRun }
+        return progress == .fresh
+    }
+
+    /// A sting that cost nothing in a scored run (Sprout's free first bee): the free-sting toast. The lesson's
     /// stings are free too, but it says "Bzzt! Never eat a bee." itself. Pure; tested.
     static func isFreeSting(_ event: TrapEvent, mode: RunMode) -> Bool {
         guard case let .stung(_, _, cost) = event, cost <= 0 else { return false }
@@ -196,10 +240,67 @@ enum AppRules {
         min(max(left + offset, 0), max(m, 1))
     }
 
-    /// The one-time label on the first Feast's flying glyph ("+1 snap", "+2 snaps"). Pure; tested.
-    static func snapGainText(_ n: Int) -> String {
+    /// R4 (QA-2 #2, #3, #4): the numeral and the glyphs only ever move from what they showed toward Core's real
+    /// count. `candidate` (Core's count plus the Scene's in-flight offset) is kept between `previous` and `target`, so a
+    /// costly sting only goes down, a Feast at the cap never dips, and a run that doesn't spend snaps (the lesson)
+    /// never shows 10 → 9 → 10. `hold`: this frame's economy events haven't reached the Scene yet (its offset is a
+    /// frame stale), so the row keeps what it showed. Pure; tested.
+    static func truthfulSnaps(previous: Int?, target: Int, candidate: Int, max m: Int, hold: Bool) -> Int {
+        let top = max(m, 1)
+        let goal = min(max(target, 0), top)
+        guard let prev = previous.map({ min(max($0, 0), top) }) else { return goal }
+        if hold { return prev }
+        let lo = min(prev, goal)
+        let hi = max(prev, goal)
+        return min(max(candidate, lo), hi)
+    }
+
+    /// Whether this frame's events change the snaps the Scene animates (its offset lags them by one frame).
+    static func movesSnaps(_ events: [TrapEvent]) -> Bool {
+        events.contains { e in
+            switch e {
+            case .snapped, .stung, .feast, .luckySnap, .wilted: return true
+            default: return false
+            }
+        }
+    }
+
+    /// The one-time label on the first Feast's flying glyph ("+1 snap", "+2 snaps"). R4 (ROUND-4 "+1 (full)"): a
+    /// refund that the full row can't hold says so. Pure; tested.
+    static func snapGainText(_ n: Int, full: Bool = false) -> String {
         let k = max(n, 1)
+        if full { return "+\(k) (full)" }
         return "+\(k) \(k == 1 ? "snap" : "snaps")"
+    }
+
+    /// A Feast's refund ran into the cap: the row was (or became) full. `before`: the snaps before the bite. Pure;
+    /// tested.
+    static func refundHitTheCap(before: Int, after: Int, back: Int, max m: Int) -> Bool {
+        back > 0 && after >= m && before - 1 + back > m
+    }
+
+    /// R4 (REVIEW-3 #10, "×1.5 held"): a clean one-bug bite keeps the chain going (no step, no break). Pure; tested.
+    static func chainHeld(_ events: [TrapEvent], chain: Int) -> Bool {
+        guard chain >= 1 else { return false }
+        var held = false
+        for e in events {
+            switch e {
+            case let .snapped(r):
+                if r.caught.count == 1 && r.stingers.isEmpty { held = true }
+            case .chainUp, .chainBroken:
+                return false
+            default:
+                break
+            }
+        }
+        return held
+    }
+
+    /// The chain chip's words: "×1.5", "Chain ×1.5", and "×1.5 held" for a beat after a held bite. Pure; tested.
+    static func chainChipText(_ multiplier: Double, short: Bool, held: Bool) -> String {
+        let m = multiplierText(multiplier)
+        if held { return m + " held" }
+        return short ? m : "Chain " + m
     }
 
     // MARK: Short labels (tiles and stats)
@@ -427,6 +528,31 @@ enum AppRules {
                                     sipping: b.activity == .sipping))
         }
         return out
+    }
+
+    /// R4 (REVIEW-3 #19: the bee pointer's arrowhead landed on the fly): while the lesson points at a bee, the other
+    /// bugs in play, so its arrow comes in from a side that misses them. Pure; tested.
+    static func lessonAvoidPoints(_ s: TrapSnapshot) -> [CGPoint] {
+        let targets = Set(lessonTargets(s).map(\.id))
+        guard s.bugs.contains(where: { targets.contains($0.id) && $0.species.isProtected }) else { return [] }
+        var out: [CGPoint] = []
+        for b in s.bugs where inPlay(b.activity) && !targets.contains(b.id) {
+            out.append(CGPoint(x: (b.position.x / 4).rounded() * 4, y: (b.position.y / 4).rounded() * 4))
+        }
+        return out
+    }
+
+    /// The Scene's live pops, rounded out to 8 pt so the HUD republishes only when one really moves. Pure; tested.
+    static func roundedRects(_ rects: [CGRect]) -> [CGRect] {
+        rects.compactMap { r -> CGRect? in
+            guard r.minX.isFinite, r.minY.isFinite, r.width.isFinite, r.height.isFinite, r.width > 0,
+                  r.height > 0 else { return nil }
+            let x0 = (r.minX / 8).rounded(.down) * 8
+            let y0 = (r.minY / 8).rounded(.down) * 8
+            let x1 = (r.maxX / 8).rounded(.up) * 8
+            let y1 = (r.maxY / 8).rounded(.up) * 8
+            return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+        }
     }
 
     // MARK: Results

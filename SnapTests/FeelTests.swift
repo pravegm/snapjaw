@@ -1259,11 +1259,14 @@ struct FeelTests {
         synth.render(frames: 512, left: left, right: right)
         #expect(synth.stolenVoices == 0)
         #expect(synth.droppedVoices == 0)
+        // R4: past the 30 ms protection (QA-2 #16).
+        _ = feelRender(synth, seconds: 0.04)
         // All 128 ring on; ten more in a later drain take over the ten oldest.
         for index in 0..<10 { synth.send(ring(index)) }
         synth.render(frames: 512, left: left, right: right)
         #expect(synth.stolenVoices == 10)
         #expect(synth.droppedVoices == 0)
+        _ = feelRender(synth, seconds: 0.04)
         // 200 in one drain: they take every older voice, then drop the rest instead of cutting each other off.
         for index in 0..<200 { synth.send(ring(index)) }
         synth.render(frames: 512, left: left, right: right)
@@ -1535,7 +1538,8 @@ struct FeelTests {
                 }
                 bite += FeelSoundBook.sting(.bee, pan: 0.3, delay: FeelSoundBook.stingAt, dice: &dice)
                 bite += FeelSoundBook.sting(.wasp, pan: -0.3, delay: FeelSoundBook.stingAt + 0.12, dice: &dice)
-                let verdict = FeelSoundBook.stingVerdictAt(.wasp, delay: FeelSoundBook.stingAt + 0.12)
+                // R4 (QA-2 #9): the blip lands with the numeral's drop, on the "Bzzt!"s' tail.
+                let verdict = FeelSoundBook.numeralDropAt
                 bite += FeelSoundBook.snapLost(cost: 3, delay: verdict, dice: &dice)
                 bite += FeelSoundBook.chainBroken(delay: verdict + FeelSoundBook.lostLength, dice: &dice)
                 bite += FeelSoundBook.lastSnap(delay: verdict + FeelSoundBook.lostLength)
@@ -1759,6 +1763,163 @@ struct FeelTests {
         let secondSigh = Double(FeelSoundBook.wiltSecondSigh)
         let second = FeelHapticBook.wilted().notes.contains { abs($0.time - secondSigh) < 1e-9 }
         #expect(second)
+    }
+
+    // MARK: - R4: stolen voices fade (QA-2 #16) and the loss blip meets the numeral (QA-2 #9)
+
+    @Test func aStolenVoiceFadesOutOverAtLeastFiveMilliseconds() {
+        #expect(FeelSynth.stealFade >= 0.005)
+        let one: Float = 1
+        let zero: Float = 0
+        #expect(abs(FeelSynth.fadeCurve(1) - one) < 1e-6)
+        #expect(abs(FeelSynth.fadeCurve(0) - zero) < 1e-6)
+        #expect(abs(FeelSynth.fadeCurve(Float.nan) - zero) < 1e-6)
+        #expect(FeelSynth.fadeCurve(0.25) < FeelSynth.fadeCurve(0.75))
+        let synth = FeelSynth(sampleRate: 48_000)
+        var bed = FeelBed()
+        bed.master = 1
+        bed.glide = 0.004
+        synth.send(.bed(bed))
+        // The oldest voice is a loud, steady 1 kHz sine; 127 near-silent ones fill the rest of the pool.
+        synth.send(.tone(FeelToneSpec(start: 1000, duration: 3, attack: 0.002, decay: 100, gain: 0.3)))
+        for index in 0..<(FeelSynth.voiceCount - 1) {
+            synth.send(.tone(FeelToneSpec(start: 300 + Float(index), duration: 3, attack: 0.002, decay: 100,
+                                          gain: 0.000005)))
+        }
+        let count = 4_800
+        let out = UnsafeMutablePointer<Float>.allocate(capacity: count)
+        defer { out.deallocate() }
+        // 0.1 s: the master is up and every voice is past the protection window.
+        synth.render(frames: count, into: out)
+        let lastBefore = out[count - 1]
+        var steady: Float = 0
+        for index in (count / 2)..<count {
+            steady = max(steady, abs(out[index] - out[index - 1]))
+        }
+        #expect(steady > 0.02)
+        #expect(synth.stolenVoices == 0)
+        // One more command takes the loud voice: it fades out, never cuts.
+        synth.send(.tone(FeelToneSpec(start: 400, duration: 1, attack: 0.002, decay: 100, gain: 0.000005)))
+        let fadeFrames = 960
+        synth.render(frames: fadeFrames, into: out)
+        #expect(synth.stolenVoices == 1)
+        #expect(synth.droppedVoices == 0)
+        // No step: the steepest sample-to-sample change stays the sine's own.
+        var jump = abs(out[0] - lastBefore)
+        for index in 1..<fadeFrames {
+            jump = max(jump, abs(out[index] - out[index - 1]))
+        }
+        #expect(jump < steady * 1.3)
+        // Still sounding 4.75–5 ms after the steal (so the fade lasts at least 5 ms), and gone by 6.5 ms.
+        var lateLevel: Float = 0
+        for index in 228..<240 {
+            lateLevel = max(lateLevel, abs(out[index]))
+        }
+        #expect(lateLevel > 0.004)
+        var afterLevel: Float = 0
+        for index in 312..<fadeFrames {
+            afterLevel = max(afterLevel, abs(out[index]))
+        }
+        #expect(afterLevel < 0.002)
+        #expect(synth.loudestVoiceEnd < 0.001)
+    }
+
+    @Test func aBiteSplitAcrossTwoCallbacksNeverTakesItsOwnVoices() {
+        #expect(FeelSynth.protectWindow >= 0.02)
+        let synth = FeelSynth(sampleRate: 48_000)
+        let out = UnsafeMutablePointer<Float>.allocate(capacity: 960)
+        defer { out.deallocate() }
+        func ring(_ index: Int) -> FeelSynthCommand {
+            .ring(FeelRingSpec(.glass, fundamental: 900 + Float(index), partials: 2, decay: 1, gain: 0.002))
+        }
+        // One bite fills the pool in one 10 ms callback; its second half arrives in the next one.
+        for index in 0..<FeelSynth.voiceCount { synth.send(ring(index)) }
+        synth.render(frames: 480, into: out)
+        for index in 0..<12 { synth.send(ring(index)) }
+        synth.render(frames: 480, into: out)
+        #expect(synth.stolenVoices == 0)
+        #expect(synth.droppedVoices == 12)
+        // 40 ms on, a later bite may take the oldest voices (each fades out first).
+        synth.render(frames: 960, into: out)
+        for index in 0..<12 { synth.send(ring(index)) }
+        synth.render(frames: 960, into: out)
+        #expect(synth.stolenVoices == 12)
+        #expect(synth.droppedVoices == 12)
+        #expect(synth.loudestVoiceEnd < 0.001)
+    }
+
+    @Test func twoBigBitesCloseTogetherNeverClick() {
+        // QA-2 #16: two 8-bug Feasts 0.45 s apart (the touch re-arm) over the playing bed, a buzzing crowd and a bog
+        // already ringing with 90 bells, so both bites must take voices from older ones.
+        let synth = FeelSynth(sampleRate: 48_000)
+        let telemetry = TrapTelemetry(closure: 2, creeping: false, buzzers: feelBuzzers(8), chain: 9, dayClock: 3.4,
+                                      playing: true)
+        var bed = FeelSoundBook.playBed(telemetry: telemetry, master: FeelAudioEngine.masterGain, ambience: 1)
+        bed.glide = 0.01
+        synth.send(.bed(bed))
+        var mixer = FeelBuzzMixer()
+        let targets = mixer.update(buzzers: telemetry.buzzers, share: 1, now: 0)
+        for (slot, target) in targets.enumerated() {
+            synth.send(.buzz(slot: slot, buzz: target))
+        }
+        for index in 0..<90 {
+            synth.send(.ring(FeelRingSpec(.bell, fundamental: 300 + Float(index) * 7, partials: 3, decay: 1.5,
+                                          gain: 0.003, seed: UInt32(index + 1), pan: Float(index % 9) / 4 - 1)))
+        }
+        _ = feelRender(synth, seconds: 0.3)
+        var dice = FeelDice(seed: 61)
+        func feastFrame() -> [FeelSynthCommand] {
+            var bite: [FeelSynthCommand] = FeelSoundBook.chomp(caught: 8, dice: &dice)
+            for index in 0..<8 {
+                bite += FeelSoundBook.crunch(index: index, pan: 0.1, light: index >= FeedbackDirector.fullCrunches,
+                                             dice: &dice)
+            }
+            bite += FeelSoundBook.feast(count: 8, snapsBack: 2, dice: &dice)
+            bite += FeelSoundBook.lucky(.goldenScarab, delay: FeelSoundBook.luckyAt, dice: &dice)
+            bite += FeelSoundBook.chainUp(count: 8, delay: FeelSoundBook.chainAt, dice: &dice)
+            bite += FeelSoundBook.chainFlare(delay: FeelSoundBook.chainAt + FeelSoundBook.flareAfter, dice: &dice)
+            bite += FeelSoundBook.newBest(delay: FeedbackDirector.newBestAt)
+            return bite
+        }
+        let first = feastFrame()
+        #expect(first.count < FeelSynth.voiceCount)
+        for command in first { synth.send(command) }
+        let between = feelRender(synth, seconds: 0.45)
+        for command in feastFrame() { synth.send(command) }
+        let result = feelRender(synth, seconds: 2.5)
+        #expect(between.finite)
+        #expect(result.finite)
+        #expect(between.peak < 1.0)
+        #expect(result.peak < 1.0)
+        #expect(synth.peak < 1.0)
+        #expect(result.hot < 0.02)
+        #expect(synth.stolenVoices > 0)
+        #expect(synth.droppedVoices == 0)
+        // Every voice that stopped (ended, or was taken and faded) left at most a hair-thin step; cutting a ringing
+        // sparkle dead leaves ten times this.
+        #expect(synth.loudestVoiceEnd < 0.003)
+    }
+
+    @Test func aCostlyStingsBlipLandsWithTheNumeralDrop() {
+        let director = FeedbackDirector()
+        director.soundOn = false
+        director.hapticsOn = false
+        let playing = TrapTelemetry(closure: 0, creeping: false, buzzers: [], chain: 0, dayClock: 1, playing: true)
+        director.handle([.snapped(feelBite(caught: [.housefly], stingers: [.wasp])),
+                         .bugCaught(id: 2, species: .housefly, position: CGPoint(x: 300, y: 300)),
+                         .stung(id: 3, species: .wasp, cost: 2), .chainBroken(count: 3)], telemetry: playing)
+        #expect(director.lossBlips == 1)
+        #expect(abs(director.lastLossBlipAt - FeelSoundBook.numeralDropAt) < 1e-6)
+        // After the "Bzzt!" starts, and at the Scene's drop: its 50 ms hit-stop, then the crack's lead.
+        #expect(FeelSoundBook.numeralDropAt > FeelSoundBook.stingAt)
+        let sceneDrop = BogScene.hitStopTime + BogEconomy.crackLead
+        let feelDrop = Double(FeelSoundBook.numeralDropAt)
+        #expect(abs(feelDrop - sceneDrop) < 0.02)
+        // A free sting drops nothing: its "oops" still waits for the spit, and no blip is scheduled.
+        director.handle([.snapped(feelBite(caught: [], stingers: [.bee])), .stung(id: 4, species: .bee, cost: 0)],
+                        telemetry: playing)
+        #expect(director.oopses == 1)
+        #expect(director.lossBlips == 1)
     }
 
     @Test func aRefusedAudioStartIsNotAnEngineFailure() {

@@ -30,8 +30,10 @@ enum HUDHint: Equatable {
     case trap(TrapHint)
     /// The first wave of a run: "Snap the halves together" on a Duo, "Tap to snap" on phones (ROUND-3 founder call).
     case foldInput
-    /// Sprout's free first sting: "Bees cost a snap!" (REVIEW-2 #9).
+    /// Sprout's free first sting: "Bees and wasps cost snaps. This one's free!" (REVIEW-3 #3, the founder's copy).
     case beesCost
+    /// R4 (REVIEW-3 #10): a player's first chain step ever, once: "Chain ×1.5! Keep the big bites coming".
+    case chainTag(Double)
 }
 
 /// The HUD values (one value, published only when it changes).
@@ -70,6 +72,15 @@ struct HUDValues: Equatable {
     var snapGain: String?
     /// R3 (Scene #14): the scene's crimson sting flash is crossing the row (`BogScene.snapsRowFlashing`).
     var rowFlashing = false
+    /// R4 (REVIEW-3 #3): the free sting: the row flashes green with "free!".
+    var freeFlash = false
+    /// R4 (REVIEW-3 #10): a clean one-bug bite kept the chain: the chip says "×1.5 held" for a beat.
+    var chainHeld = false
+    /// R4 (REVIEW-3 #3): the Scene's live score/word pops (scene space, rounded), while a hint is up: the plate keeps
+    /// off them.
+    var popRects: [CGRect] = []
+    /// R4 (REVIEW-3 #19): the other bugs in play while the lesson points at a bee (its arrow steers round them).
+    var lessonAvoid: [CGPoint] = []
 }
 
 /// A bug the lesson points at (a pulsing ring, and an arrow from the card).

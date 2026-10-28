@@ -228,6 +228,31 @@ final class BogBugLayer {
     /// Where a bug is drawn (nil when it is not on screen).
     func drawnPoint(_ id: Int) -> CGPoint? { live[id]?.drawnPoint }
 
+    /// R4 (#6, tests): bug `id`'s global z and drawn scale now (nil when it is not on screen).
+    func drawnZ(_ id: Int) -> CGFloat? { live[id].map { layer.zPosition + $0.root.zPosition } }
+    func drawnScale(_ id: Int) -> CGFloat? { live[id].map { $0.root.yScale } }
+
+    /// R4 (#6): a caught bug is in the seam this long after the bite (session seconds: the lobes' 60 ms squeeze).
+    static let sinkTime: Double = 0.06
+    /// The global z a caught bug is drawn at: just under the closed trap (z 16.5), over the lobes, the nectar (15)
+    /// and its glistens (16).
+    static let caughtZ: CGFloat = 16.2
+
+    /// How far a caught bug has sunk into the seam `elapsed` s after the bite (0 … 1 at `sinkTime`, eased out).
+    static func sinkLevel(_ elapsed: Double) -> CGFloat {
+        guard elapsed.isFinite, elapsed > 0 else { return 0 }
+        let u = CGFloat(min(elapsed / sinkTime, 1))
+        return 1 - (1 - u) * (1 - u)
+    }
+
+    /// Where a bug caught at `p` sinks to: on the seam (the midrib line), a little towards the middle, kept inside the
+    /// closed trap's length.
+    static func seamPoint(from p: CGPoint, geometry g: TrapGeometry) -> CGPoint {
+        let reach = max(g.b - TrapArt.notchDepth - 16, 10)
+        let y = p.y + (g.center.y - p.y) * 0.2
+        return CGPoint(x: g.center.x, y: min(max(y, g.center.y - reach), g.center.y + reach))
+    }
+
     /// A bug in the bite: it flashes white for 2 frames and squishes into the midrib from here.
     func markCaught(_ id: Int, at p: CGPoint) {
         guard let n = live[id] else { return }
@@ -272,6 +297,12 @@ final class BogBugLayer {
                 tint: UIColor, tintAmount: CGFloat, reduceMotion: Bool, squeeze: CGFloat = 1, hold: Bool = false) {
         frame &+= 1
         if hold {
+            // R4 (#6): the hit-stop freezes the crowd, but the caught bugs keep sinking into the seam (60 ms).
+            for b in bugs {
+                guard case .caught(_) = b.activity, let n = live[b.id] else { continue }
+                draw(n, b, t: CGFloat(time), dt: 0, geometry: g, night: night, reduceMotion: reduceMotion,
+                     squeeze: squeeze)
+            }
             for n in live.values { applyFlash(n, tint: tint, tintAmount: tintAmount) }
             return
         }
@@ -327,6 +358,7 @@ final class BogBugLayer {
         var walking = false
         var released = false
         var caughtT: CGFloat = -1
+        var caughtAge: Double = 0
         var stretch: CGFloat = 1
         switch b.activity {
         case .arriving, .leaving, .hopping:
@@ -342,7 +374,8 @@ final class BogBugLayer {
         case .sipping:
             sipping = true
         case .caught(let elapsed):
-            caughtT = CGFloat(min(max(elapsed / 0.5, 0), 1))
+            caughtAge = elapsed.isFinite ? min(max(elapsed, 0), 1) : 0
+            caughtT = CGFloat(min(caughtAge / 0.5, 1))
         }
         let restless = CGFloat(min(max(b.restless, 0), 1))
         let motion: CGFloat = reduceMotion ? 0.5 : 1
@@ -366,26 +399,25 @@ final class BogBugLayer {
             pos.y += 1.6 * sin(t * 9 + ph) * motion
         }
 
-        // The squish into the midrib.
+        // R4 (#6): the gulp. A caught bug sinks into the seam within `sinkTime` (60 ms, the lobes' squeeze), under the
+        // closed trap, so the shut trap never shows uneaten bugs on top of it. A cheeky gulp, never gore (4+): it
+        // shrinks and spins in, whole, and is gone.
+        var sunk: CGFloat = 0
         if caughtT >= 0 {
             let start = n.catchPoint ?? b.position
             if n.catchPoint == nil {
                 n.catchPoint = start
                 n.catchHeight = n.lastHeight
             }
-            let target = CGPoint(x: g.center.x, y: start.y + (g.center.y - start.y) * 0.3)
-            // A cheeky gulp, never gore (4+): the bug shrinks and spins into the midrib, whole, and is gone.
-            let pull = BogMath.smoothstep(0.08, 0.85, caughtT)
-            pos = BogMath.lerp(start, target, pull)
-            // It rides with the squeezed lobe during the bite's hold.
-            pos.x = g.center.x + (pos.x - g.center.x) * min(max(squeeze, 0.3), 1.2)
-            let shrink = 1 - 0.85 * BogMath.smoothstep(0.05, 0.95, caughtT)
-            let boing = 1 + 0.12 * sin(.pi * min(caughtT * 3, 1))
+            sunk = BogBugLayer.sinkLevel(caughtAge)
+            pos = BogMath.lerp(start, BogBugLayer.seamPoint(from: start, geometry: g), sunk)
+            let shrink = (1 - 0.45 * sunk) * (1 - 0.4 * BogMath.smoothstep(0.06, 0.3, CGFloat(caughtAge)))
+            let boing = 1 + 0.1 * sin(.pi * sunk)
             sx *= shrink * boing
             sy *= shrink * boing
-            rot += 2.6 * .pi * pull * pull
-            alpha = 1 - BogMath.smoothstep(0.6, 1, caughtT)
-            h = n.catchHeight * (1 - BogMath.smoothstep(0, 0.6, caughtT))
+            rot += 1.4 * .pi * sunk * sunk
+            alpha = 1 - BogMath.smoothstep(0.1, 0.22, CGFloat(caughtAge))
+            h = n.catchHeight * (1 - sunk)
         }
         n.lastHeight = h
 
@@ -398,7 +430,8 @@ final class BogBugLayer {
         n.root.xScale = max(sx * lift * stretch, 0.01)
         n.root.yScale = max(sy * lift, 0.01)
         n.root.alpha = alpha
-        n.root.zPosition = 6 * h
+        // Caught: under the closed trap (`caughtZ`), over the lobes and the nectar. Otherwise by height.
+        n.root.zPosition = caughtT >= 0 ? BogBugLayer.caughtZ - layer.zPosition : 6 * h
 
         // Wings.
         var spread: CGFloat = st.restSpread
@@ -453,7 +486,7 @@ final class BogBugLayer {
         n.shadow.position = CGPoint(x: pos.x + 2 + 8 * h, y: pos.y - 2 - 5 * h)
         n.shadow.zRotation = CGFloat(b.heading)
         n.shadow.setScale(max((1 - 0.35 * h) * (caughtT >= 0 ? 1 - caughtT : 1), 0.01))
-        n.shadow.alpha = 0.4 * (1 - 0.6 * h) * alpha
+        n.shadow.alpha = 0.4 * (1 - 0.6 * h) * alpha * (1 - sunk)
 
         // The cross mark over a released bee.
         n.markLevel = BogMath.approach(n.markLevel, released ? 1 : 0, rate: 6, dt: dt)

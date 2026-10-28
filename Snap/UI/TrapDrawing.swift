@@ -98,6 +98,65 @@ struct TrapArtImage: View {
     }
 }
 
+/// R4 (REVIEW-3 #16, the founder's P0): the trap on its own (Results, the cover) is never a centred vertical slit. It is
+/// the Scene's 3/4 trap (`TrapArt.trapImage(style: .threeQuarter …)`): tilted like the icon, half open, its leaf back
+/// and petiole leaf showing, with a housefly sipping on it. If the Scene's image can't be made, the open trap is tilted
+/// back and turned by the App, with the fly on its near lobe.
+struct TrapHeroImage: View {
+    /// A fly sipping on it.
+    var withBug = true
+
+    var body: some View {
+        if let hero = TrapImageCache.heroImage(bug: withBug) {
+            Image(decorative: hero, scale: TrapImageCache.scale)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .accessibilityHidden(true)
+        } else {
+            GeometryReader { geo in
+                let w = geo.size.width
+                let h = geo.size.height
+                ZStack {
+                    // The shadow it casts on the bog.
+                    Ellipse()
+                        .fill(RadialGradient(colors: [Color.black.opacity(0.45), Color.black.opacity(0)],
+                                             center: .center, startRadius: 0, endRadius: w * 0.48))
+                        .frame(width: w * 0.92, height: h * 0.34)
+                        .offset(y: h * 0.30)
+                    TrapHeroArt()
+                        .frame(width: w * 0.94, height: h * 0.86)
+                        .offset(y: -h * 0.02)
+                    if withBug {
+                        BugPortrait(species: .housefly)
+                            .frame(width: w * 0.2, height: w * 0.2)
+                            .offset(x: w * TrapHeroArt.bugAt.x, y: h * TrapHeroArt.bugAt.y)
+                    }
+                }
+                .frame(width: w, height: h)
+            }
+            .accessibilityHidden(true)
+        }
+    }
+}
+
+/// The fallback for `TrapHeroImage`: the open trap tilted back about 3/4 (the far half foreshortened) and turned so the
+/// midrib runs on a slant.
+struct TrapHeroArt: View {
+    /// Where the sipping fly sits (fractions of the hero's size from its centre): on the near, right lobe.
+    static let bugAt = CGPoint(x: 0.17, y: 0.02)
+    /// The tilt back (degrees about the horizontal axis) and the turn (degrees in the plane).
+    static let tilt: Double = 46
+    static let turn: Double = -16
+
+    var body: some View {
+        TrapArtImage()
+            .rotation3DEffect(.degrees(Self.tilt), axis: (x: 1, y: 0, z: 0), anchor: .center, perspective: 0.45)
+            .rotationEffect(.degrees(Self.turn))
+            .accessibilityHidden(true)
+    }
+}
+
 /// One render of `TrapArt.trapImage`, kept for the app's life.
 @MainActor
 enum TrapImageCache {
@@ -112,6 +171,20 @@ enum TrapImageCache {
         tried = true
         cached = TrapArt.trapImage(width: width, scale: scale)
         return cached
+    }
+
+    private static var heroCache: [Bool: CGImage] = [:]
+    private static var heroTried: Set<Bool> = []
+
+    /// R4 (REVIEW-3 #16): the Scene's own 3/4 trap, `bug`: with a fly sipping on it (nil: the App tilts the open trap
+    /// instead).
+    static func heroImage(bug: Bool = false) -> CGImage? {
+        if let hit = heroCache[bug] { return hit }
+        guard !heroTried.contains(bug) else { return nil }
+        heroTried.insert(bug)
+        let made = SceneHooks.threeQuarterTrap(width: width, scale: scale, bug: bug)
+        heroCache[bug] = made
+        return made
     }
 
     private static var halvesCache: (CGImage, CGImage)?
@@ -340,32 +413,45 @@ struct SnapSlot: View {
 
 // MARK: - The Duo's fold as the input (ROUND-3 founder call)
 
-/// One half of a Duo seen from the front: a dark body, its screen showing that half's lobe of the play trap
-/// (`TrapArt.trapImage`, cut down the midrib) on the bog.
+/// One half of a Duo seen from the front: a dark body, its screen showing its half of ONE play trap (R4, REVIEW-3 #8:
+/// the trap spans the hinge, one stem, not two images): the whole `TrapArt.trapImage` is laid across both screens and
+/// each half shows its side of it, so the midrib sits on the hinge.
 struct DuoHalfView: View {
     let left: Bool
 
+    /// The body's bezel; thinner on the hinge side, so the two screens meet.
+    static let bezel: CGFloat = 3
+    static let hingeBezel: CGFloat = 1
+
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
-        ZStack {
-            shape.fill(Color(snapHex: 0x14181C))
+        GeometryReader { geo in
+            let screenW = max(geo.size.width - Self.bezel - Self.hingeBezel, 1)
+            let screenH = max(geo.size.height - 2 * Self.bezel, 1)
             ZStack {
-                SnapTheme.bog
-                if let halves = TrapImageCache.halves() {
-                    Image(decorative: left ? halves.left : halves.right, scale: TrapImageCache.scale)
-                        .resizable()
-                        .interpolation(.medium)
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: left ? .trailing : .leading)
-                } else {
-                    LinearGradient(colors: left ? [SnapTheme.crimson, SnapTheme.crimsonDeep]
-                                                : [SnapTheme.crimsonDeep, SnapTheme.crimson],
-                                   startPoint: .leading, endPoint: .trailing)
-                        .padding(.vertical, 8)
+                shape.fill(Color(snapHex: 0x14181C))
+                ZStack {
+                    SnapTheme.bog
+                    if let whole = TrapImageCache.image() {
+                        // Twice the screen's width (both screens), this half's side showing.
+                        Image(decorative: whole, scale: TrapImageCache.scale)
+                            .resizable()
+                            .interpolation(.medium)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: (screenW + Self.hingeBezel) * 2, height: screenH)
+                            .offset(x: left ? screenW / 2 + Self.hingeBezel : -(screenW / 2 + Self.hingeBezel))
+                    } else {
+                        LinearGradient(colors: left ? [SnapTheme.crimson, SnapTheme.crimsonDeep]
+                                                    : [SnapTheme.crimsonDeep, SnapTheme.crimson],
+                                       startPoint: .leading, endPoint: .trailing)
+                            .padding(.vertical, 8)
+                    }
                 }
+                .frame(width: screenW, height: screenH)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .offset(x: left ? (Self.bezel - Self.hingeBezel) / 2 : (Self.hingeBezel - Self.bezel) / 2)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-            .padding(3)
+            .frame(width: geo.size.width, height: geo.size.height)
         }
     }
 }
@@ -420,9 +506,12 @@ struct FoldAngleGlyph: View {
     var body: some View {
         let th = theta.isFinite ? min(max(theta, 60), 180) : 160
         Canvas { ctx, size in
-            let hinge = CGPoint(x: size.width / 2, y: size.height - 3)
-            let arm = min(size.width * 0.3, 60)
+            // R4 (REVIEW-3 #8: "138°" was clipped by the drawing above it): the angle reads under the hinge, and the
+            // arms fit the room above it.
+            let fontSize = Self.labelSize(height: size.height)
+            let hinge = CGPoint(x: size.width / 2, y: max(size.height - fontSize - 6, size.height * 0.4))
             let lift = CGFloat((180 - th) / 2 * Double.pi / 180)
+            let arm = min(size.width * 0.3, 60, max(hinge.y - 3, 4) / max(sin(lift), 0.2))
             var v = Path()
             v.move(to: CGPoint(x: hinge.x - arm * cos(lift), y: hinge.y - arm * sin(lift)))
             v.addLine(to: hinge)
@@ -431,12 +520,17 @@ struct FoldAngleGlyph: View {
                        style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
             ctx.stroke(v, with: .color(SnapTheme.limeLight),
                        style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
-            ctx.draw(Text("\(Int(th.rounded()))°").font(.system(size: max(min(size.height * 0.5, 15), 9),
-                                                                weight: .heavy, design: .rounded).monospacedDigit())
+            ctx.draw(Text("\(Int(th.rounded()))°").font(.system(size: fontSize, weight: .heavy, design: .rounded)
+                                                            .monospacedDigit())
                         .foregroundColor(SnapTheme.cream),
-                     at: CGPoint(x: hinge.x, y: hinge.y - arm * sin(lift) - 2), anchor: .bottom)
+                     at: CGPoint(x: hinge.x, y: hinge.y + 3), anchor: .top)
         }
         .accessibilityHidden(true)
+    }
+
+    /// The angle's type size for a glyph `height` tall. Pure; tested (it fits under the hinge).
+    static func labelSize(height: CGFloat) -> CGFloat {
+        max(min(height * 0.36, 15), 9)
     }
 }
 

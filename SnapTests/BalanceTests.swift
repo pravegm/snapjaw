@@ -3,22 +3,27 @@ import Foundation
 import Testing
 @testable import Snap
 
-// MARK: - Headless balance playtest (Round 3)
+// MARK: - Headless balance playtest (Round 4)
 //
-// Every PilotSkill plays real TrapSessions (mode .feed, SNAP_BAL_SEEDS seeds, default 16) at 60 Hz, the pilot fed the
-// previous frame's snapshot the way GameController feeds it. Each run is capped at 10 min. Prints, per skill:
-//   SNAP-BAL skill=casual score=4833 p10=… p90=… seconds=134.0 snaps=23.5 caught=62.0 stings=2.0 maxStings=6 …
-// tools/balance-sim.js (a line-by-line port) predicts on these 16 seeds (design/notes/core-R3.md):
-//   novice  166 protein    /  44 s / 10 snaps   / 1 sting (median) / 0 wilts
-//   casual  4,833          / 134 s / 23.5 snaps / 2 stings / longest chain 5 / 1.5 wilts
-//   expert  28,763         / 329 s / 34 snaps   / 0 stings / 11.5 wilts
-//   perfect 43,378         / 353 s / 43 snaps   / never stung / 5 wilts
-//   casual, Sprout run 1 (12 snaps, no wilting, the first sting free): 154 s
-// R3 targets (asserted on medians): perfect runs 4–8 min (240–480 s) with ≤ 6 wilts; casual runs 100–240 s and 18–45
-// snaps, with a longest chain of 3–6 and ≤ 2 wilts; the casual pilot's Sprout run 1 lasts ≥ 90 s; plus R1's: novice <
-// casual < expert ≤ perfect, perfect never stung, novice stung ≥ 1. The late night (reactions × 0.96 per wave to 0.25,
-// lingers × 0.92 to 0.2) ends every run, so no skill may hit the 10-minute cap.
-// Each skill is simulated once (memoised), so the tests share the runs.
+// Every PilotSkill plays real TrapSessions (mode .feed, SNAP_BAL_SEEDS seeds, default 16; CI sets 8) at 60 Hz, the
+// pilot fed the previous frame's snapshot the way GameController feeds it. Each run is capped at 10 min. R4: every
+// run (the four skills plus the novice and casual pilots' Sprout run 1) is simulated once, in parallel, the first time
+// any balance test asks, and the whole table is printed then as ONE block between "SNAP-BAL ==== table" and
+// "SNAP-BAL ==== end", so it sits at the start of the balance section of the CI log:
+//   SNAP-BAL skill=casual score=5206 p10=… p90=… seconds=147.4 snaps=24.5 caught=70.5 stings=2.5 maxStings=6 …
+// tools/balance-sim.js (a line-by-line port) predicts on these 16 seeds (design/notes/core-R4.md):
+//   novice  191 protein    /  45 s / 10 snaps   / 1 sting (median) / 0 wilts
+//   casual  5,206          / 147 s / 24.5 snaps / 2.5 stings / longest chain 5 / 0 wilts
+//   expert  28,763         / 326 s / 43 snaps   / 0 stings / 3 wilts
+//   perfect 42,761         / 377 s / 43 snaps   / never stung / 3 wilts
+//   Sprout run 1 (SessionOptions.firstRun: 14 snaps, no wilting, the first sting free, a calm first morning):
+//   novice 105 s, casual 165 s
+// (8 seeds: casual 128 s, chain 5, 0 wilts; expert 3 wilts; perfect 366 s, 2 wilts; novice Sprout run 1 101 s.)
+// R4 targets (asserted on medians): perfect runs 4–8 min (240–480 s) with ≤ 5 wilts; expert ≤ 6 wilts; casual runs
+// 100–240 s and 18–45 snaps, with a longest chain of 3–6 and ≤ 2 wilts; the novice and casual pilots' Sprout run 1
+// lasts ≥ 90 s and never wilts; plus R1's: novice < casual < expert ≤ perfect, perfect never stung, novice stung (R3:
+// median ≥ 0.5). The late night (reactions × 0.96 per wave to 0.2, lingers × 0.92 to 0.2) ends every run, so no skill
+// may hit the 10-minute cap.
 
 struct SnapBalanceRun {
     var score: Int
@@ -35,50 +40,115 @@ struct SnapBalanceRun {
     var capped: Bool
 }
 
+/// The parallel runs' results (one lock; written from DispatchQueue.concurrentPerform's workers).
+final class SnapBalanceBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done: [Int: SnapBalanceRun] = [:]
+
+    func put(_ k: Int, _ r: SnapBalanceRun) {
+        lock.lock()
+        done[k] = r
+        lock.unlock()
+    }
+
+    func all() -> [Int: SnapBalanceRun] {
+        lock.lock()
+        defer { lock.unlock() }
+        return done
+    }
+}
+
+/// R4: every balance run, simulated once (in parallel) and printed as one table the first time a test asks.
 final class SnapBalanceMemo: @unchecked Sendable {
     static let shared = SnapBalanceMemo()
 
-    private let locks: [PilotSkill: NSLock]
-    private let dataLock = NSLock()
+    private let lock = NSLock()
+    private var built: Bool = false
     private var results: [PilotSkill: [SnapBalanceRun]] = [:]
-    private let sproutLock = NSLock()
-    private var sprout: [SnapBalanceRun]? = nil
+    private var sprout: [PilotSkill: [SnapBalanceRun]] = [:]
 
-    init() {
-        var l: [PilotSkill: NSLock] = [:]
-        for s in PilotSkill.allCases { l[s] = NSLock() }
-        locks = l
-    }
+    /// The skills whose Sprout run 1 is simulated too.
+    static let sproutSkills: [PilotSkill] = [.novice, .casual]
 
     func runs(_ skill: PilotSkill) -> [SnapBalanceRun] {
-        let lock: NSLock = locks[skill] ?? NSLock()
+        build()
         lock.lock()
         defer { lock.unlock() }
-        dataLock.lock()
-        let cached: [SnapBalanceRun]? = results[skill]
-        dataLock.unlock()
-        if let c = cached { return c }
-        let computed: [SnapBalanceRun] = SnapBalanceHarness.simulate(skill)
-        dataLock.lock()
-        results[skill] = computed
-        dataLock.unlock()
-        return computed
+        return results[skill] ?? []
     }
 
-    /// R3: the casual pilot's Sprout run 1 on every seed (SnapBalanceHarness.sproutRunOne).
-    func sproutRuns() -> [SnapBalanceRun] {
-        sproutLock.lock()
-        defer { sproutLock.unlock() }
-        if let c = sprout { return c }
-        var out: [SnapBalanceRun] = []
-        var i: Int = 0
-        while i < SnapBalanceHarness.seedCount {
-            out.append(SnapBalanceHarness.runOne(.casual, seed: SnapBalanceHarness.seed(i),
-                                                 options: SnapBalanceHarness.sproutRunOne))
-            i += 1
+    /// R3/R4: the pilot's Sprout run 1 on every seed (SnapBalanceHarness.sproutRunOne).
+    func sproutRuns(_ skill: PilotSkill) -> [SnapBalanceRun] {
+        build()
+        lock.lock()
+        defer { lock.unlock() }
+        return sprout[skill] ?? []
+    }
+
+    private struct Job {
+        var skill: PilotSkill
+        var sprout: Bool
+        var index: Int
+    }
+
+    private func build() {
+        lock.lock()
+        defer { lock.unlock() }
+        if built { return }
+        let n: Int = SnapBalanceHarness.seedCount
+        var jobs: [Job] = []
+        for s in PilotSkill.allCases {
+            var i: Int = 0
+            while i < n {
+                jobs.append(Job(skill: s, sprout: false, index: i))
+                i += 1
+            }
         }
-        sprout = out
-        return out
+        for s in SnapBalanceMemo.sproutSkills {
+            var i: Int = 0
+            while i < n {
+                jobs.append(Job(skill: s, sprout: true, index: i))
+                i += 1
+            }
+        }
+        let box = SnapBalanceBox()
+        let list: [Job] = jobs
+        DispatchQueue.concurrentPerform(iterations: list.count) { (k: Int) in
+            let j: Job = list[k]
+            let options: SessionOptions = j.sprout ? SnapBalanceHarness.sproutRunOne : SessionOptions.for(.feed)
+            let r: SnapBalanceRun = SnapBalanceHarness.runOne(j.skill, seed: SnapBalanceHarness.seed(j.index),
+                                                              options: options)
+            box.put(k, r)
+        }
+        let done: [Int: SnapBalanceRun] = box.all()
+        var plain: [PilotSkill: [SnapBalanceRun]] = [:]
+        var first: [PilotSkill: [SnapBalanceRun]] = [:]
+        var k: Int = 0
+        while k < list.count {
+            let j: Job = list[k]
+            if let r = done[k] {
+                if j.sprout {
+                    first[j.skill, default: []].append(r)
+                } else {
+                    plain[j.skill, default: []].append(r)
+                }
+            }
+            k += 1
+        }
+        results = plain
+        sprout = first
+        built = true
+        // One write, so the table is one block in the log (unbuffered: it survives a later crash of the runner).
+        var lines: [String] = []
+        lines.append("SNAP-BAL ==== table (\(n) seeds per skill, 60 Hz, 600 s cap; tools/balance-sim.js predicts it) ====")
+        for s in PilotSkill.allCases {
+            lines.append(SnapBalanceHarness.report(s, plain[s] ?? []))
+        }
+        for s in SnapBalanceMemo.sproutSkills {
+            lines.append("SNAP-BAL sprout1 " + SnapBalanceHarness.report(s, first[s] ?? [], prefix: ""))
+        }
+        lines.append("SNAP-BAL ==== end ====")
+        FileHandle.standardOutput.write(Data((lines.joined(separator: "\n") + "\n").utf8))
     }
 }
 
@@ -96,12 +166,12 @@ enum SnapBalanceHarness {
         return UInt64(1000 + i * 7919)
     }
 
-    /// R3: what the App passes for a Sprout's first run (12 snaps, no wilting, the first stinger bite free).
+    /// R4: what the App passes for a Sprout's first Feed run: `startSnaps` 12 (every Sprout Feed run) and
+    /// `firstRun`, which overrides it (14 snaps, no wilting, the first stinger bite free, a calm first morning).
     static var sproutRunOne: SessionOptions {
         var o: SessionOptions = SessionOptions.for(.feed)
         o.startSnaps = 12
-        o.hunger = false
-        o.freeFirstSting = true
+        o.firstRun = true
         return o
     }
 
@@ -129,16 +199,6 @@ enum SnapBalanceHarness {
                               beesSpared: r.beesSpared, wilts: wilts, capped: capped)
     }
 
-    static func simulate(_ skill: PilotSkill) -> [SnapBalanceRun] {
-        var out: [SnapBalanceRun] = []
-        var i: Int = 0
-        while i < seedCount {
-            out.append(runOne(skill, seed: seed(i)))
-            i += 1
-        }
-        return out
-    }
-
     static func percentile(_ values: [Double], _ p: Double) -> Double {
         if values.isEmpty { return 0 }
         let sorted: [Double] = values.sorted()
@@ -157,7 +217,7 @@ enum SnapBalanceHarness {
         return median(SnapBalanceMemo.shared.runs(skill)) { (r: SnapBalanceRun) -> Double in Double(r.score) }
     }
 
-    static func report(_ skill: PilotSkill, _ runs: [SnapBalanceRun]) -> String {
+    static func report(_ skill: PilotSkill, _ runs: [SnapBalanceRun], prefix: String = "SNAP-BAL ") -> String {
         let score: [Double] = runs.map { (r: SnapBalanceRun) -> Double in Double(r.score) }
         let secs: [Double] = runs.map { (r: SnapBalanceRun) -> Double in r.seconds }
         let snaps: [Double] = runs.map { (r: SnapBalanceRun) -> Double in Double(r.snaps) }
@@ -170,14 +230,15 @@ enum SnapBalanceHarness {
         let wilts: [Double] = runs.map { (r: SnapBalanceRun) -> Double in Double(r.wilts) }
         let maxStings: Int = runs.map { (r: SnapBalanceRun) -> Int in r.stings }.max() ?? 0
         let capped: Int = runs.filter { (r: SnapBalanceRun) -> Bool in r.capped }.count
-        let head: String = String(format: "SNAP-BAL skill=%@ score=%.0f p10=%.0f p90=%.0f seconds=%.1f snaps=%.1f",
+        let head: String = String(format: "skill=%@ score=%.0f p10=%.0f p90=%.0f seconds=%.1f p10s=%.1f snaps=%.1f",
                                   skill.rawValue, percentile(score, 0.5), percentile(score, 0.1),
-                                  percentile(score, 0.9), percentile(secs, 0.5), percentile(snaps, 0.5))
+                                  percentile(score, 0.9), percentile(secs, 0.5), percentile(secs, 0.1),
+                                  percentile(snaps, 0.5))
         let tail: String = String(format: " caught=%.1f stings=%.1f maxStings=%d feasts=%.1f waves=%.1f chain=%.1f spared=%.1f wilts=%.1f capped=%d n=%d",
                                   percentile(caught, 0.5), percentile(stings, 0.5), maxStings,
                                   percentile(feasts, 0.5), percentile(waves, 0.5), percentile(chains, 0.5),
                                   percentile(spared, 0.5), percentile(wilts, 0.5), capped, runs.count)
-        return head + tail
+        return prefix + head + tail
     }
 }
 
@@ -187,8 +248,6 @@ struct BalanceTests {
     func skillReport(skill: PilotSkill) {
         let runs: [SnapBalanceRun] = SnapBalanceMemo.shared.runs(skill)
         let line: String = SnapBalanceHarness.report(skill, runs)
-        // Unbuffered, so the line survives even if a later test crashes the runner.
-        FileHandle.standardOutput.write(Data((line + "\n").utf8))
         #expect(runs.count == SnapBalanceHarness.seedCount)
         // R2/R3: every run ends (R3: the late night outruns every hand), so no skill reaches the cap.
         let capped: Int = runs.filter { (r: SnapBalanceRun) -> Bool in r.capped }.count
@@ -213,18 +272,27 @@ struct BalanceTests {
     }
 
     @Test func casualRarelyWilts() {
-        // R3 (REVIEW-2 #7): wilt 18/16/14/12 s from the first landing after a catch: a casual run wilts ≤ 2 times.
+        // R4 (QA-2 #1): the clock ticks only while food sits in the trap with no bee: a casual run wilts ≤ 2 times.
         let runs: [SnapBalanceRun] = SnapBalanceMemo.shared.runs(.casual)
         let line: String = SnapBalanceHarness.report(.casual, runs)
         let wilts: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in Double(r.wilts) }
         #expect(wilts <= 2, "casual wilts \(wilts): \(line)")
     }
 
-    @Test func casualSproutRunOneLasts() {
-        // R3 (REVIEW-2 #9): a first run (12 snaps, no wilting, the first sting free) lasts ≥ 90 s for the casual pilot.
-        let runs: [SnapBalanceRun] = SnapBalanceMemo.shared.sproutRuns()
-        let line: String = "sprout1 " + SnapBalanceHarness.report(.casual, runs)
-        FileHandle.standardOutput.write(Data((line + "\n").utf8))
+    @Test func expertWiltsAtMostSixTimes() {
+        // R4 (REVIEW-3 #12): the expert wilted 11.5 times per run in R3; real Duo hands are in this band.
+        let runs: [SnapBalanceRun] = SnapBalanceMemo.shared.runs(.expert)
+        let line: String = SnapBalanceHarness.report(.expert, runs)
+        let wilts: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in Double(r.wilts) }
+        #expect(wilts <= 6, "expert wilts \(wilts): \(line)")
+    }
+
+    @Test(arguments: SnapBalanceMemo.sproutSkills)
+    func sproutRunOneLasts(skill: PilotSkill) {
+        // R3/R4 (REVIEW-2 #9, REVIEW-3 #11): a first run (14 snaps, no wilting, the first sting free, a calm first
+        // morning) lasts ≥ 90 s for the novice and the casual pilot. The novice's was 75 s in R3's CI log 20.
+        let runs: [SnapBalanceRun] = SnapBalanceMemo.shared.sproutRuns(skill)
+        let line: String = "sprout1 " + SnapBalanceHarness.report(skill, runs)
         let seconds: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in r.seconds }
         let wilts: Int = runs.map { (r: SnapBalanceRun) -> Int in r.wilts }.max() ?? 0
         let capped: Int = runs.filter { (r: SnapBalanceRun) -> Bool in r.capped }.count
@@ -235,13 +303,13 @@ struct BalanceTests {
     }
 
     @Test func perfectRunLength() {
-        // R3: a perfect player's run ends at 4–8 minutes (median), and hunger is not what ends it (≤ 6 wilts).
+        // R3/R4: a perfect player's run ends at 4–8 minutes (median), and hunger is not what ends it (≤ 5 wilts).
         let runs: [SnapBalanceRun] = SnapBalanceMemo.shared.runs(.perfect)
         let line: String = SnapBalanceHarness.report(.perfect, runs)
         let seconds: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in r.seconds }
         let wilts: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in Double(r.wilts) }
         #expect(seconds >= 240 && seconds <= 480, "perfect seconds \(seconds): \(line)")
-        #expect(wilts <= 6, "perfect wilts \(wilts): \(line)")
+        #expect(wilts <= 5, "perfect wilts \(wilts): \(line)")
     }
 
     @Test func perfectIsNeverStung() {
@@ -264,7 +332,6 @@ struct BalanceTests {
         let expert: Double = SnapBalanceHarness.medianScore(.expert)
         let perfect: Double = SnapBalanceHarness.medianScore(.perfect)
         let line: String = "novice \(novice) casual \(casual) expert \(expert) perfect \(perfect)"
-        FileHandle.standardOutput.write(Data(("SNAP-BAL order " + line + "\n").utf8))
         #expect(novice < casual, "\(line)")
         #expect(casual < expert, "\(line)")
         #expect(expert <= perfect, "\(line)")

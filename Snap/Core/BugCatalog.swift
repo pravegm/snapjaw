@@ -188,14 +188,16 @@ enum TrapRules {
 
     /// R3: (x, y) moved straight out sideways to `creaseGap(radius:)` if it is closer to the midrib line (a point on
     /// the line goes right); if that leaves the normalised radius `maxR`, y is pulled toward the centre line.
+    /// R4 (REVIEW-3 #14): `side` +1 / −1 puts it on that lobe instead (0: the side it is on).
     static func offCrease(_ g: TrapGeometry, _ x: Double, _ y: Double, maxR: Double,
-                          radius: CGFloat) -> (Double, Double) {
+                          radius: CGFloat, side: Double = 0) -> (Double, Double) {
         let gap: Double = creaseGap(radius: radius)
         let cx: Double = Double(g.center.x)
         let cy: Double = Double(g.center.y)
         let dx: Double = x - cx
-        if abs(dx) >= gap { return (x, y) }
-        let nx: Double = cx + (dx >= 0 ? gap : -gap)
+        let sd: Double = side != 0 ? (side > 0 ? 1 : -1) : (dx >= 0 ? 1 : -1)
+        if dx * sd >= gap { return (x, y) }
+        let nx: Double = cx + sd * gap
         let ux: Double = gap / Double(g.a)
         let lim: Double = maxR * maxR - ux * ux
         var ny: Double = y

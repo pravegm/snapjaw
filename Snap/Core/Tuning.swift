@@ -6,7 +6,7 @@ import Foundation
 // Nothing is hard-coded elsewhere in Core. tools/balance-sim.js mirrors the balance-relevant values in its `T` table
 // (same names) and the detector values in its `D` table: KEEP THEM IDENTICAL. R1 tuning (design/notes/core-R1.md)
 // changed some GAME-DESIGN starting values; each change is marked "R1". R2 changes (design/notes/core-R2.md) are
-// marked "R2", R3 changes (design/notes/core-R3.md) "R3".
+// marked "R2", R3 changes (design/notes/core-R3.md) "R3", R4 changes (design/notes/core-R4.md) "R4".
 
 enum Tuning {
 
@@ -56,6 +56,13 @@ enum Tuning {
     static let startSnaps: Int = 10
     /// R3 (REVIEW-2 #23): two rows of 7, so a Sprout's 12-snap start never caps an early Feast away.
     static let maxSnaps: Int = 14
+    /// R4 (REVIEW-3 #11, founder call): a Sprout's first Feed run (SessionOptions.firstRun) starts with the max.
+    static let firstRunSnaps: Int = 14
+    /// R4: … and a calm first morning: waves 1…firstRunCalmWaves are crowds (one cluster, landing together), and the
+    /// gap after each of them is × firstRunWaveGap, so the novice pilot's first run lasts ≥ 90 s (it was 67 s with 14
+    /// snaps alone: a hand that bites every landing spends a snap per wave).
+    static let firstRunCalmWaves: Int = 14
+    static let firstRunWaveGap: Double = 1.6
     static let snapCost: Int = 1
     /// Caught ≥ feastCount: +feastRefund; caught ≥ bigFeastCount: +bigFeastRefund (instead).
     static let feastCount: Int = 3
@@ -76,13 +83,14 @@ enum Tuning {
 
     // MARK: Hunger (R2, GAME-DESIGN §5 "Hunger")
 
-    /// Seconds without a catching bite before a snap wilts, by day phase. R3 (REVIEW-2 #7): 18/16/14/12 (was
-    /// 15/14/12/10), and the clock only runs from the first in-trap landing of a catchable bug after a catching bite
-    /// (and after the start), so empty-trap time never counts.
+    /// Seconds of hunger before a snap wilts, by day phase. R3 (REVIEW-2 #7): 18/16/14/12 (was 15/14/12/10). R4
+    /// (QA-2 #1, REVIEW-3 #12, founder call): night 14, and the clock ticks only while at least one catchable bug has
+    /// landed in the trap and no protected bug has, so an empty, bee-only or bee-plus-flies trap never gets hungrier.
+    /// A catch resets it.
     static let wiltMorning: Double = 18
     static let wiltNoon: Double = 16
     static let wiltDusk: Double = 14
-    static let wiltNight: Double = 12
+    static let wiltNight: Double = 14
     /// `hungry` fires (and the hint shows) this many seconds before a wilt.
     static let hungryWarning: Double = 3
 
@@ -94,11 +102,13 @@ enum Tuning {
     /// An arriving bug is in the bite only below this height.
     static let catchableHeight: Double = 0.6
     /// After this wave reactions × lateReactionDecay per wave (floor lateReactionFloor).
-    /// R3: the late night is the run-ender now, not hunger: reactions × 0.96 per wave to a 0.25 floor and lingers
-    /// × 0.92 to a 0.2 floor, so even an 80 ms hand is outrun around wave 60–100 (was 0.97 / 0.6 and 0.98 / 0.5).
+    /// R3: the late night is the run-ender now, not hunger: reactions × 0.96 per wave to a floor and lingers × 0.92 to
+    /// a 0.2 floor (was 0.97 / 0.6 and 0.98 / 0.5). R4: the floor is 0.2 (was 0.25): at 0.25 a sipping housefly
+    /// (0.24 × 1.35 × 0.25 = 81 ms) never outran an 80 ms hand, and with R4's gated hunger nothing else ended a perfect
+    /// run. At 0.2 every night bug but the scarab outruns 80 ms by about wave 70.
     static let lateWaveStart: Int = 30
     static let lateReactionDecay: Double = 0.96
-    static let lateReactionFloor: Double = 0.25
+    static let lateReactionFloor: Double = 0.2
     /// R1: night lingers shrink the same way after lateWaveStart (floor lateLingerFloor).
     static let lateLingerDecay: Double = 0.92
     static let lateLingerFloor: Double = 0.2
@@ -201,6 +211,11 @@ enum Tuning {
     /// R3 (REVIEW-2 #5): no bug rests (lands, sips, pauses, ends a hop) with its centre closer to the midrib line than
     /// ScreenLayout.creaseHalfWidth + its radius + this (pt). See TrapRules.creaseGap(radius:).
     static let creaseClearance: Double = 16
+    /// R4 (REVIEW-3 #14): over the trap, a bug whose centre is within creaseHalfWidth + its radius of the midrib line
+    /// is at least this high (airborne). Ground moves (walks, wanders, nectar dashes, hops, darts) and the hover keep
+    /// to the bug's own lobe, and a walker walks in on its spot's side, so only approaches (height ≥ 0.5), crossers
+    /// (0.85), take-offs and the caught slide ever pass over the crease.
+    static let creaseAirHeight: Double = 0.5
 
     // MARK: Session
 
@@ -290,4 +305,7 @@ enum Tuning {
     static let perfectValue: Int = 400
     static let perfectRestless: Double = 0.7
     static let expertRestless: Double = 0.6
+    /// R4: expert and perfect bite a landed bug after this long (s) without a snap even when they judge it too quick
+    /// (a hand never waits for ever; with R4's gated hunger an unfed trap only wilts slowly).
+    static let pilotGiveUp: Double = 12
 }

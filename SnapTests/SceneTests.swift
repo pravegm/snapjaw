@@ -583,9 +583,10 @@ struct SceneTests {
         for _ in 0..<150 { scene.show(s, events: [], dt: 1.0 / 120.0) }
         #expect(scene.glyphsLanded == 3)
         #expect(scene.glyphFlights == 0)
-        // A sting cracks a glyph on the row.
+        // A sting cracks a glyph on the row (QA-2 #2: only for the snaps Core really took: 8 → 6).
         let sting = BiteReport(caught: [], escaped: 0, stingers: [.wasp], points: 0, countMultiplier: 0,
                                chainMultiplier: 1, snapsBack: 0, snapsLost: 2, duration: 0.1, time: 3)
+        s.snapsLeft = 6
         scene.show(s, events: [.snapped(sting), .stung(id: 5, species: .wasp, cost: 2)], dt: 1.0 / 120.0)
         for _ in 0..<10 { scene.show(s, events: [], dt: 1.0 / 120.0) }
         #expect(scene.glyphCracking)
@@ -833,6 +834,8 @@ struct SceneTests {
         let feast = BiteReport(caught: [.housefly, .gnat, .fruitFly], escaped: 0, stingers: [], points: 66,
                                countMultiplier: 3, chainMultiplier: 1, snapsBack: 2, snapsLost: 0, duration: 0.1,
                                time: 1)
+        // Core added the two snaps (8 → 10): the numeral waits for both glyphs.
+        s.snapsLeft = 10
         scene.show(s, events: [.snapped(feast), .bugCaught(id: 0, species: .housefly, position: s.bugs[0].position),
                                .feast(count: 3, snapsBack: 2)], dt: 1.0 / 120.0)
         #expect(scene.snapsShownOffset == -2)
@@ -844,6 +847,7 @@ struct SceneTests {
         scene.show(s, events: [], dt: 1.0 / 120.0)
         let sting = BiteReport(caught: [], escaped: 0, stingers: [.bee], points: 0, countMultiplier: 0,
                                chainMultiplier: 1, snapsBack: 0, snapsLost: 1, duration: 0.1, time: 3)
+        s.snapsLeft = 9
         scene.show(s, events: [.snapped(sting), .stung(id: 40, species: .bee, cost: 1)], dt: 1.0 / 120.0)
         #expect(scene.snapsShownOffset == 1)
         for _ in 0..<12 { scene.show(s, events: [], dt: 1.0 / 120.0) }
@@ -861,4 +865,381 @@ struct SceneTests {
         #expect(scene.snapsShownOffset == 0)
     }
 
+    // MARK: R4
+
+    /// One pixel of `img` (straight alpha), `x` from the left and `yUp` from the bottom (the drawing's y-up space).
+    static func pixel(_ img: CGImage, x: Int, yUp: Int) -> RGBA {
+        guard let data = img.dataProvider?.data, let bytes = CFDataGetBytePtr(data), img.bitsPerPixel == 32 else {
+            return RGBA(0, 0, 0, 0)
+        }
+        let col = min(max(x, 0), img.width - 1)
+        let row = img.height - 1 - min(max(yUp, 0), img.height - 1)
+        let i = row * img.bytesPerRow + col * 4
+        let a = Double(bytes[i + 3]) / 255
+        guard a > 0.001 else { return RGBA(0, 0, 0, 0) }
+        return RGBA(Double(bytes[i]) / 255 / a, Double(bytes[i + 1]) / 255 / a, Double(bytes[i + 2]) / 255 / a, a)
+    }
+
+    /// The average of a (2n+1)² window of pixels around (x, yUp).
+    static func average(_ img: CGImage, x: Int, yUp: Int, n: Int = 2) -> RGBA {
+        var r = 0.0, g = 0.0, b = 0.0, a = 0.0
+        var k = 0.0
+        for dx in -n...n {
+            for dy in -n...n {
+                let p = pixel(img, x: x + dx, yUp: yUp + dy)
+                r += p.r
+                g += p.g
+                b += p.b
+                a += p.a
+                k += 1
+            }
+        }
+        return RGBA(r / k, g / k, b / k, a / k)
+    }
+
+    /// REVIEW-3 #5 (the founder's face): outer lobe ≤ #C02A42, the oxblood gradient (#892934 by the midrib) visible
+    /// across the whole lobe, and a yellow-green blush (≈ #B8C25A, ≤ 40 %) only in the last 8–10 %, never peach.
+    @Test func theFaceIsCrimsonWithAYellowGreenBlush() {
+        let cap = RGBA(hex: 0xC02A42)
+        let tol = 0.5 / 255
+        for (_, c) in TrapArt.faceStops {
+            #expect(c.r <= cap.r + tol && c.g <= cap.g + tol && c.b <= cap.b + tol)
+        }
+        let mid = TrapArt.faceStops[1].1
+        #expect(abs(mid.r - TrapArt.lobeMidrib.r) < 0.01 && abs(mid.g - TrapArt.lobeMidrib.g) < 0.01)
+        #expect(TrapArt.faceStops[1].0 <= CGFloat(0.2))
+        // The blush: yellow-green, at most 40 %, nothing before 90 % of the radius.
+        let blush = TrapArt.blush
+        #expect(blush.g > blush.r && blush.r > blush.b * 1.6 && blush.b < 0.4)
+        #expect(BogArt.blushAlpha(at: 1) <= 0.4 && BogArt.blushAlpha(at: 1) > 0.3)
+        #expect(BogArt.blushAlpha(at: 0.9) < 0.001)
+        #expect(BogArt.blushAlpha(at: 0.8) < 0.001)
+        #expect(TrapArt.blushStart >= CGFloat(0.9) && TrapArt.blushStart <= CGFloat(0.92))
+
+        // As drawn: the scene's own lobe (right side) in scene space.
+        let g = SceneTests.geometry
+        let img = BogPainter.image(width: g.sceneSize.width, height: g.sceneSize.height, scale: 1) { ctx, _ in
+            BogArt.drawLobe(ctx, side: 1, geometry: g)
+        }
+        #expect(img != nil)
+        guard let im = img else { return }
+        let ia = g.a - TrapArt.rimBand
+        let y = Int(g.center.y + 14)
+        func at(_ f: CGFloat) -> RGBA { SceneTests.average(im, x: Int(g.center.x + ia * f), yUp: y) }
+        let inner = at(0.12), middle = at(0.5), outer = at(0.8), edge = at(0.985)
+        // Crimson out on the face, never lighter than the cap (no salmon).
+        #expect(outer.r <= cap.r + 0.02 && outer.g <= cap.g + 0.03)
+        #expect(outer.r > 2.5 * outer.g)
+        // The gradient reads across the lobe: darker by the midrib, brighter towards the margin.
+        #expect(BogPaint.luminance(inner) < BogPaint.luminance(middle))
+        #expect(BogPaint.luminance(middle) < BogPaint.luminance(outer))
+        #expect(BogPaint.contrast(inner, outer) > 1.3)
+        // The margin is warmed yellow-green, not peach: still a deep red-brown (peach #E3A26C has g/r 0.71, value 0.89).
+        #expect(edge.g / max(edge.r, 0.01) < 0.62)
+        #expect(edge.r < 0.82)
+        #expect(edge.g > outer.g)
+    }
+
+    /// REVIEW-3 #6: the hold reads "shut" — green leaf backs with crimson only at the seam, one hold width, and the
+    /// caught bugs sink into the seam (under the closed trap) within 60 ms.
+    @Test func theShutTrapShowsItsLeafBacks() {
+        let stops = TrapArt.closedStops
+        for (f, c) in stops where f < TrapArt.closedCrimsonFrom {
+            #expect(c.g > c.r)
+        }
+        let crimson = stops.filter { $0.0 > TrapArt.closedCrimsonFrom + 0.02 && $0.0 < 0.99 }
+        #expect(!crimson.isEmpty)
+        for (_, c) in crimson { #expect(c.r > c.g) }
+        #expect(TrapArt.closedCrimsonFrom >= CGFloat(0.7))
+
+        // As drawn: the outer part of each closed lobe is green.
+        let g = SceneTests.geometry
+        let img = BogPainter.image(width: g.sceneSize.width, height: g.sceneSize.height, scale: 1) { ctx, _ in
+            BogArt.drawClosedTrap(ctx, geometry: g)
+        }
+        #expect(img != nil)
+        if let im = img {
+            let halfW = (g.a + TrapArt.exteriorWidth) * TrapArt.slamSqueeze
+            for s in [CGFloat(-1), CGFloat(1)] {
+                let p = SceneTests.average(im, x: Int(g.center.x + s * halfW * 0.62), yUp: Int(g.center.y - 30), n: 1)
+                #expect(p.g > p.r)
+            }
+        }
+
+        // One hold width, and the caught fly sinks into the seam within 60 ms, under the closed trap.
+        let scene = BogScene(layout: SceneTests.duo)
+        let fly = CGPoint(x: g.center.x - 210, y: g.center.y + 70)
+        var s = TrapSnapshot(bugs: [SceneTests.bug(1, .housefly, fly, .sipping)])
+        for _ in 0..<4 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        s.closure = Tuning.snapDepth
+        s.bugs[0].activity = .caught(elapsed: 0)
+        let report = BiteReport(caught: [.housefly], escaped: 0, stingers: [], points: 10, countMultiplier: 1,
+                                chainMultiplier: 1, snapsBack: 0, snapsLost: 0, duration: 0.1, time: 1)
+        scene.show(s, events: [.snapped(report), .bugCaught(id: 1, species: .housefly, position: fly)],
+                   dt: 1.0 / 120.0)
+        var widths: [CGFloat] = []
+        var movedInHitStop = false
+        let closed = BogArt.closedFrame(geometry: g)
+        for k in 1...60 {
+            let e = Double(k) / 120
+            s.bugs[0].activity = .caught(elapsed: e)
+            scene.show(s, events: [], dt: 1.0 / 120.0)
+            if scene.closedTrapAlpha > CGFloat(0.5) { widths.append(scene.closedTrapWidth) }
+            if k == 4, scene.inHitStop, let p = scene.drawnPoint(ofBug: 1) {
+                movedInHitStop = abs(p.x - g.center.x) < abs(fly.x - g.center.x) * CGFloat(0.5)
+            }
+            if k == 8 {
+                // 66 ms: in the seam, under the closed trap.
+                let p = scene.drawnPoint(ofBug: 1) ?? fly
+                #expect(abs(p.x - g.center.x) < CGFloat(1.5))
+                #expect(closed.contains(p))
+                let z = scene.drawnZ(ofBug: 1) ?? 99
+                #expect(z < scene.closedTrapZ)
+                #expect((scene.drawnScale(ofBug: 1) ?? 1) < CGFloat(0.7))
+            }
+        }
+        #expect(movedInHitStop)
+        #expect(widths.count > 5)
+        let wMin = widths.min() ?? 0, wMax = widths.max() ?? 0
+        #expect(wMax - wMin < CGFloat(1))
+        #expect(wMax < 2 * (g.a + TrapArt.exteriorWidth) * CGFloat(0.32))
+        #expect(BogBugLayer.sinkLevel(BogBugLayer.sinkTime) > CGFloat(0.999))
+        #expect(BogBugLayer.sinkLevel(0.03) > CGFloat(0.7))
+        #expect(BogBugLayer.sinkLevel(0) < CGFloat(0.001))
+    }
+
+    /// REVIEW-3 #7: lit by phase — a peach haze and a warm rim through dusk waves 15–22, night from wave 23, a
+    /// whiter noon; the phase changes ease rather than pop.
+    @Test func duskShowsThroughWave22AndNightStartsAt23() {
+        func clock(wave w: Double) -> Double {
+            if w < 7 { return (w - 1) / 6 }
+            if w < 15 { return 1 + (w - 7) / 8 }
+            if w < 23 { return 2 + (w - 15) / 8 }
+            return 3 + (w - 23) / 8
+        }
+        for w in stride(from: 15.0, to: 23.0, by: 0.5) {
+            let lc = BogLight.lightClock(clock(wave: w))
+            let k = BogLight.key(at: lc)
+            #expect(lc >= 2 && lc < 2.1)
+            #expect(k.env.g < 0.75 && k.env.b < 0.6 && k.env.r > 0.95)
+            #expect(k.hazeAlpha > 0.2 && k.rimAlpha > 0.4)
+            // The trap warms at dusk but never lightens towards salmon: its overlay is a deep warm, never a pale peach.
+            #expect(BogPaint.luminance(k.lobe) < BogPaint.luminance(RGBA(hex: 0xF08080)))
+            #expect(BogLight.nightness(lc) < CGFloat(0.05))
+            #expect(k.liftAlpha > 0.05 && k.lift.b < 0.5)
+        }
+        // Noon (waves 7–14) is held white and higher-key than the morning.
+        for w in stride(from: 7.0, to: 15.0, by: 1) {
+            let lc = BogLight.lightClock(clock(wave: w))
+            #expect(abs(lc - 1) < 0.0001)
+        }
+        let noon = BogLight.key(at: 1), morning = BogLight.key(at: 0)
+        #expect(noon.liftAlpha > morning.liftAlpha && noon.lift.b > 0.9)
+        #expect(BogLight.nightness(BogLight.lightClock(clock(wave: 23))) > CGFloat(0.99))
+
+        // In the scene: wave 18 is peach, wave 22 still dusk; wave 23 eases into night over about a second.
+        let scene = BogScene(layout: SceneTests.duo)
+        var s = SceneTests.crowd()
+        s.dayClock = clock(wave: 18)
+        scene.show(s, events: [], dt: 1.0 / 60.0)
+        #expect(scene.rimLightAlpha > CGFloat(0.4))
+        #expect(scene.bogLiftAlpha > CGFloat(0.05) && scene.bogLiftColor.b < 0.5)
+        s.dayClock = clock(wave: 22.8)
+        for _ in 0..<10 { scene.show(s, events: [], dt: 1.0 / 60.0) }
+        #expect(scene.nightLevel < CGFloat(0.05))
+        s.dayClock = clock(wave: 23)
+        scene.show(s, events: [], dt: 1.0 / 60.0)
+        #expect(scene.lightClock < 2.2)
+        for _ in 0..<150 { scene.show(s, events: [], dt: 1.0 / 60.0) }
+        #expect(abs(scene.lightClock - 3) < 0.001)
+        #expect(scene.nightLevel > CGFloat(0.99))
+    }
+
+    /// REVIEW-3 #15: under 24 pt the snap glyph is a closed green pod with a crimson seam and three cilia ticks.
+    @Test func theSmallSnapGlyphIsAGreenPod() {
+        #expect(TrapArt.smallGlyphWidth == CGFloat(24))
+        #expect(TrapArt.smallGlyphTicks == 3)
+        let w: CGFloat = 16, h: CGFloat = 16 * 22 / 30, k: CGFloat = 3
+        let img = TrapArt.snapGlyph(width: w, height: h, scale: k)
+        let spent = TrapArt.snapGlyph(width: w, height: h, scale: k, empty: true)
+        #expect(img != nil && spent != nil)
+        guard let im = img else { return }
+        let line = max(h * 0.1, 1)
+        let rx = w * 0.5 - line, ry = h * 0.5 - line
+        let cx = w / 2, cy = h / 2
+        // The upper back (between the ticks, clear of the glint): leaf green.
+        let back = SceneTests.pixel(im, x: Int((cx + rx * 0.23) * k), yUp: Int((cy + ry * 0.62) * k))
+        #expect(back.g > back.r && back.a > 0.9)
+        // The seam: crimson.
+        let seam = SceneTests.pixel(im, x: Int((cx + rx * 0.23) * k), yUp: Int((cy + ry * 0.18) * k))
+        #expect(seam.r > 2 * seam.g && seam.a > 0.9)
+        // At 24 pt and up (the Duo's row) the full mini closed trap is drawn, the same size as before.
+        let big = TrapArt.snapGlyph(width: 30, height: 22, scale: 3)
+        #expect((big?.width ?? 0) == 90)
+    }
+
+    /// REVIEW-3 #3: the Scene exposes its live pops (scene space, their whole remaining rise) so the App keeps the
+    /// hint/toast plate off them.
+    @Test func livePopsAreExposedForThePlate() {
+        let scene = BogScene(layout: SceneTests.duo)
+        var s = SceneTests.crowd()
+        scene.show(s, events: [], dt: 1.0 / 120.0)
+        #expect(scene.livePopRects.isEmpty)
+        s.bugs[0].activity = .caught(elapsed: 0)
+        let report = BiteReport(caught: [.housefly, .gnat, .fruitFly], escaped: 0, stingers: [], points: 66,
+                                countMultiplier: 3, chainMultiplier: 1, snapsBack: 0, snapsLost: 0, duration: 0.1,
+                                time: 1)
+        scene.show(s, events: [.snapped(report), .bugCaught(id: 0, species: .housefly, position: s.bugs[0].position),
+                               .stung(id: 5, species: .bee, cost: 0)], dt: 1.0 / 120.0)
+        for _ in 0..<50 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        let live = scene.livePopRects, boxes = scene.popRects
+        #expect(!live.isEmpty && live.count == boxes.count)
+        for (i, b) in boxes.enumerated() where i < live.count {
+            // Each covers its pop's box now (the camera has settled) with room to spare.
+            #expect(live[i].insetBy(dx: BogPops.clearance - 1, dy: BogPops.clearance - 1).contains(b))
+            #expect(scene.overlapsLivePop(b))
+        }
+        // A plate far from every pop is clear.
+        let corner = CGRect(x: 2, y: 2, width: 20, height: 12)
+        #expect(!scene.overlapsLivePop(corner))
+        // A plate over the trap's middle (where the hero callout sits) is not.
+        let heroIndex = scene.popTexts.firstIndex { $0.hasPrefix("TRIPLE") } ?? 0
+        if heroIndex < boxes.count {
+            #expect(scene.overlapsLivePop(boxes[heroIndex].insetBy(dx: 4, dy: 4)))
+        }
+        // Gone when the pops are.
+        for _ in 0..<240 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        #expect(scene.livePopRects.isEmpty)
+    }
+
+    /// REVIEW-3 #16: the isolated trap, 3/4-tilted like the icon, with its leaf back and petiole leaf (never a centred
+    /// vertical slit), optionally with a sipping bug.
+    @Test func theIsolatedTrapIsThreeQuarterTilted() {
+        let img = TrapArt.trapImage(style: .threeQuarter, width: 300, scale: 1)
+        #expect(img != nil)
+        guard let im = img else { return }
+        #expect(abs(CGFloat(im.width) - CGFloat(300)) < CGFloat(2))
+        let aspect = CGFloat(im.height) / CGFloat(im.width)
+        #expect(abs(aspect - TrapArt.threeQuarterAspect) < CGFloat(0.02))
+        #expect(TrapPose.tilt < CGFloat(-0.1) && TrapPose.tilt > CGFloat(-0.35))
+        // Where trap-frame points land in the image.
+        let box = TrapPose.bounds()
+        let k = CGFloat(300) / box.width
+        func px(_ p: CGPoint) -> RGBA {
+            let q = p.applying(TrapPose.turn)
+            return SceneTests.average(im, x: Int((q.x - box.minX) * k), yUp: Int((q.y - box.minY) * k), n: 1)
+        }
+        let L = TrapPose.halfSpan, H = TrapPose.height
+        // The back lobe's face is crimson; the front lobe shows its green leaf back; the petiole leaf is green.
+        let face = px(CGPoint(x: -L * 0.05, y: H * 0.85))
+        #expect(face.r > 2 * face.g && face.a > 0.9)
+        let front = px(CGPoint(x: L * 0.1, y: -H * 0.45))
+        #expect(front.g > front.r && front.a > 0.9)
+        let stalk = px(CGPoint(x: -L * 0.55, y: -H * 1.25))
+        #expect(stalk.g > stalk.r && stalk.a > 0.9)
+        // The hinge is turned (not a vertical slit): the corners sit at different heights, side by side.
+        let l = TrapPose.cornerL.applying(TrapPose.turn), r = TrapPose.cornerR.applying(TrapPose.turn)
+        #expect(r.x - l.x > CGFloat(250) && abs(r.y - l.y) > CGFloat(20))
+        // With a sipping bug the face changes where it sits; without one it doesn't.
+        let fed = TrapArt.trapImage(style: .threeQuarter, width: 300, scale: 1, sippingBug: .housefly)
+        #expect(fed != nil && fed?.width == im.width && fed?.height == im.height)
+        if let f = fed {
+            let q = TrapPose.bugSpot.applying(TrapPose.turn)
+            let x = Int((q.x - box.minX) * k), y = Int((q.y - box.minY) * k)
+            let a = SceneTests.average(im, x: x, yUp: y, n: 2), b = SceneTests.average(f, x: x, yUp: y, n: 2)
+            #expect(abs(a.r - b.r) + abs(a.g - b.g) + abs(a.b - b.b) > 0.1)
+        }
+        // The top-down style is the scene's play trap, as before; it can carry a bug too.
+        let flat = TrapArt.trapImage(style: .topDown, width: 300, scale: 1)
+        #expect(abs(CGFloat(flat?.width ?? 0) - CGFloat(300)) < CGFloat(2))
+        #expect(TrapArt.trapImage(style: .topDown, width: 300, scale: 1, sippingBug: .bee) != nil)
+        // Drawn into any context too (badges).
+        let badge = BogPainter.image(width: 120, height: 120, scale: 1) { ctx, sz in
+            TrapArt.drawThreeQuarterTrap(ctx, size: sz, sippingBug: .housefly)
+        }
+        #expect(badge != nil)
+    }
+
+    /// QA-2 #2, #3, #6, #7: the glyphs and the numeral only show the change that really happened, the row flash sits
+    /// on the row, Home shows no economy, and (#8) a wilt lets the droop go gently.
+    @Test func theEconomyOnlyShowsRealChanges() {
+        #expect(BogScene.countedFlights(snapsBack: 2, before: 14, after: 14) == 0)
+        #expect(BogScene.countedFlights(snapsBack: 2, before: 13, after: 14) == 1)
+        #expect(BogScene.countedFlights(snapsBack: 2, before: 3, after: 5) == 2)
+        #expect(BogScene.shownStingCost(costs: 2, before: 1, after: 0) == 1)
+        #expect(BogScene.shownStingCost(costs: 3, before: 5, after: 2) == 3)
+        #expect(BogScene.shownStingCost(costs: 1, before: 10, after: 10) == 0)
+
+        let scene = BogScene(layout: SceneTests.duo)
+        scene.hudSnapsAnchor = CGPoint(x: 760, y: 40)
+        var s = SceneTests.crowd()
+        // A Feast at the cap: the glyphs fly, the numeral never dips.
+        s.snapsLeft = 14
+        scene.show(s, events: [], dt: 1.0 / 120.0)
+        s.bugs[0].activity = .caught(elapsed: 0)
+        let feast = BiteReport(caught: [.housefly, .gnat, .fruitFly, .ant, .ladybird], escaped: 0, stingers: [],
+                               points: 255, countMultiplier: 5, chainMultiplier: 1, snapsBack: 2, snapsLost: 0,
+                               duration: 0.1, time: 1)
+        scene.show(s, events: [.snapped(feast), .bugCaught(id: 0, species: .housefly, position: s.bugs[0].position),
+                               .feast(count: 5, snapsBack: 2)], dt: 1.0 / 120.0)
+        #expect(scene.glyphFlights == 2)
+        var dipped = false
+        for _ in 0..<120 {
+            scene.show(s, events: [], dt: 1.0 / 120.0)
+            if scene.snapsShownOffset != 0 { dipped = true }
+        }
+        #expect(!dipped)
+        // A bee and a wasp in one bite with 5 left: the numeral waits on both (3), then drops once.
+        let both = BiteReport(caught: [], escaped: 0, stingers: [.bee, .wasp], points: 0, countMultiplier: 0,
+                              chainMultiplier: 1, snapsBack: 0, snapsLost: 3, duration: 0.1, time: 3)
+        s.snapsLeft = 5
+        scene.show(s, events: [], dt: 1.0 / 120.0)
+        let row = CGRect(x: 640, y: 20, width: 220, height: 50)
+        scene.hudSnapsRowRect = row
+        s.snapsLeft = 2
+        scene.show(s, events: [.snapped(both), .stung(id: 20, species: .bee, cost: 1),
+                               .stung(id: 21, species: .wasp, cost: 2)], dt: 1.0 / 120.0)
+        #expect(scene.pendingCrackCost == 3)
+        #expect(scene.snapsShownOffset == 3)
+        #expect(abs(scene.rowFlashCenter.x - row.midX) < CGFloat(0.5))
+        #expect(abs(scene.rowFlashCenter.y - row.midY) < CGFloat(0.5))
+        for _ in 0..<100 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        #expect(scene.snapsShownOffset == 0)
+        // One snap left and a wasp that costs two: the numeral shows 1 (never 2), then 0.
+        s.snapsLeft = 1
+        scene.show(s, events: [], dt: 1.0 / 120.0)
+        let wasp = BiteReport(caught: [], escaped: 0, stingers: [.wasp], points: 0, countMultiplier: 0,
+                              chainMultiplier: 1, snapsBack: 0, snapsLost: 1, duration: 0.1, time: 5)
+        s.snapsLeft = 0
+        scene.show(s, events: [.snapped(wasp), .stung(id: 22, species: .wasp, cost: 2)], dt: 1.0 / 120.0)
+        #expect(s.snapsLeft + scene.snapsShownOffset == 1)
+
+        // Home: no glyphs, no crack, no wilt.
+        let home = BogScene(layout: SceneTests.duo)
+        home.showsEconomy = false
+        var h = SceneTests.crowd()
+        h.snapsLeft = 8
+        home.show(h, events: [], dt: 1.0 / 120.0)
+        h.snapsLeft = 10
+        h.bugs[0].activity = .caught(elapsed: 0)
+        home.show(h, events: [.snapped(feast), .bugCaught(id: 0, species: .housefly, position: h.bugs[0].position)],
+                  dt: 1.0 / 120.0)
+        #expect(home.glyphFlights == 0)
+        h.snapsLeft = 9
+        home.show(h, events: [.snapped(both), .stung(id: 20, species: .bee, cost: 1), .wilted(snapsLeft: 9)],
+                  dt: 1.0 / 120.0)
+        #expect(!home.glyphCracking && !home.glyphWilting && home.snapsShownOffset == 0)
+
+        // QA-2 #8: a wilt lets the droop go over ~0.6 s, never in one frame.
+        let jaws = BogScene(layout: SceneTests.duo)
+        var j = SceneTests.crowd()
+        j.hunger = 0.98
+        jaws.show(j, events: [], dt: 1.0 / 120.0)
+        #expect(jaws.hungerDroop > CGFloat(0.8))
+        j.hunger = 0
+        jaws.show(j, events: [.wilted(snapsLeft: 7)], dt: 1.0 / 120.0)
+        #expect(jaws.hungerDroop > CGFloat(0.7))
+        for _ in 0..<90 { jaws.show(j, events: [], dt: 1.0 / 120.0) }
+        #expect(jaws.hungerDroop < CGFloat(0.01))
+    }
 }

@@ -497,6 +497,30 @@ final class BogPops {
         return out
     }
 
+    /// R4 (#3): how far the App's plates keep from a live pop (points, on every side).
+    static let clearance: CGFloat = 6
+
+    /// R4 (#3): every live pop's footprint for the rest of its life, in the pops' own space: its box at the pop-in
+    /// overshoot (and its drop shadow) swept from where it is now to where its rise ends, padded by `clearance`.
+    /// Pops still waiting on their delay count from their start.
+    var liveRects: [CGRect] {
+        var out: [CGRect] = []
+        for i in 0..<ages.count where ages[i] >= 0 {
+            let u = max(ages[i] - delays[i], 0)
+            let f = CGFloat(min(u / lives[i], 1))
+            let ease = 1 - (1 - f) * (1 - f)
+            let y0 = starts[i].y + rises[i] * ease
+            let y1 = starts[i].y + rises[i]
+            let over = 1 + BogPops.overshoot(hero: heroes[i])
+            let b = boxes[i]
+            let w = b.width * over, h = b.height * over
+            let lo = min(y0, y1) - h / 2 - 3, hi = max(y0, y1) + h / 2
+            let r = CGRect(x: starts[i].x - w / 2, y: lo, width: w + 2, height: hi - lo)
+            out.append(r.insetBy(dx: -BogPops.clearance, dy: -BogPops.clearance))
+        }
+        return out
+    }
+
     func clear() {
         for i in 0..<ages.count {
             ages[i] = -1

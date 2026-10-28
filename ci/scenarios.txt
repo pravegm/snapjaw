@@ -54,3 +54,11 @@
 # R3
 35-play-night-open|screen=play;seed=7;wave=24;pilot=expert;freezeOn=landed|40|Night with the trap open (no bite on screen): the blue bog, the trap still crimson, firefly blooms|SNAP-T canvas
 36-badges|screen=badges|15|The 12 Game Center achievement badges, 1024 x 1024 (written to Documents/badges, collected into badges/)|SNAP-T badges done
+# R4 (REVIEW-3 #2, #7, #9, #10, #20): standard rules unless progress=fresh / firstRun=1
+37-play-dusk-18|screen=play;seed=7;wave=18;pilot=expert;freezeOn=landed|40|Dusk at wave 18: the peach haze and the warm rim light, the trap crimson|SNAP-T canvas
+38-play-first-hint|screen=play;seed=7;freezeOn=firstHint|30|The first wave of a run, no snap yet: "Snap the halves together" (phone: "Tap to snap")|SNAP-T freeze firstHint
+39-play-chain5|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=chain5|240|The chain reaching ×5: the chip flare|SNAP-T freeze chain5
+40-play-costly-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=costlySting|120|A sting that costs snaps: "Stung! · +N", a glyph cracks and the row flashes crimson|SNAP-T freeze costlySting
+41-play-dry-snap|screen=play;seed=7;pilot=novice;freezeOn=drySnap|90|A dry snap: nothing caught, the chain broken|SNAP-T freeze drySnap
+42-play-held|screen=play;seed=7;wave=6;pilot=casual;freezeOn=held|150|A 1-bug clean bite holding the chain: "×1.5 held"|SNAP-T freeze held
+43-play-sprout-first-sting|screen=play;seed=7;wave=15;pilot=novice;progress=fresh;firstRun=1;freezeOn=sting|120|Sprout run 1: the free first sting, "Bees and wasps cost snaps. This one's free!" in the hint slot, the row flashing green|SNAP-T event stung

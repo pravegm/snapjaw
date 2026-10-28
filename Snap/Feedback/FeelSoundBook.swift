@@ -445,11 +445,16 @@ enum FeelSoundBook {
         return start + spitAfter + 0.14 * Float(stingZaps(species) - 1) + verdictAfterSpit
     }
 
+    /// R4 (QA-2 #9): when the HUD numeral drops for a costly sting (s after the bite): the Scene's 50 ms hit-stop
+    /// (`BogScene.hitStopTime`), then `BogEconomy.crackLead` (0.15 s) while the glyph cracks. The loss blip and its
+    /// haptic land here, so the sound and the number agree. Keep in step with the Scene (design/notes/feel-R4.md).
+    static let numeralDropAt: Float = 0.2
+
     /// The loss blip's two notes, `lostSpacing` apart; the whole blip is over after `lostLength`.
     static let lostSpacing: Float = 0.12
     static let lostLength: Float = 0.32
 
-    /// R3: a sting that cost snaps says "you lost something": a short descending two-note blip after the "Bzzt!".
+    /// R3: a sting that cost snaps says "you lost something": a short descending two-note blip (R4: at `numeralDropAt`).
     /// Hollow square-ish blips (odd harmonics) doubled on the marimba, A5 then a fourth down to E5; a wasp's two
     /// snaps fall a fifth, to D5. Clear and small, never louder than the CHOMP.
     static func snapLost(cost: Int = 1, delay: Float = 0, dice: inout FeelDice) -> [FeelSynthCommand] {

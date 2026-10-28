@@ -271,7 +271,10 @@ enum WaveFactory {
     }
 
     /// Builds wave `index` (1-based) for this run seed, aiming bugs at `nectar` (the drops at the wave's start).
-    static func wave(seed: UInt64, index: Int, geometry: TrapGeometry, nectar: [NectarDrop]) -> WaveSpec {
+    /// R4 (REVIEW-3 #11): `calm` (a Sprout's first Feed run, SessionOptions.firstRun) makes waves up to
+    /// Tuning.firstRunCalmWaves crowds. The crowd chance is still drawn, so the draw order never changes.
+    static func wave(seed: UInt64, index: Int, geometry: TrapGeometry, nectar: [NectarDrop],
+                     calm: Bool = false) -> WaveSpec {
         var r = SeededRandom(seed: waveSeed(seed: seed, index: index))
         let ph: DayPhase = phase(forWave: index)
         var size: Int
@@ -285,7 +288,8 @@ enum WaveFactory {
             case .night: size = r.int(Tuning.sizeNightMin...Tuning.sizeNightMax)
             }
         }
-        let crowd: Bool = index >= Tuning.crowdFromWave && r.chance(Tuning.crowdChance)
+        let crowd: Bool = (index >= Tuning.crowdFromWave && r.chance(Tuning.crowdChance))
+            || (calm && index <= Tuning.firstRunCalmWaves)
         if crowd { size = max(size, 3) }
         let p: [Weighted] = pool(ph, index)
         // Shuffled drop order (Fisher–Yates).

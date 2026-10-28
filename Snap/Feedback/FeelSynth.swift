@@ -386,6 +386,14 @@ private struct FeelVoice {
     var active = false
     /// The synth's start counter when this voice started (steal order: the smallest goes first).
     var stamp: UInt64 = 0
+    /// R4 (QA-2 #16): the synth's sample clock when this voice started; it can't be stolen for `protectWindow` after.
+    var born: UInt64 = 0
+    /// R4 (QA-2 #16): samples left in a steal fade-out (0: not fading).
+    var fadeLeft = 0
+    /// R4 (QA-2 #16): the command that takes this slot once the fade-out ends.
+    var next: FeelSynthCommand?
+    /// The magnitude of this voice's last output sample (the size of the step if it stopped here).
+    var last: Float = 0
     var kind: FeelVoiceKind = .noise
     var delay = 0
     var age = 0
@@ -504,6 +512,12 @@ final class FeelSynth: @unchecked Sendable {
     /// Buzz slot glides: the level's time constant (≈ 80 ms to fade in or out) and the pan's.
     static let buzzLevelTau: Float = 0.027
     static let buzzPanTau: Float = 0.06
+    /// R4 (QA-2 #16): a stolen voice fades out over this long (≥ 5 ms, a smoothstep) before the new command takes its
+    /// slot, so a steal never cuts a ringing voice dead. The new command's delay absorbs the wait.
+    static let stealFade: Float = 0.006
+    /// R4 (QA-2 #16): a voice is never stolen this soon after it starts, so a bite whose commands straddle two render
+    /// callbacks (10 ms buffers; about 23 ms if iOS ignores the preference) never takes voices from its own first half.
+    static let protectWindow: Float = 0.03
 
     private let queue: UnsafeMutablePointer<FeelSynthCommand>
     private let writeIndex = Atomic<Int>(0)
@@ -512,6 +526,7 @@ final class FeelSynth: @unchecked Sendable {
     private let renderCount = Atomic<Int>(0)
     private let stolenCount = Atomic<Int>(0)
     private let droppedCount = Atomic<Int>(0)
+    private let loudestEndBits = Atomic<UInt32>(0)
 
     // Audio-thread-only state below.
     private let voices: UnsafeMutablePointer<FeelVoice>
@@ -524,8 +539,8 @@ final class FeelSynth: @unchecked Sendable {
     private var retuneCounter = 0
     /// Monotonic voice start counter (each start takes the next stamp).
     private var startCounter: UInt64 = 0
-    /// The first stamp of the current drain: voices from this drain (stamp ≥ floor) are never stolen.
-    private var drainFloor: UInt64 = 1
+    /// R4: samples rendered so far (a voice's age for the steal protection).
+    private var clock: UInt64 = 0
 
     // Groan.
     private var groanPhase: Float = 0
@@ -575,6 +590,8 @@ final class FeelSynth: @unchecked Sendable {
     private let musicStepSamples: Int
     private let bubbleDecay: Float
     private let bubbleChirp: Float
+    private let fadeSamples: Int
+    private let protectSamples: UInt64
 
     init(sampleRate: Float) {
         let rate: Float = sampleRate > 1000 ? sampleRate : 48_000
@@ -602,6 +619,8 @@ final class FeelSynth: @unchecked Sendable {
         bubbleDecay = exp(-1 / (0.006 * rate))
         bubbleChirp = pow(1.8, 1 / (0.012 * rate))
         frogCountdown = Int(rate * 2)
+        fadeSamples = max(Int((FeelSynth.stealFade * rate).rounded(.up)), 1)
+        protectSamples = UInt64(max(Int(FeelSynth.protectWindow * rate), 1))
         tuneFixedFilters()
         retuneContinuous()
     }
@@ -635,11 +654,24 @@ final class FeelSynth: @unchecked Sendable {
     /// Render callbacks so far: if it stops climbing, the engine isn't pulling audio.
     var renderCallbacks: Int { renderCount.load(ordering: .relaxed) }
 
-    /// One-shot voices that took over the oldest playing voice (all 128 busy), for tests and diagnostics.
+    /// One-shot commands that took over the oldest playing voice (all 128 busy; the old voice fades out first), for
+    /// tests and diagnostics.
     var stolenVoices: Int { stolenCount.load(ordering: .relaxed) }
 
-    /// One-shot commands dropped because every voice was started in the same drain, for tests and diagnostics.
+    /// One-shot commands dropped because every voice was too young to steal (or already fading), for tests and
+    /// diagnostics.
     var droppedVoices: Int { droppedCount.load(ordering: .relaxed) }
+
+    /// R4 (QA-2 #16): the loudest step any one-shot voice left when it stopped (its last sample's magnitude, before
+    /// the pan and the master; `stopAll` aside), for tests: a voice that ends, fades or is stolen never clicks.
+    var loudestVoiceEnd: Float { Float(bitPattern: loudestEndBits.load(ordering: .relaxed)) }
+
+    /// R4 (QA-2 #16): the steal fade's gain, 1 → 0 as `x` (the share of the fade left) goes 1 → 0. A smoothstep, so
+    /// both ends are flat. Pure.
+    static func fadeCurve(_ x: Float) -> Float {
+        let t = x.isFinite ? min(max(x, 0), 1) : 0
+        return t * t * (3 - 2 * t)
+    }
 
     /// Equal-power pan gains, normalised so the centre is 1 on each side: (√(1 − p), √(1 + p)). Pure.
     static func panGains(_ pan: Float) -> (left: Float, right: Float) {
@@ -659,6 +691,7 @@ final class FeelSynth: @unchecked Sendable {
         drain()
         let twoPi = 2 * Float.pi
         var blockPeak: Float = 0
+        var blockEnd: Float = 0
         for frame in 0..<frames {
             bed.approach(target, glideK)
             retuneCounter += 1
@@ -697,7 +730,7 @@ final class FeelSynth: @unchecked Sendable {
                 let gain: Float = 0.03 + 0.03 * unitNoise()
                 let pan: Float = 1.4 * unitNoise() - 0.7
                 start(.drop(FeelDropSpec(frequency: f, chirp: 1.7, decay: 0.02 + 0.015 * unitNoise(), gain: gain,
-                                         pan: pan)))
+                                         pan: pan)), mayTake: false)
             }
             if bed.crickets > FeelSynth.quiet {
                 let pair = renderNightCrickets()
@@ -718,9 +751,25 @@ final class FeelSynth: @unchecked Sendable {
                 }
             }
             for index in 0..<FeelSynth.voiceCount where voices[index].active {
-                let value = renderVoice(&voices[index], slot: index)
+                let before = voices[index].last
+                var value = renderVoice(&voices[index], slot: index)
+                // QA-2 #16: a stolen voice fades out, then hands its slot to the command that took it.
+                let fading = voices[index].fadeLeft
+                if fading > 0 {
+                    value *= FeelSynth.fadeCurve(Float(fading) / Float(fadeSamples))
+                    voices[index].fadeLeft = fading - 1
+                    if fading == 1 { voices[index].active = false }
+                }
+                let size = abs(value)
+                voices[index].last = size
                 l += value * voices[index].gainL
                 r += value * voices[index].gainR
+                if !voices[index].active {
+                    blockEnd = max(blockEnd, max(before, size))
+                    if let next = voices[index].next {
+                        launch(next, slot: index, late: fadeSamples)
+                    }
+                }
             }
             l = (l + mid) * bed.master
             r = (r + mid) * bed.master
@@ -753,9 +802,12 @@ final class FeelSynth: @unchecked Sendable {
                 left[frame] = mono
                 blockPeak = max(blockPeak, abs(mono))
             }
+            clock &+= 1
         }
         let previous = Float(bitPattern: peakBits.load(ordering: .relaxed))
         if blockPeak > previous { peakBits.store(blockPeak.bitPattern, ordering: .relaxed) }
+        let previousEnd = Float(bitPattern: loudestEndBits.load(ordering: .relaxed))
+        if blockEnd > previousEnd { loudestEndBits.store(blockEnd.bitPattern, ordering: .relaxed) }
         renderCount.store(renderCount.load(ordering: .relaxed) &+ 1, ordering: .relaxed)
     }
 
@@ -815,14 +867,14 @@ final class FeelSynth: @unchecked Sendable {
         if unitNoise() < 0.7 {
             let f: Float = 380 + 160 * unitNoise()
             start(.fm(FeelFMSpec(carrier: f, ratio: 0.5, index: 2.2, indexDecay: 0.025, attack: 0.004, decay: 0.035,
-                                 gain: 0.05 * level, pan: pan)))
+                                 gain: 0.05 * level, pan: pan)), mayTake: false)
             start(.fm(FeelFMSpec(carrier: f * 1.06, ratio: 0.5, index: 2.0, indexDecay: 0.025, attack: 0.004,
-                                 decay: 0.04, gain: 0.045 * level, delay: 0.085, pan: pan)))
+                                 decay: 0.04, gain: 0.045 * level, delay: 0.085, pan: pan)), mayTake: false)
         } else {
             let f: Float = 100 + 22 * unitNoise()
             start(.tone(FeelToneSpec(start: f, end: f * 0.88, glide: 0.25, duration: 0.34, attack: 0.03, decay: 0.12,
                                      gain: 0.055 * level, harmonics: 6, vibratoRate: 28, vibratoDepth: 0.05,
-                                     pan: pan)))
+                                     pan: pan)), mayTake: false)
         }
     }
 
@@ -1119,7 +1171,6 @@ final class FeelSynth: @unchecked Sendable {
         var read = readIndex.load(ordering: .relaxed)
         let write = writeIndex.load(ordering: .acquiring)
         var handled = 0
-        drainFloor = startCounter &+ 1
         while read != write && handled < 256 {
             let command = queue[read]
             read = (read + 1) % FeelSynth.queueCapacity
@@ -1143,7 +1194,7 @@ final class FeelSynth: @unchecked Sendable {
             clean.pitch = clean.pitch.isFinite ? min(max(clean.pitch, 0.5), 2) : 1
             buzz[slot].want = clean
         case .stopAll:
-            for index in 0..<FeelSynth.voiceCount { voices[index].active = false }
+            for index in 0..<FeelSynth.voiceCount { voices[index] = FeelVoice() }
             for slot in 0..<FeelSynth.buzzSlots {
                 buzz[slot].want = FeelBuzz()
                 buzz[slot].level = 0
@@ -1201,7 +1252,7 @@ final class FeelSynth: @unchecked Sendable {
         dcOutL = 0
         dcInR = 0
         dcOutR = 0
-        for index in 0..<FeelSynth.voiceCount { voices[index].active = false }
+        for index in 0..<FeelSynth.voiceCount { voices[index] = FeelVoice() }
         for slot in 0..<FeelSynth.buzzSlots {
             let wanted = buzz[slot].want
             buzz[slot] = FeelBuzzState()
@@ -1220,36 +1271,54 @@ final class FeelSynth: @unchecked Sendable {
         (nextNoise() + 1) * 0.5
     }
 
-    /// QA-1 #4: a free voice, else the voice that started first (the smallest stamp), but never one started in the
-    /// current drain (a bite's own commands never cut each other off); if every voice is that new, the command is
-    /// dropped. 128 voices make stealing rare; the oldest voice has usually decayed to almost nothing.
-    private func start(_ command: FeelSynthCommand) {
-        var slot = -1
+    /// QA-1 #4 and R4 (QA-2 #16): a free voice, else the voice that started first (the smallest stamp), but never one
+    /// younger than `protectWindow` (a bite's own commands never take each other's voices, even across two render
+    /// callbacks) and never one already fading out for another command; if none is left, the command is dropped.
+    /// The taken voice fades out over `stealFade` and the command then starts in its slot (a voice still waiting out
+    /// its delay is silent, so it is replaced at once). `mayTake: false` (the bog's drips and frogs) only ever uses a
+    /// free voice. 128 voices make stealing rare; the oldest voice has usually decayed to almost nothing.
+    private func start(_ command: FeelSynthCommand, mayTake: Bool = true) {
+        var free = -1
         var oldest = -1
         var oldestStamp = UInt64.max
         for index in 0..<FeelSynth.voiceCount {
             if !voices[index].active {
-                slot = index
+                free = index
                 break
             }
+            if voices[index].fadeLeft > 0 { continue }
+            if clock &- voices[index].born < protectSamples { continue }
             let stamp = voices[index].stamp
-            if stamp < drainFloor && stamp < oldestStamp {
+            if stamp < oldestStamp {
                 oldestStamp = stamp
                 oldest = index
             }
         }
-        if slot < 0 {
-            guard oldest >= 0 else {
-                droppedCount.store(droppedCount.load(ordering: .relaxed) &+ 1, ordering: .relaxed)
-                return
-            }
-            slot = oldest
-            stolenCount.store(stolenCount.load(ordering: .relaxed) &+ 1, ordering: .relaxed)
+        if free >= 0 {
+            launch(command, slot: free, late: 0)
+            return
         }
+        guard mayTake else { return }
+        guard oldest >= 0 else {
+            droppedCount.store(droppedCount.load(ordering: .relaxed) &+ 1, ordering: .relaxed)
+            return
+        }
+        stolenCount.store(stolenCount.load(ordering: .relaxed) &+ 1, ordering: .relaxed)
+        if voices[oldest].delay > 0 {
+            launch(command, slot: oldest, late: 0)
+        } else {
+            voices[oldest].fadeLeft = fadeSamples
+            voices[oldest].next = command
+        }
+    }
+
+    /// Starts `command` in `slot` now. `late`: samples it has already waited (a steal fade), taken off its delay.
+    private func launch(_ command: FeelSynthCommand, slot: Int, late: Int) {
         startCounter &+= 1
         var voice = FeelVoice()
         voice.active = true
         voice.stamp = startCounter
+        voice.born = clock
         let gains = FeelSynth.panGains(command.pan)
         voice.gainL = gains.left
         voice.gainR = gains.right
@@ -1325,6 +1394,7 @@ final class FeelSynth: @unchecked Sendable {
         case .bed, .buzz, .stopAll:
             return
         }
+        voice.delay = max(voice.delay - max(late, 0), 0)
         voices[slot] = voice
     }
 

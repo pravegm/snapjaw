@@ -277,7 +277,8 @@ struct HUDLayout: Equatable {
     static let snapRowGap: CGFloat = 5
     /// Height over width: the Scene's snap glyph is drawn 30 × 22 (`TrapArt.snapGlyph`).
     static let glyphAspect: CGFloat = 22.0 / 30.0
-    static let glyphDuo: CGFloat = 22
+    /// R4 (Scene R4 #15): 24 pt on the Duo draws the full mini closed trap (smaller ones are the simple pod).
+    static let glyphDuo: CGFloat = 24
     static let glyphPhone: CGFloat = 16
     /// Glyphs shrink towards this when a row would touch the cilia.
     static let glyphMin: CGFloat = 12
@@ -409,11 +410,20 @@ struct HUDLayout: Equatable {
         return CGPoint(x: x0 + CGFloat(col) * (glyph + Self.snapGap) + glyph / 2, y: rect.midY)
     }
 
-    /// The Scene's economy anchor (`BogScene.hudSnapsAnchor`: Feast glyph flights, the sting crack, the wilt droop, the
-    /// row flash 90 pt right of it): the top row's first glyph, as the Scene's contract asks. Pure; tested.
+    /// The Scene's economy anchor (`BogScene.hudSnapsAnchor`: Feast glyph flights, the sting crack, the wilt droop).
+    /// R4 (QA-2 #6): the glyph that changes, the last full one (`snapsLeft − 1`; the first slot when none is left);
+    /// the row flash now covers `hudSnapsRowRect`. Pure; tested.
     func anchor(snapsLeft: Int) -> CGPoint {
-        _ = snapsLeft
-        return glyphCenter(0)
+        glyphCenter(max(snapsLeft - 1, 0))
+    }
+
+    /// R4 (REVIEW-3 #3): where the hint plate goes this frame: its own slot (the inner top), else the other one (the
+    /// inner bottom) when a live pop is under it, else nowhere until the pop has gone (a plate never covers a pop).
+    /// `low`: the plate sits in the lower slot. Pure; tested.
+    static func hintSlot(primary: CGRect, alternate: CGRect, pops: [CGRect]) -> (rect: CGRect, low: Bool)? {
+        if !pops.contains(where: { $0.intersects(primary) }) { return (primary, false) }
+        if !pops.contains(where: { $0.intersects(alternate) }) { return (alternate, true) }
+        return nil
     }
 
     /// Every rect the play HUD draws text or glyphs in (the fold-clear test).

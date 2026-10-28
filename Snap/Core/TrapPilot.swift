@@ -10,7 +10,8 @@ import Foundation
 //   nothing else flying in (or 1 worth ≥ 20, or 7 s), and fumbles 30 % of its snaps (a slow 0.3–0.45 s close);
 //   expert waits for 3 it can catch at its speed, or value ≥ 120, or 2 with one about to leave, or 6 s; perfect waits
 //   for 5, or 3 with nothing else about to land, or value ≥ 400, or 7 s. Each decision waits a human reaction delay
-//   and is re-checked before the stroke.
+//   and is re-checked before the stroke. R4: expert and perfect also bite any landed bug after Tuning.pilotGiveUp
+//   (12 s) without a snap, even one they judge too quick (hands never wait for ever).
 // - Bees: each protected bug in the trap is rolled once: missed (ignored) with novice 0.6, casual 0.25, expert 0.02;
 //   perfect never misses and also waits while a protected bug is flying low over the trap.
 // - The novice sometimes creeps (a slow 12° close over 1.2 s before finishing the snap). The expert shoos a bee that
@@ -190,10 +191,12 @@ struct TrapPilot {
             want = v.catchable >= 3 || (v.catchable >= 1 && v.value >= Tuning.expertValue)
                 || (v.catchable >= 2 && v.restless >= Tuning.expertRestless)
                 || (v.catchable >= 1 && waited >= Tuning.expertPatience)
+                || (v.landed >= 1 && waited >= Tuning.pilotGiveUp)
         case .perfect:
             want = v.catchable >= 5 || (v.catchable >= 3 && v.arriving == 0)
                 || (v.catchable >= 3 && v.restless >= Tuning.perfectRestless) || v.value >= Tuning.perfectValue
                 || (v.catchable >= 1 && waited >= Tuning.perfectPatience)
+                || (v.landed >= 1 && waited >= Tuning.pilotGiveUp)
         }
         if !want { return false }
         return !beeBlocks(snap)

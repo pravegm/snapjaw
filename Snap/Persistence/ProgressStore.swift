@@ -81,6 +81,9 @@ struct ProgressData: Codable, Equatable {
     var lifetimeBugs = 0
     var lifetimeSpared = 0
     var runs = 0
+    /// R4 (QA-2 #11): Feed runs only (the first Feed run gets Sprout run 1 even after a Daily). A save from before R4
+    /// has none on record and takes `runs` (every run counted as Feed: an older player never gets the perks again).
+    var feedRuns = 0
     var snaps = 0
     var feasts = 0
     var stings = 0
@@ -111,6 +114,7 @@ struct ProgressData: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case version, bestFeed, bestDaily, lifetimeScore, lifetimeBugs, lifetimeSpared, runs, snaps, feasts, stings
+        case feedRuns
         case bestBitePoints, biggestBite, longestChain, fastestSnap, caught, spared, foundOrder, achievements, daily
         case dailyAttempted, lastDailyDay, lessonDone, pendingRun
     }
@@ -126,6 +130,7 @@ struct ProgressData: Codable, Equatable {
         lifetimeBugs = max((try? c.decodeIfPresent(Int.self, forKey: .lifetimeBugs)) ?? 0, 0)
         lifetimeSpared = max((try? c.decodeIfPresent(Int.self, forKey: .lifetimeSpared)) ?? 0, 0)
         runs = max((try? c.decodeIfPresent(Int.self, forKey: .runs)) ?? 0, 0)
+        feedRuns = max((try? c.decodeIfPresent(Int.self, forKey: .feedRuns)) ?? runs, 0)
         snaps = max((try? c.decodeIfPresent(Int.self, forKey: .snaps)) ?? 0, 0)
         feasts = max((try? c.decodeIfPresent(Int.self, forKey: .feasts)) ?? 0, 0)
         stings = max((try? c.decodeIfPresent(Int.self, forKey: .stings)) ?? 0, 0)
@@ -155,6 +160,7 @@ struct ProgressData: Codable, Equatable {
         try c.encode(lifetimeBugs, forKey: .lifetimeBugs)
         try c.encode(lifetimeSpared, forKey: .lifetimeSpared)
         try c.encode(runs, forKey: .runs)
+        try c.encode(feedRuns, forKey: .feedRuns)
         try c.encode(snaps, forKey: .snaps)
         try c.encode(feasts, forKey: .feasts)
         try c.encode(stings, forKey: .stings)
@@ -312,6 +318,7 @@ enum ProgressRules {
         outcome.rankAfter = rankFor(data.lifetimeBugs)
         outcome.firstRun = data.runs == 0
         data.runs += 1
+        if case .feed = result.mode { data.feedRuns += 1 }
         data.snaps += max(result.snaps, 0)
         data.feasts += max(result.feasts, 0)
         data.stings += max(result.stings, 0)
@@ -354,7 +361,10 @@ enum ProgressRules {
             r.finished = false
             data.daily[day] = r
         }
-        if max(result.score, 0) == 0 && result.bugsCaught <= 0, !outcome.ignored { data.runs = max(data.runs - 1, 0) }
+        if max(result.score, 0) == 0 && result.bugsCaught <= 0, !outcome.ignored {
+            data.runs = max(data.runs - 1, 0)
+            if case .feed = result.mode { data.feedRuns = max(data.feedRuns - 1, 0) }
+        }
         return outcome
     }
 

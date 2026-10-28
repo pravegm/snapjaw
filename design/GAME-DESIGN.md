@@ -107,17 +107,21 @@ notice anything. Touch snaps (no hinge) count as `d = 0.09 s`.
   - "Double ×2", "Triple ×3", "Quad ×4", "FEAST ×5+" on screen.
 - **Chain:** only a clean bite of ≥ 2 bugs adds 0.5 to the multiplier (×1, ×1.5, ×2 … ×4 at the 6th step, **×5 at the
   8th**, the cap; R3). A clean 1-bug bite holds the chain; a dry snap or a stinger breaks it (×1).
-- **Hunger:** patience can't be infinite. With no catching bite for the phase's wilt time (R3: morning **18 s**, noon
-  **16 s**, dusk **14 s**, night **12 s**), one snap **wilts** ("Too slow! −1 snap") and the timer restarts. The clock
-  only runs from the **first in-trap landing of a catchable bug after a catching bite** (and after the start), so an
-  empty trap (or one with only a bee in it) never gets hungry. A dry snap or a miss doesn't feed it; any catch does.
-  3 s before a wilt: `hungry` (the next snap glyph drains, "Hungry… bite!"). The lesson and attract never wilt.
-- **First runs:** while the plant rank is Sprout, a run starts with 12 snaps instead of 10. **Sprout run 1 (R3)** never
-  wilts, and its first bite with a bee in it costs no extra snap ("Bees cost a snap!").
+- **Hunger:** patience can't be infinite. After the phase's wilt time of hunger (morning **18 s**, noon **16 s**, dusk
+  **14 s**, night **14 s**; R4), one snap **wilts** ("Too slow! −1 snap") and the clock starts again. **The clock ticks
+  only while at least one catchable bug has landed in the trap and no bee, bumblebee or wasp has (R4).** An empty,
+  bee-only or bee-plus-flies trap never gets hungrier: waiting a bee out is always safe. A pause keeps the level; only
+  a catch resets it (a dry snap or a miss doesn't). 3 s before a wilt: `hungry` (the next snap glyph drains,
+  "Hungry… bite!", shown only while the clock ticks). The lesson and attract never wilt.
+- **First runs:** while the plant rank is Sprout, a Feed run starts with 12 snaps instead of 10. **Sprout run 1** (the
+  first Feed run; R4) starts with **14** (the max), never wilts, its first bite with a bee in it costs no extra snap
+  ("Bees and wasps cost snaps. This one's free!"), and it has a **calm first morning**: waves 1–14 come as crowds
+  (one cluster, landing together) with 1.6× the usual gap. The Daily is always standard: if a player's first ever
+  run is the Daily, their first Feed run still gets the perks.
 - **The run ends** when snaps reach 0: "Your trap is tired." The score is the **protein** total.
-- A typical casual run: 20–25 snaps, about 2 minutes (a Sprout's first run about 2.5). The late night (§6: reactions
-  × 0.96 per wave after wave 30 to a 0.25 floor, lingers × 0.92 to 0.2) ends runs; a perfect player ends around
-  5–7 minutes with at most a handful of wilts.
+- A typical casual run (sim, R4): about 25 snaps and 2.5 minutes with no wilts; a Sprout's first run about 2.7
+  minutes, and even a novice who bites every landing gets about 1¾ minutes. The late night (§6) ends runs: an expert
+  ends around 5½ minutes with about 3 wilts, a perfect player around 6 minutes with 2–3.
 
 ## 6. Waves and the day
 - Bugs come in **waves**: a group of 1–7 bugs every 3.0–4.5 s (overlapping). Each wave has a recipe from the wave
@@ -131,7 +135,13 @@ notice anything. Touch snaps (no hinge) count as `d = 0.09 s`.
 | 15–22 | Dusk | Moth, Mosquito, Dragonfly, Wasp | 1 | 4–6 s |
 | 23+ | Night | Firefly, Cricket; Golden Scarab rare | 1–2 | 3.5–5 s |
 
-After wave 30 the night repeats with reactions × 0.97 per wave (floor 0.6) and one more bee every 8 waves.
+After wave 30 the night repeats and quickens (R3/R4): bug reactions × **0.96** per wave (floor **0.2**, so by about wave
+70 every night bug but the scarab outruns an 80 ms hand), lingers × **0.92** per wave (floor **0.2**), and **one more
+bee every 40 waves** (at most 4 protected bugs a wave). Wave gaps stay 3.0–4.5 s (× 1.6 in a first run's waves 1–14).
+
+Nothing rests within 20 pt + its radius + 16 pt of the midrib, and nothing walks, hovers or hops low across it (R4):
+ground moves stay on the bug's own lobe, so only flying bugs (approaches at half height or more, crossers, take-offs)
+ever pass over the crease.
 
 **The cast** (16, the Bug Book):
 
@@ -143,7 +153,7 @@ After wave 30 the night repeats with reactions × 0.97 per wave (floor 0.6) and 
 | Bluebottle | 25 | 0.16 | 5 | Fast, short sips, shiny |
 | Ant | 8 | 0.60 | 15 | Walks in from the bottom edge in a line of 3–5; never flies |
 | Ladybird | 15 | 0.30 | 10 | Lucky: catching one adds +1 snap |
-| Grasshopper | 20 | 0.22 | 7 | Hops between the lobes across the fold |
+| Grasshopper | 20 | 0.22 | 7 | Hops about its lobe (it flies in over the fold) |
 | Moth | 20 | 0.30 | 9 | Dusk; drawn to the trap's glow (lands near the fold) |
 | Mosquito | 12 | 0.14 | 4 | Tiny, darting, high-pitched whine |
 | Dragonfly | 50 | 0.12 | 4 | Hovers, darts; catchable only by a sharp snap |

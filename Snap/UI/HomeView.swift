@@ -11,6 +11,9 @@ struct HomeView: View {
 
     /// The caption under Home's clap diagram.
     static let foldCaption = "Snap it shut a little"
+    static let foldDetail = "The two halves are the trap. Bite, then open."
+    /// R4 (REVIEW-3 #8): the clap diagram's height on Home (it was ~65 pt, on the cilia).
+    static let foldDiagramHeight: CGFloat = 120
 
     var body: some View {
         let c = info.isCompact
@@ -107,30 +110,32 @@ struct HomeView: View {
         let today = controller.today
         let found = store.data.speciesFound
         return VStack(spacing: c ? 8 : 14) {
-            HStack(spacing: c ? 8 : 12) {
-                SnapButton(kind: .primary, height: c ? 58 : 70, compact: c, action: { controller.play() }) {
-                    Label("Feed", systemImage: "fork.knife")
-                }
-                .accessibilityHint("Start a run")
-                // ROUND-3 founder call: on a Duo the fold is the input, so Home shows it beside Feed.
-                if controller.showsFoldInput(info) {
-                    VStack(spacing: 2) {
-                        DuoClapDiagram(reduceMotion: controller.reduceMotion, showsAngle: false)
-                            .frame(width: c ? 72 : 92, height: c ? 40 : 50)
+            // ROUND-3 founder call, R4 (REVIEW-3 #8): on a Duo the fold is the input, so Home shows it big (≥ 120 pt),
+            // looping, on its own card above Feed (off the trap's cilia).
+            if controller.showsFoldInput(info) {
+                HStack(spacing: c ? 8 : 12) {
+                    DuoClapDiagram(reduceMotion: controller.reduceMotion, showsAngle: true)
+                        .frame(width: Self.foldDiagramHeight * 1.3, height: Self.foldDiagramHeight)
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(Self.foldCaption)
-                            .font(SnapType.caption(true))
-                            .foregroundStyle(SnapTheme.mist)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.8)
+                            .font(SnapType.headline(c))
+                            .foregroundStyle(SnapTheme.cream)
                             .fixedSize(horizontal: false, vertical: true)
-                            .snapLegible()
+                        Text(Self.foldDetail)
+                            .font(SnapType.caption(c))
+                            .foregroundStyle(SnapTheme.mist)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .frame(width: c ? 80 : 100)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(Self.foldCaption)
+                    Spacer(minLength: 0)
                 }
+                .snapCard(padding: c ? 6 : 10, radius: 18)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Self.foldCaption + ". " + Self.foldDetail)
             }
+            SnapButton(kind: .primary, height: c ? 58 : 70, compact: c, action: { controller.play() }) {
+                Label("Feed", systemImage: "fork.knife")
+            }
+            .accessibilityHint("Start a run")
             SnapButton(kind: .secondary, height: c ? 52 : 60, compact: c, action: { controller.show(.daily) }) {
                 HStack(spacing: 10) {
                     Image(systemName: "sun.max.fill").foregroundStyle(SnapTheme.gold)

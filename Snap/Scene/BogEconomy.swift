@@ -25,6 +25,9 @@ final class BogEconomy {
         var age: Double = 0
         var active = false
         var landed = false
+        /// QA-2 #2/#3: false for a glyph whose snap Core didn't add (the row was full, or the run doesn't spend snaps):
+        /// it still flies and bumps, but never holds the numeral back.
+        var counts = true
     }
 
     static let flightTime: Double = 0.45
@@ -53,7 +56,8 @@ final class BogEconomy {
     private(set) var landedCount = 0
     var reduceMotion = false
 
-    init(capacity: Int = 8) {
+    /// QA-2 #19: 12 slots, so a live flight is never overwritten (the numeral never jumps a glyph early).
+    init(capacity: Int = 12) {
         root = SKNode()
         root.zPosition = 62
         let tex = BogTextures.snapGlyph
@@ -100,7 +104,7 @@ final class BogEconomy {
     /// cracks (+cost), then the numeral drops.
     var shownOffset: Int {
         var n = 0
-        for f in flights where f.active && !f.landed { n -= 1 }
+        for f in flights where f.active && !f.landed && f.counts { n -= 1 }
         if crackAge >= 0 && crackAge < BogEconomy.crackLead { n += crackCost }
         return n
     }
@@ -117,9 +121,11 @@ final class BogEconomy {
         landedCount = 0
     }
 
-    /// `count` snap glyphs fly from `from` to `to`, one after another.
-    func fly(count: Int, from: CGPoint, to: CGPoint) {
+    /// `count` snap glyphs fly from `from` to `to`, one after another; only the first `counted` of them hold the
+    /// numeral back (QA-2 #2: the snaps Core really added; nil = all of them).
+    func fly(count: Int, counted: Int? = nil, from: CGPoint, to: CGPoint) {
         guard count > 0 else { return }
+        let real = min(max(counted ?? count, 0), count)
         for k in 0..<min(count, glyphs.count) {
             var slot = -1
             for j in 0..<flights.count where !flights[(cursor + j) % flights.count].active {
@@ -133,7 +139,7 @@ final class BogEconomy {
             // An arc that rises first, then swoops down into the row.
             let control = CGPoint(x: (start.x + to.x) / 2, y: max(start.y, to.y) + 140)
             flights[slot] = Flight(start: start, control: control, end: to, delay: Double(k) * BogEconomy.flightGap,
-                                   age: 0, active: true, landed: false)
+                                   age: 0, active: true, landed: false, counts: k < real)
             let g = glyphs[slot]
             g.position = start
             g.setScale(0.4)
@@ -143,11 +149,17 @@ final class BogEconomy {
     }
 
     /// The glyph a sting cost cracks at `p` (`cost` snaps: the numeral waits `crackLead` s for it), and the row
-    /// flashes crimson.
-    func crack(at p: CGPoint, cost: Int = 1) {
+    /// flashes crimson. QA-2 #2: a second sting while the numeral is still waiting adds its cost (never replaces it).
+    /// QA-2 #6: `row` is the HUD's snaps row (scene space) when the App knows it: the flash covers it, centred.
+    func crack(at p: CGPoint, cost: Int = 1, row: CGRect? = nil) {
+        let c = max(cost, 0)
+        if crackAge >= 0 && crackAge < BogEconomy.crackLead {
+            crackCost += c
+        } else {
+            crackCost = c
+        }
         crackAge = 0
         crackAt = p
-        crackCost = max(cost, 0)
         for s in [halfL, halfR, flash, rowFlash] {
             s.isHidden = false
             s.alpha = 1
@@ -157,9 +169,20 @@ final class BogEconomy {
         halfL.position = CGPoint(x: p.x - BogTextures.glyphSize.width / 4, y: p.y)
         halfR.position = CGPoint(x: p.x + BogTextures.glyphSize.width / 4, y: p.y)
         flash.position = p
-        // The row runs right from its leftmost live glyph (the anchor), in two rows of seven.
-        rowFlash.position = CGPoint(x: p.x + 90, y: p.y - 12)
+        if let r = row, !r.isNull, r.width > 1, r.height > 1 {
+            bogResize(rowFlash, CGSize(width: r.width + 40, height: r.height + 36))
+            rowFlash.position = CGPoint(x: r.midX, y: r.midY)
+        } else {
+            // The fallback: the row runs right from its leftmost live glyph (the anchor), in two rows of seven.
+            bogResize(rowFlash, BogEconomy.rowFlashSize)
+            rowFlash.position = CGPoint(x: p.x + 90, y: p.y - 12)
+        }
     }
+
+    /// R4 (tests): the cost the numeral is waiting on now.
+    var pendingCrackCost: Int { crackAge >= 0 && crackAge < BogEconomy.crackLead ? crackCost : 0 }
+    /// R4 (tests): the row flash's centre.
+    var rowFlashCenter: CGPoint { rowFlash.position }
 
     /// A snap wilted (hunger): one glyph droops off the row at `p`, greyed.
     func wilt(at p: CGPoint) {

@@ -37,11 +37,15 @@ struct SettingsView: View {
     }
 
     /// A fade at the foot of a scrolling column: there's more below (with `scrollColumn()`).
+    /// R4 (REVIEW-3 #13: the chevron sat on "for her", "Absolutely not on the menu", "eaten."): the column's foot
+    /// is a clear gutter the chevron sits in, under the fade, so no text is ever under it.
     static var footFade: some View {
         VStack(spacing: 0) {
             Color.black
             LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
                 .frame(height: 36)
+            Color.clear
+                .frame(height: ScrollColumnCue.gutter)
         }
     }
 
@@ -142,6 +146,8 @@ struct SettingsView: View {
 /// A scrolling page column: the foot fade, and a "more below" chevron that shows until the end is reached
 /// (REVIEW-2 #19, #20: the Bug Book's fourth row and the clipped Credits had no cue).
 struct ScrollColumnCue: ViewModifier {
+    /// The clear band at the foot of the column (the chevron's), kept free of content by a matching bottom margin.
+    static let gutter: CGFloat = 40
     @State private var more: Bool
 
     init(initially: Bool) {
@@ -150,6 +156,8 @@ struct ScrollColumnCue: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            // The last card can always scroll up out of the gutter.
+            .contentMargins(.bottom, Self.gutter, for: .scrollContent)
             .onScrollGeometryChange(for: Bool.self) { g in
                 g.contentOffset.y + g.containerSize.height < g.contentSize.height - 12
             } action: { _, new in
@@ -165,7 +173,7 @@ struct ScrollColumnCue: ViewModifier {
                         .padding(.vertical, 3)
                         .background(Capsule().fill(SnapTheme.surface.opacity(0.88)))
                         .overlay(Capsule().stroke(SnapTheme.lime.opacity(0.3), lineWidth: 1))
-                        .padding(.bottom, 8)
+                        .padding(.bottom, (Self.gutter - 30) / 2)
                         .allowsHitTesting(false)
                         .transition(.opacity)
                         .accessibilityHidden(true)

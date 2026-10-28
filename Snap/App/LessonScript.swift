@@ -75,6 +75,10 @@ struct LessonScript: Equatable {
     static let praiseCatchTouch = "CHOMP! It opens again by itself."
     static let praiseMissTouch = "Snap! It opens again by itself."
     static let waitForSip = "Wait till it's sipping…"
+    /// R4 (QA-2 #15): held flat (or nearly), the pose step says what to do.
+    static let bendALittle = "Bend it a little, like a book"
+    /// Above this the Duo is too flat to read as a book.
+    static let flatAbove: Double = 176
 
     private(set) var step: Step
     let replay: Bool
@@ -124,11 +128,17 @@ struct LessonScript: Equatable {
         switch step {
         case .pose:
             if let a = i.angle, a.isFinite, Self.poseRange.contains(a) {
+                if warning == Self.bendALittle { warning = nil }
                 let since = poseSince ?? i.time
                 poseSince = since
                 if i.time - since >= Self.poseHold { pass("That's it!", at: i.time) }
             } else {
                 poseSince = nil
+                if let a = i.angle, a.isFinite {
+                    let flat = a > Self.flatAbove
+                    if flat && warning == nil && !isPassing { warning = Self.bendALittle }
+                    if !flat && warning == Self.bendALittle { warning = nil }
+                }
                 if i.angle == nil && i.time - stepStart >= Self.poseNoHinge && !isPassing {
                     // No hinge reading at all: carry on with taps rather than wait for ever.
                     enter(.firstSnap)

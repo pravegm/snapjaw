@@ -28,11 +28,16 @@ import UIKit
 //                                 hinge (Duo CI) or touch.
 // - `progress=fresh|mid|late`     seeded in-memory progress (fresh: nothing; mid: rank 4, 9 species, best 3,200;
 //                                 late: rank 10, 16 species, best 14,800). Demo runs never write UserDefaults.
-// - `freezeOn=landed|crowd|bee|snap|feast|sting|dusk|night|lastSnap|hungry|wilted|tired|results`
+// - `freezeOn=landed|crowd|bee|snap|feast|sting|dusk|night|lastSnap|hungry|wilted|tired|results|firstHint|chain5|
+//             costlySting|drySnap|held`
 //                                 stop stepping the session (the scene keeps drawing) at the first such moment, and
-//                                 print `SNAP-T freeze <tag>`. `snap` holds 0.12 s after the bite; the other event
-//                                 moments (feast, sting, lastSnap, wilted) 0.3 s, so their FX are on screen; `hungry`
-//                                 1 s (the next snap glyph drains and "Hungry… bite!" shows).
+//                                 print `SNAP-T freeze <tag>`. `snap` holds 0.12 s after the bite; `costlySting` (a sting
+//                                 that cost snaps) 0.2 s; feast, sting, lastSnap, wilted, chain5 (the chain's 5th step),
+//                                 drySnap and held ("×1.5 held") 0.3 s, so their FX are on screen; `hungry` 0.5 s (the
+//                                 next snap glyph drains and "Hungry… bite!" shows). `firstHint`: the opening's fold line
+//                                 ("Snap the halves together" / "Tap to snap") is on its plate.
+// - `firstRun=0|1`                R4: Sprout run 1's rules (14 snaps, no wilt, a free first sting). Unset: only
+//                                 `progress=fresh` plays them; every other play demo runs the standard rules.
 // - `freezeAfter=<s>`             freeze after s seconds of play (`SNAP-T freeze after`); with `freezeOn`, the moment
 //                                 only counts once s seconds have passed.
 // - `closure=<deg>`               hold the drawn closure at this many degrees (no pilot, no hinge): static jaw frames.
@@ -58,23 +63,28 @@ struct DemoMode: Equatable {
     enum ModeKey: String, Equatable { case feed, daily, attract }
     enum Freeze: String, Equatable, CaseIterable {
         case landed, crowd, bee, snap, feast, sting, dusk, night, lastSnap, hungry, wilted, tired, results
+        /// R4 (REVIEW-3 #2, #9, #10, #20): the opening's fold line on its plate; the chain's fifth step; a sting that
+        /// cost snaps (the crack and the row flash); a dry snap; a held chain ("×1.5 held").
+        case firstHint, chain5, costlySting, drySnap, held
 
         /// Event moments hold a beat after the event; state moments freeze at once.
         var isEvent: Bool {
             switch self {
-            case .snap, .feast, .sting, .lastSnap, .hungry, .wilted: return true
-            case .landed, .crowd, .bee, .dusk, .night, .tired, .results: return false
+            case .snap, .feast, .sting, .lastSnap, .hungry, .wilted, .chain5, .costlySting, .drySnap, .held: return true
+            case .landed, .crowd, .bee, .dusk, .night, .tired, .results, .firstHint: return false
             }
         }
 
-        /// The beat after an event moment (s of play). `hungry` holds long enough for the glyph to visibly drain;
-        /// `wilted` for the "wilted −1" pop to rise.
+        /// The beat after an event moment (s of play). R4 (ROUND-4): `hungry` +0.5 (the glyph drains and the numeral
+        /// goes red), `wilted` +0.3 (the "Too slow! −1 snap" pop rises), `costlySting` +0.2 (the crack, before the
+        /// numeral drops).
         var holdDelay: Double {
             switch self {
             case .snap: return 0.12
-            case .feast, .sting, .lastSnap, .wilted: return 0.3
-            case .hungry: return 1.0
-            case .landed, .crowd, .bee, .dusk, .night, .tired, .results: return 0
+            case .costlySting: return 0.2
+            case .feast, .sting, .lastSnap, .wilted, .chain5, .drySnap, .held: return 0.3
+            case .hungry: return 0.5
+            case .landed, .crowd, .bee, .dusk, .night, .tired, .results, .firstHint: return 0
             }
         }
     }
@@ -97,6 +107,12 @@ struct DemoMode: Equatable {
     var hudLeft: Bool?
     var fold = false
     var sound = true
+    /// R4 (REVIEW-3 #2): `firstRun=1` plays Sprout run 1's rules (14 snaps, no wilt, a free first sting); `firstRun=0`
+    /// never does. Unset: only `progress=fresh` does, so every other play demo runs the standard rules.
+    var firstRun: Bool?
+
+    /// Whether a demo run gets the first-run rules.
+    var playsFirstRun: Bool { AppRules.demoFirstRun(firstRun: firstRun, progress: progress) }
 
     init(raw: String) { self.raw = raw }
 
@@ -152,6 +168,7 @@ struct DemoMode: Equatable {
             case "hudLeft": config.hudLeft = flag(value)
             case "fold": config.fold = flag(value)
             case "sound": config.sound = flag(value)
+            case "firstRun": config.firstRun = flag(value)
             default: break
             }
         }
@@ -219,6 +236,7 @@ enum DemoPresets {
     static func make(_ p: Profile, today: Int) -> ProgressData {
         var data = ProgressData()
         data.runs = p.runs
+        data.feedRuns = max(p.runs - p.dailies.count, 0)
         data.bestFeed = p.best
         data.lifetimeBugs = lifetimeBugs(rank: p.rank)
         data.lifetimeScore = max(p.best + (p.runs - 1) * p.best / 3, p.best)

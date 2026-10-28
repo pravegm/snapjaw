@@ -46,10 +46,18 @@ struct ResultsView: View {
         let r = summary.result
         let o = summary.outcome
         return VStack(spacing: c ? 6 : 12) {
-            // The trap that ate it all, as the scene paints it (REVIEW-1 #12).
-            TrapArtImage()
-                .frame(width: c ? 116 : 180, height: c ? 84 : 130)
-                .shadow(color: Color.black.opacity(0.5), radius: 12, y: 4)
+            // The trap that ate it all, as the scene paints it (REVIEW-1 #12). R4 (REVIEW-3 #16): open and 3/4 with a
+            // fly sipping on it (never a centred slit), 1.4× on a patch of bog.
+            ZStack {
+                Ellipse()
+                    .fill(RadialGradient(colors: [SnapTheme.mossLight.opacity(0.75), SnapTheme.moss.opacity(0.45),
+                                                  SnapTheme.moss.opacity(0)],
+                                         center: .center, startRadius: 4, endRadius: c ? 96 : 150))
+                    .frame(width: c ? 200 : 310, height: c ? 120 : 180)
+                TrapHeroImage()
+                    .frame(width: c ? 162 : 252, height: c ? 118 : 182)
+                    .shadow(color: Color.black.opacity(0.5), radius: 12, y: 4)
+            }
             SnapOverline(text: summary.title, compact: c, color: SnapTheme.limeLight)
             CountingNumber(value: r.score, font: SnapType.hero(c), instant: controller.reduceMotion || AppTrace.enabled)
                 .foregroundStyle(LinearGradient(colors: [SnapTheme.goldLight, SnapTheme.gold], startPoint: .top,

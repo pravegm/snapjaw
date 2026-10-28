@@ -23,6 +23,8 @@ struct AchievementBadge: View {
 /// The images a badge draws, made once on the main actor before the Canvas runs.
 struct BadgeArt {
     var trap: CGImage?
+    /// The Scene's own 3/4 trap, when it has one (R4); else the open trap is tilted here.
+    var hero: CGImage?
     var bugs: [BugSpecies: CGImage] = [:]
 
     /// Bugs are drawn big (radius 70 pt at 4×), so they stay crisp at 1024 px.
@@ -32,8 +34,11 @@ struct BadgeArt {
     static func load(for id: String) -> BadgeArt {
         var art = BadgeArt(trap: TrapImageCache.image())
         for s in BadgePainter.species(for: id) {
-            art.bugs[s] = TrapArt.bugImage(s, radius: bugRadius, scale: 4, wingSpread: s == .dragonfly ? 1 : 0.8)
+            // R4 (REVIEW-3 #18): the scarab's wings are folded under its own wing cases (drawn by the badge).
+            let spread: CGFloat = s == .dragonfly ? 1 : (s == .goldenScarab ? 0 : 0.8)
+            art.bugs[s] = TrapArt.bugImage(s, radius: bugRadius, scale: 4, wingSpread: spread)
         }
+        art.hero = TrapImageCache.heroImage(bug: false)
         return art
     }
 }
@@ -63,9 +68,11 @@ enum BadgePainter {
         switch id {
         case Achievements.feast.id: return [.housefly, .gnat, .fruitFly]
         case Achievements.bite5.id: return [.housefly, .bluebottle, .gnat, .ladybird, .fruitFly]
+        case Achievements.nobees.id: return [.bee, .housefly, .gnat]
+        case Achievements.daily.id, Achievements.monarch.id, Achievements.score10k.id: return [.housefly]
         case Achievements.scarab.id: return [.goldenScarab]
         case Achievements.dragonfly.id: return [.dragonfly]
-        case Achievements.spare50.id, Achievements.nobees.id: return [.bee]
+        case Achievements.spare50.id: return [.bee]
         case Achievements.bugbook.id: return [.ladybird, .moth]
         case Achievements.night.id: return [.firefly]
         default: return []
@@ -78,19 +85,24 @@ enum BadgePainter {
         medallion(&ctx, tier: tier(for: id), night: night)
         switch id {
         case Achievements.feast.id:
-            trap(&ctx, art, width: 330, y: 268)
-            bugs(&ctx, art, [(.housefly, -74, -18, 92), (.gnat, 70, 22, 78), (.fruitFly, 6, 58, 76)])
+            // R4 (REVIEW-3 #16, #18): the 3/4 trap with a crowd of three sipping on its near lobe (off the midrib).
+            let c = CGPoint(x: 256, y: 262)
+            hero(&ctx, art, width: 340, center: c)
+            heroBugs(&ctx, art, width: 340, center: c, [(.housefly, -0.34, 0.5, 72), (.gnat, 0.34, 0.56, 62),
+                                                        (.fruitFly, 0.0, 0.76, 62)])
         case Achievements.bite5.id:
-            trap(&ctx, art, width: 330, y: 250)
-            bugs(&ctx, art, [(.housefly, -86, -30, 80), (.bluebottle, 76, -36, 80), (.gnat, -46, 44, 66),
-                             (.ladybird, 52, 40, 70), (.fruitFly, 4, -2, 66)])
-            coin(&ctx, "5", at: CGPoint(x: 256, y: 378))
+            // R4 (REVIEW-3 #18): no trap here (that is First Feast): five bugs swooping in round the 5.
+            swirl(&ctx)
+            ringOfBugs(&ctx, art, [.housefly, .bluebottle, .gnat, .ladybird, .fruitFly], radius: 128, width: 92)
+            coin(&ctx, "5", at: center)
         case Achievements.chain4.id:
             chain(&ctx)
             coin(&ctx, "×4", at: CGPoint(x: 256, y: 372))
         case Achievements.scarab.id:
             glow(&ctx, at: center, radius: 170, color: SnapTheme.goldLight)
             bugs(&ctx, art, [(.goldenScarab, 0, 0, 250)])
+            // R4 (REVIEW-3 #18): a beetle's domed wing cases, not a bee's glassy wings.
+            wingCases(&ctx, center: center, width: 250, degrees: -24)
             sparkles(&ctx)
         case Achievements.dragonfly.id:
             bugs(&ctx, art, [(.dragonfly, 0, 0, 290)])
@@ -102,7 +114,9 @@ enum BadgePainter {
             book(&ctx, art)
             coin(&ctx, "16", at: CGPoint(x: 256, y: 384))
         case Achievements.monarch.id:
-            trap(&ctx, art, width: 320, y: 300)
+            let c = CGPoint(x: 256, y: 316)
+            hero(&ctx, art, width: 260, center: c)
+            heroBugs(&ctx, art, width: 260, center: c, [(.housefly, 0.3, 0.6, 60)])
             crown(&ctx)
         case Achievements.night.id:
             moon(&ctx)
@@ -110,17 +124,25 @@ enum BadgePainter {
             bugs(&ctx, art, [(.firefly, -24, 44, 170)])
         case Achievements.daily.id:
             sun(&ctx)
-            trap(&ctx, art, width: 300, y: 312)
+            let c = CGPoint(x: 256, y: 324)
+            hero(&ctx, art, width: 250, center: c)
+            heroBugs(&ctx, art, width: 250, center: c, [(.housefly, 0.3, 0.6, 58)])
         case Achievements.score10k.id:
-            trap(&ctx, art, width: 220, y: 190)
-            numeral(&ctx, "10K", size: 128, at: CGPoint(x: 256, y: 336))
+            let c = CGPoint(x: 256, y: 176)
+            hero(&ctx, art, width: 200, center: c)
+            heroBugs(&ctx, art, width: 200, center: c, [(.housefly, 0.3, 0.6, 46)])
+            numeral(&ctx, "10K", size: 128, at: CGPoint(x: 256, y: 360))
         case Achievements.nobees.id:
-            trap(&ctx, art, width: 300, y: 320)
-            halo(&ctx, at: CGPoint(x: 256, y: 168), radius: 72)
-            bugs(&ctx, art, [(.bee, 0, -88, 120)])
-            coin(&ctx, "30", at: CGPoint(x: 360, y: 384))
+            // R4 (REVIEW-3 #18): unlike Bee Kind (a bee in its halo), the trap feeds on flies while a bee buzzes off
+            // free along a dashed trail.
+            let c = CGPoint(x: 236, y: 298)
+            hero(&ctx, art, width: 290, center: c)
+            heroBugs(&ctx, art, width: 290, center: c, [(.housefly, -0.3, 0.52, 60), (.gnat, 0.28, 0.6, 52)])
+            beeTrail(&ctx, from: CGPoint(x: 220, y: 214), to: CGPoint(x: 352, y: 132))
+            bugs(&ctx, art, [(.bee, 104, -132, 104)])
+            coin(&ctx, "30", at: CGPoint(x: 366, y: 388))
         default:
-            trap(&ctx, art, width: 330, y: 256)
+            hero(&ctx, art, width: 340, center: center)
         }
     }
 
@@ -192,6 +214,133 @@ enum BadgePainter {
             rib.move(to: CGPoint(x: 256, y: r.minY + 6))
             rib.addLine(to: CGPoint(x: 256, y: r.maxY - 6))
             ctx.stroke(rib, with: .color(Color(snapHex: 0x4E0716)), lineWidth: 8)
+        }
+    }
+
+    // MARK: The 3/4 trap (R4, REVIEW-3 #16: never a centred vertical slit)
+
+    /// The open trap's tilt for the badges: squashed to 3/4 and turned so the midrib runs on a slant.
+    static let heroSquash: CGFloat = 0.62
+    static let heroTurn: Double = -16
+
+    /// A point on the tilted trap: (`fx`, `fy`) as fractions of its `width` from its centre, before the tilt (x to the
+    /// right, y down). Pure; tested (the bugs sit on the near lobe, off the midrib).
+    static func heroPoint(_ fx: CGFloat, _ fy: CGFloat, width: CGFloat, center c: CGPoint) -> CGPoint {
+        let x = fx * width
+        let y = fy * width * heroSquash
+        let a = heroTurn * Double.pi / 180
+        let ca = CGFloat(cos(a))
+        let sa = CGFloat(sin(a))
+        return CGPoint(x: c.x + x * ca - y * sa, y: c.y + x * sa + y * ca)
+    }
+
+    /// The trap open and tilted 3/4 on a shadow (the Scene's own 3/4 art when there is one).
+    static func hero(_ ctx: inout GraphicsContext, _ art: BadgeArt, width: CGFloat, center c: CGPoint) {
+        // The Scene's 3/4 trap brings its own ground shadow and petiole leaf.
+        if let threeQuarter = art.hero, threeQuarter.width > 0 {
+            image(&ctx, threeQuarter, center: c, width: width)
+            return
+        }
+        let shadow = CGRect(x: c.x - width * 0.46, y: c.y + width * 0.12, width: width * 0.92, height: width * 0.2)
+        ctx.fill(Path(ellipseIn: shadow), with: .radialGradient(Gradient(colors: [Color.black.opacity(0.45), .clear]),
+                                                                 center: CGPoint(x: shadow.midX, y: shadow.midY),
+                                                                 startRadius: 0, endRadius: width * 0.46))
+        guard let cg = art.trap, cg.width > 0, cg.height > 0 else {
+            trap(&ctx, art, width: width, y: c.y)
+            return
+        }
+        let h = width * CGFloat(cg.height) / CGFloat(cg.width)
+        var g = ctx
+        g.translateBy(x: c.x, y: c.y)
+        g.rotate(by: .degrees(heroTurn))
+        g.scaleBy(x: 1, y: heroSquash)
+        g.draw(Image(decorative: cg, scale: 1), in: CGRect(x: -width / 2, y: -h / 2, width: width, height: h))
+    }
+
+    /// Bugs sipping on the 3/4 trap's back face: (species, u, v, w), `u` −1…1 along the hinge and `v` 0…1 up the back
+    /// lobe (`SceneHooks.threeQuarterPoint`); on the App's tilted fallback, the near lobe.
+    static func heroBugs(_ ctx: inout GraphicsContext, _ art: BadgeArt, width: CGFloat, center c: CGPoint,
+                         _ list: [(BugSpecies, CGFloat, CGFloat, CGFloat)]) {
+        for (s, u, v, w) in list {
+            let p = art.hero != nil
+                ? SceneHooks.threeQuarterPoint(u: u, v: v, width: width, center: c)
+                : heroPoint(0.16 + u * 0.14, (0.6 - v) * 0.4, width: width, center: c)
+            image(&ctx, art.bugs[s], center: p, width: w, degrees: -24)
+        }
+    }
+
+    /// Mouthful (R4): five bugs in a ring, swooping in toward the centre.
+    static func ringOfBugs(_ ctx: inout GraphicsContext, _ art: BadgeArt, _ species: [BugSpecies], radius r: CGFloat,
+                           width w: CGFloat) {
+        let n = max(species.count, 1)
+        for (i, s) in species.enumerated() {
+            let a = -Double.pi / 2 + Double(i) / Double(n) * 2 * Double.pi
+            let p = CGPoint(x: center.x + r * CGFloat(cos(a)), y: center.y + r * CGFloat(sin(a)))
+            // Facing inward (the portraits face +x: turn each toward the centre).
+            let facing = (a + Double.pi) * 180 / Double.pi
+            image(&ctx, art.bugs[s], center: p, width: w, degrees: facing)
+        }
+    }
+
+    /// Mouthful's motion: a soft spiral of dashes into the centre.
+    static func swirl(_ ctx: inout GraphicsContext) {
+        for i in 0..<5 {
+            let a0 = -Double.pi / 2 + Double(i) / 5 * 2 * Double.pi
+            var p = Path()
+            let steps = 14
+            for k in 0...steps {
+                let f = Double(k) / Double(steps)
+                let a = a0 + 0.9 * f
+                let r = CGFloat(168 - 100 * f)
+                let pt = CGPoint(x: center.x + r * CGFloat(cos(a)), y: center.y + r * CGFloat(sin(a)))
+                if k == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
+            }
+            ctx.stroke(p, with: .color(Color.white.opacity(0.35)),
+                       style: StrokeStyle(lineWidth: 6, lineCap: .round, dash: [10, 12]))
+        }
+    }
+
+    /// Bee-Free Diet (R4): the dashed trail of a bee flying off free.
+    static func beeTrail(_ ctx: inout GraphicsContext, from a: CGPoint, to b: CGPoint) {
+        var p = Path()
+        p.move(to: a)
+        p.addQuadCurve(to: b, control: CGPoint(x: a.x - 30, y: (a.y + b.y) / 2 - 40))
+        ctx.stroke(p, with: .color(Color.black.opacity(0.3)),
+                   style: StrokeStyle(lineWidth: 10, lineCap: .round, dash: [14, 14]))
+        ctx.stroke(p, with: .color(Color.white.opacity(0.9)),
+                   style: StrokeStyle(lineWidth: 6, lineCap: .round, dash: [14, 14]))
+    }
+
+    /// Pure Gold (R4, REVIEW-3 #18): the scarab's elytra, two domed gold wing cases meeting down its back, over the
+    /// bug drawn at `c`, `width` wide, turned `degrees` (as `bugs` draws it). The bug faces +x and its radius in the
+    /// image is `BadgeArt.bugRadius` of `TrapArt.bugExtent`.
+    static func wingCases(_ ctx: inout GraphicsContext, center c: CGPoint, width: CGFloat, degrees: Double) {
+        let extent = TrapArt.bugExtent(radius: BadgeArt.bugRadius)
+        let r = BadgeArt.bugRadius * width / max(2 * extent, 1)
+        var g = ctx
+        g.translateBy(x: c.x, y: c.y)
+        g.rotate(by: .degrees(degrees))
+        for side in [CGFloat(-1), 1] {
+            var p = Path()
+            // From the shoulder (behind the pronotum) back to the tail, the seam slightly parted at the tip.
+            p.move(to: CGPoint(x: 0.24 * r, y: side * 0.03 * r))
+            p.addCurve(to: CGPoint(x: -0.8 * r, y: side * 0.07 * r),
+                       control1: CGPoint(x: 0.2 * r, y: side * 0.7 * r),
+                       control2: CGPoint(x: -0.72 * r, y: side * 0.66 * r))
+            p.closeSubpath()
+            g.fill(p, with: .linearGradient(Gradient(colors: [Color(snapHex: 0xFFF0A8), Color(snapHex: 0xF2B92E),
+                                                              Color(snapHex: 0xA8700E)]),
+                                            startPoint: CGPoint(x: 0, y: side * 0.1 * r),
+                                            endPoint: CGPoint(x: -0.3 * r, y: side * 0.62 * r)))
+            g.stroke(p, with: .color(Color(snapHex: 0x1E0A10)), lineWidth: max(r * 0.05, 2))
+            // A ridge along each case and a glossy streak.
+            var ridge = Path()
+            ridge.move(to: CGPoint(x: 0.12 * r, y: side * 0.28 * r))
+            ridge.addQuadCurve(to: CGPoint(x: -0.66 * r, y: side * 0.24 * r),
+                               control: CGPoint(x: -0.3 * r, y: side * 0.42 * r))
+            g.stroke(ridge, with: .color(Color(snapHex: 0x8A5A0A).opacity(0.55)), lineWidth: max(r * 0.03, 1.5))
+            let gloss = CGRect(x: -0.42 * r, y: side > 0 ? 0.12 * r : -0.3 * r, width: 0.36 * r, height: 0.16 * r)
+            g.fill(Path(ellipseIn: gloss), with: .color(Color.white.opacity(0.45)))
         }
     }
 

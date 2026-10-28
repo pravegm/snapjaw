@@ -32,6 +32,9 @@ final class GameController: ObservableObject, SceneDriver {
     static let toastSeconds: Double = 2.4
     /// The first Feast's "+1 snap" label (session s).
     static let snapGainSeconds: Double = 1.8
+    /// R4: the free sting's green flash, and how long the chip says "held".
+    static let freeFlashSeconds: Double = 1.4
+    static let chainHeldSeconds: Double = 1.4
     /// If the tired moment hasn't finished this long after it began (the scene stopped drawing: the cover display),
     /// the run is finished headless and Results shown.
     static let endWatchSeconds: Double = 3.4
@@ -91,6 +94,7 @@ final class GameController: ObservableObject, SceneDriver {
     private var stings = 0
     /// Where the HUD's snaps row sits, in scene space (Scene's economy glyph flights fly there).
     private var snapsAnchor: CGPoint?
+    private var snapsRow: CGRect?
     /// The demo pilot, in fixed steps (Core R3 `PilotRun`, REVIEW-2 #21).
     private var pilotRun: PilotRun?
     private var lessonScript: LessonScript?
@@ -136,6 +140,17 @@ final class GameController: ObservableObject, SceneDriver {
     private var snapGainShown = false
     private var snapGainUntil: Double = -1
     private var snapGainLabel = ""
+    /// R4 (QA-2 #2–#4): what the snaps row last showed (it only ever moves toward Core's count), and Core's count
+    /// on the last frame (a Feast's refund against the cap).
+    private var shownSnaps: Int?
+    private var lastCoreSnaps = 0
+    /// R4 (REVIEW-3 #3): the free sting's green row flash and its "free!" tag.
+    private var freeFlashUntil: Double = -1
+    /// R4 (REVIEW-3 #10): the one-time chain tag (a player's first chain step ever) and the "×1.5 held" chip.
+    private var chainTagEligible = false
+    private var chainTagUntil: Double = -1
+    private var chainTagMultiplier = 1.5
+    private var chainHeldUntil: Double = -1
 
     init(store: ProgressStore, settings: SettingsStore) {
         self.store = store
@@ -158,6 +173,9 @@ final class GameController: ObservableObject, SceneDriver {
     var demoFold: Bool { demo?.fold ?? false }
     /// No hinge drives the trap: the copy says "tap".
     var touchWording: Bool { input == .touch }
+    /// The lesson's wording. R4 (REVIEW-3 #8, #19): demo `fold=1` plays the Duo lesson (the clap on step 2, the
+    /// re-arm step) on a phone sim, so CI can capture it.
+    var lessonTouch: Bool { touchWording && !(isDemo && demoFold) }
     /// R3: the hint plate's wording. The fold is the input on a hinge, and for a pilot or held demo on a Duo layout
     /// (CI's fold=1 frames); a pilot on a phone layout reads as a phone ("Tap to snap").
     var hintTouch: Bool { !(input == .hinge || (input != .touch && sessionLayout.hasFold)) }
@@ -256,20 +274,24 @@ final class GameController: ObservableObject, SceneDriver {
         for event in events {
             tally.note(event)
             switch event {
-            case .snapped:
+            case let .snapped(report):
                 snapped = true
-                hungryOn = false
+                // QA-2 #10: only a bite that eats something feeds the trap (a dry snap or a bee bite doesn't).
+                if !report.caught.isEmpty { hungryOn = false }
             case .tired: watchTheEnd()
             case .newBest: passedBest = true
             case .wilted:
                 wilts += 1
                 snapped = true
                 hungryOn = false
-            case .stung:
-                stings += 1
-                // Sprout's free first bee (REVIEW-2 #9): the toast says what it would have cost.
+            case let .stung(_, _, cost):
+                // QA-2 #5: the crimson "lost" flash only for a sting that cost something.
+                if cost > 0 { stings += 1 }
+                // Sprout's free first sting (REVIEW-3 #3): the hint slot says what it would have cost, and the row
+                // flashes green with "free!".
                 if AppRules.isFreeSting(event, mode: session.mode) {
                     beesToastUntil = snapshot.time + Self.toastSeconds
+                    freeFlashUntil = snapshot.time + Self.freeFlashSeconds
                     snapped = true
                     AppTrace.t("SNAP-T toast bees-cost")
                 }
@@ -277,23 +299,45 @@ final class GameController: ObservableObject, SceneDriver {
                 hungryOn = true
                 snapped = true
             case let .feast(_, back):
-                // The first Feast ever: its flying glyph is labelled once (REVIEW-2 #12).
-                if back > 0 && !snapGainShown && feastsAtStart == 0 && session.mode != .lesson {
+                let full = session.mode != .lesson
+                    && AppRules.refundHitTheCap(before: lastCoreSnaps, after: snapshot.snapsLeft, back: back,
+                                                max: snapshot.snapsMax)
+                if full {
+                    // ROUND-4: a Feast at the cap says "+1 (full)" (the numeral never dips).
+                    snapGainUntil = snapshot.time + Self.snapGainSeconds
+                    snapGainLabel = AppRules.snapGainText(back, full: true)
+                    snapped = true
+                } else if back > 0 && !snapGainShown && feastsAtStart == 0 && session.mode != .lesson {
+                    // The first Feast ever: its flying glyph is labelled once (REVIEW-2 #12).
                     snapGainShown = true
                     snapGainUntil = snapshot.time + Self.snapGainSeconds
                     snapGainLabel = AppRules.snapGainText(back)
                     snapped = true
                 }
+            case let .chainUp(_, multiplier):
+                // REVIEW-3 #10: a player's first chain step ever is named, once, in the hint slot.
+                if chainTagEligible && session.mode != .lesson {
+                    chainTagEligible = false
+                    chainTagUntil = snapshot.time + Self.toastSeconds
+                    chainTagMultiplier = multiplier
+                    snapped = true
+                    AppTrace.t("SNAP-T toast chain")
+                }
             default: break
             }
             AppTrace.t("SNAP-T event " + AppTrace.describe(event))
+        }
+        if AppRules.chainHeld(events, chain: snapshot.chain) {
+            chainHeldUntil = snapshot.time + Self.chainHeldSeconds
+            snapped = true
         }
         if AppTrace.enabled && now - lastTrapLog >= Self.trapLogInterval {
             lastTrapLog = now
             let ref = input == .hinge ? hinge.reference : AppTrace.reference(trap)
             AppTrace.t(AppTrace.trapLine(trap, reference: ref))
         }
-        publishHUD(snapshot, now: now, force: snapped)
+        publishHUD(snapshot, now: now, force: snapped, hold: AppRules.movesSnaps(events))
+        lastCoreSnaps = snapshot.snapsLeft
         demoAfterStep(snapshot, events: events)
         if session.isFinished { handleFinished(immediate: false) }
         return (snapshot, events)
@@ -413,6 +457,8 @@ final class GameController: ObservableObject, SceneDriver {
         sceneGeneration += 1
         newScene.reset()
         if let p = snapsAnchor { SceneHooks.setSnapsAnchor(newScene, p) }
+        SceneHooks.setSnapsRow(newScene, snapsRow)
+        SceneHooks.setShowsEconomy(newScene, route.isPlay)
         homeTicker?.stop()
     }
 
@@ -537,8 +583,13 @@ final class GameController: ObservableObject, SceneDriver {
         SceneHooks.setDrawnClosure(scene, drawnClosureDegrees(now: now))
     }
 
-    /// The HUD's snaps row centre in scene space (PlayLayer reports it on layout).
-    func setSnapsAnchor(_ p: CGPoint) {
+    /// The HUD's snaps anchor (the glyph that changes next, QA-2 #6) and the whole row, in scene space (PlayLayer
+    /// reports them on layout and on every count change).
+    func setSnapsAnchor(_ p: CGPoint, row: CGRect? = nil) {
+        if let row, row != snapsRow {
+            snapsRow = row
+            SceneHooks.setSnapsRow(scene, row)
+        }
         guard p.x.isFinite, p.y.isFinite, p != snapsAnchor else { return }
         snapsAnchor = p
         SceneHooks.setSnapsAnchor(scene, p)
@@ -725,7 +776,10 @@ final class GameController: ObservableObject, SceneDriver {
         scene?.isPaused = false
         feedback.silence()
         hud.update(HUDValues())
+        shownSnaps = nil
         if freshBog { makeHomeSession() }
+        // QA-2 #7: Home has no snaps row.
+        SceneHooks.setShowsEconomy(scene, false)
         // A snap made on a menu is never delivered on Home's first frame either.
         if hinge.hasHinge { hinge.reset(at: CACurrentMediaTime()) }
         setRoute(.home)
@@ -781,7 +835,7 @@ final class GameController: ObservableObject, SceneDriver {
     /// `lessonStep=1` on a phone sim keeps it on screen too (a frame of it).
     private func lessonHingeLike() -> Bool {
         let foldLayout = (layout?.hasFold ?? false) && !isDemo
-        return input == .hinge || foldLayout || demo?.lessonStep == 1
+        return input == .hinge || foldLayout || demo?.lessonStep == 1 || (isDemo && demoFold)
     }
 
     /// Skip (offered on every step): the lesson counts as done.
@@ -816,11 +870,11 @@ final class GameController: ObservableObject, SceneDriver {
         }
         return LessonScript.Input(time: s.time, angle: input == .hinge ? hinge.angle : nil,
                                   hasHinge: lessonHingeLike(), armed: s.armed, events: events, liveFlies: flies,
-                                  liveBees: bees, fliesInTrap: inTrap, touch: touchWording)
+                                  liveBees: bees, fliesInTrap: inTrap, touch: lessonTouch)
     }
 
     private func publishLesson(_ script: LessonScript) {
-        let display = script.display(touch: touchWording, hasPose: lessonHasPose)
+        let display = script.display(touch: lessonTouch, hasPose: lessonHasPose)
         guard display != lessonDisplay else { return }
         if display.step != lessonDisplay?.step || display.praise != lessonDisplay?.praise
             || display.warning != lessonDisplay?.warning {
@@ -864,12 +918,14 @@ final class GameController: ObservableObject, SceneDriver {
             : SessionOptions.`for`(m)
         // Demo `wave=`: Core starts the run at that wave (its nectar block and day follow).
         if m != .lesson, let wave = demo?.wave, wave > 1 { options.firstWave = wave }
+        let rules = runRules(for: m)
         // First runs (GAME-DESIGN §5): 12 snaps while the plant rank is Sprout.
-        options.startSnaps = AppRules.startSnaps(mode: m, lifetimeBugs: store.data.lifetimeBugs)
-        // R3 (ROUND-3 founder call): Sprout's first run never wilts and its first bee is free.
-        let firstRun = AppRules.isSproutFirstRun(mode: m, runs: store.data.runs, lifetimeBugs: store.data.lifetimeBugs)
-        Self.applyFirstRun(firstRun, to: &options)
-        if firstRun { AppTrace.t("SNAP-T first run options") }
+        options.startSnaps = rules.startSnaps
+        // R3/R4 (founder calls): the first Feed run starts with 14, never wilts and its first sting is free.
+        Self.applyFirstRun(rules.firstRun, to: &options)
+        if rules.firstRun { AppTrace.t("SNAP-T first run options") }
+        // REVIEW-3 #19: the lesson shows the row the next run will really start with.
+        if m == .lesson { options.startSnaps = lessonSnaps() }
         let newSession = TrapSession(mode: m, seed: runSeed, best: store.best(for: m), geometry: sessionLayout.geometry,
                                      options: options)
         session = newSession
@@ -882,6 +938,12 @@ final class GameController: ObservableObject, SceneDriver {
         feastsAtStart = store.data.feasts
         snapGainShown = false
         snapGainUntil = -1
+        shownSnaps = nil
+        lastCoreSnaps = newSession.snapshot.snapsLeft
+        freeFlashUntil = -1
+        chainTagEligible = store.data.longestChain == 0 && m != .lesson
+        chainTagUntil = -1
+        chainHeldUntil = -1
         touch = TouchTrapSource()
         fixedSource.closure = demo?.closure ?? 0
         pilotRun = demo?.pilot.map { PilotRun(skill: $0, seed: runSeed &+ 101) }
@@ -900,17 +962,45 @@ final class GameController: ObservableObject, SceneDriver {
         lastHint = nil
         bannerText = AppRules.startBanner(m, touch: touchWording)
         scene?.reset()
+        SceneHooks.setShowsEconomy(scene, true)
         setRoute(m == .lesson ? .lesson : .playing)
         publishHUD(newSession.snapshot, now: CACurrentMediaTime(), force: true)
         refreshIdleTimer()
     }
 
     /// Core's first-run switches (design/notes/core-R3.md): no hunger, and the first stinger bite costs nothing (its
-    /// `stung(cost: 0)` shows the toast). Pure; tested.
+    /// `stung(cost: 0)` shows the toast). R4 (founder call, REVIEW-3 #11): it starts full, at 14. Pure; tested.
     nonisolated static func applyFirstRun(_ on: Bool, to options: inout SessionOptions) {
         guard on else { return }
+        // Core R4: `firstRun` is the switch (14 snaps, no wilt, the free sting, a calm first morning; Feed only). The
+        // R3 switches stay set too, so the run reads the same either way.
+        options.firstRun = true
         options.hunger = false
         options.freeFirstSting = true
+        options.startSnaps = AppRules.firstRunSnaps
+    }
+
+    /// A run's opening rules: its start snaps and whether it is the first Feed run. Demo play runs are standard unless
+    /// `firstRun=1` or `progress=fresh` (REVIEW-3 #2: every CI run was a Sprout run 1, so hunger and the costly
+    /// sting were never seen).
+    private func runRules(for m: RunMode) -> (startSnaps: Int?, firstRun: Bool) {
+        let sprout = AppRules.startSnaps(mode: m, lifetimeBugs: store.data.lifetimeBugs)
+        guard let demo else {
+            return (sprout, AppRules.isSproutFirstRun(mode: m, feedRuns: store.data.feedRuns))
+        }
+        guard case .feed = m else { return (nil, false) }
+        if demo.playsFirstRun { return (sprout, true) }
+        // Unseeded demo progress plays like `progress=mid`: Core's standard start.
+        return (demo.progress == nil ? nil : sprout, false)
+    }
+
+    /// The snaps the lesson's row shows: what the next Feed run will start with.
+    private func lessonSnaps() -> Int {
+        // A demo lesson is a first launch unless `firstRun=0`.
+        if let demo, demo.firstRun == nil, demo.effectiveScreen == .lesson { return AppRules.firstRunSnaps }
+        let next = runRules(for: .feed)
+        if next.firstRun { return AppRules.firstRunSnaps }
+        return next.startSnaps ?? Tuning.startSnaps
     }
 
     private func seed(for mode: RunMode) -> UInt64 {
@@ -1050,7 +1140,7 @@ final class GameController: ObservableObject, SceneDriver {
 
     // MARK: - HUD
 
-    private func publishHUD(_ s: TrapSnapshot, now: TimeInterval, force: Bool) {
+    private func publishHUD(_ s: TrapSnapshot, now: TimeInterval, force: Bool, hold: Bool = false) {
         var core = s.hint
         // The lesson shows only the hints it teaches with ("Bee! Wait…", "Now!" once all three sip).
         if route == .lesson, let h = core, !AppRules.lessonShowsHint(h) { core = nil }
@@ -1060,6 +1150,8 @@ final class GameController: ObservableObject, SceneDriver {
         if s.time < beesToastUntil {
             // The free sting's toast wins over everything for its beat.
             hint = .beesCost
+        } else if s.time < chainTagUntil {
+            hint = .chainTag(chainTagMultiplier)
         } else if AppRules.showsFoldHint(mode: s.mode, wave: s.wave, snapsMade: tally.snaps, time: s.time,
                                          after: Self.bannerSeconds, coreHint: core) {
             hint = .foldInput
@@ -1071,6 +1163,7 @@ final class GameController: ObservableObject, SceneDriver {
         values.snapsMax = s.snapsMax
         values.chain = s.chain
         values.chainMultiplier = s.chainMultiplier
+        values.chainHeld = live && s.time < chainHeldUntil && s.chainMultiplier > 1.01
         values.hint = hint
         values.banner = hint == nil && s.time < Self.bannerSeconds && !isPaused ? bannerText : nil
         values.tired = AppRules.isTired(s.phase)
@@ -1081,19 +1174,32 @@ final class GameController: ObservableObject, SceneDriver {
         values.wilts = wilts
         values.stings = stings
         // Scene R3 (#14): the numeral and the glyphs change as each flying glyph lands, and drop only once a sting's
-        // crack has shown (`BogScene.snapsShownOffset`).
-        values.snapsLeft = AppRules.shownSnaps(s.snapsLeft, offset: scene?.snapsShownOffset ?? 0, max: s.snapsMax)
+        // crack has shown (`BogScene.snapsShownOffset`). R4 (QA-2 #2–#4): never the wrong way, and held on the frame
+        // whose events the Scene hasn't drawn yet.
+        let candidate = AppRules.shownSnaps(s.snapsLeft, offset: scene?.snapsShownOffset ?? 0, max: s.snapsMax)
+        let shown = AppRules.truthfulSnaps(previous: shownSnaps, target: s.snapsLeft, candidate: candidate,
+                                           max: s.snapsMax, hold: hold)
+        shownSnaps = shown
+        values.snapsLeft = shown
         values.rowFlashing = scene?.snapsRowFlashing ?? false
-        values.hungry = hungryOn && live && !isPaused
+        values.freeFlash = live && s.time < freeFlashUntil
+        // QA-2 #10 (Core R4): keyed on Core's own `hungry` hint, which stays up through a dry snap or a bee bite until a
+        // catch or the wilt, and drops while the clock is paused (an empty or bee-only trap).
+        values.hungry = live && !isPaused && s.hint == .hungry
+        if hint != nil || values.banner != nil { values.popRects = SceneHooks.livePopRects(scene) }
         values.snapGain = s.time < snapGainUntil && live ? snapGainLabel : nil
         if route == .lesson {
             values.lessonSnaps = lessonDisplay?.showsSnaps ?? false
             values.ringSnaps = lessonDisplay?.isFinal ?? false
         }
-        if route == .lesson && !isPaused { values.lessonTargets = AppRules.lessonTargets(s) }
+        if route == .lesson && !isPaused {
+            values.lessonTargets = AppRules.lessonTargets(s)
+            values.lessonAvoid = AppRules.lessonAvoidPoints(s)
+        }
         // A glyph landing or the row flash shows on its frame, not up to 1/15 s later.
         let urgent = force || hint != lastHint || values.tired != hud.values.tired
             || values.snapsLeft != hud.values.snapsLeft || values.rowFlashing != hud.values.rowFlashing
+            || values.freeFlash != hud.values.freeFlash || values.chainHeld != hud.values.chainHeld
         guard urgent || now - lastHUD >= Self.hudInterval else { return }
         lastHUD = now
         lastHint = hint
@@ -1210,7 +1316,7 @@ final class GameController: ObservableObject, SceneDriver {
         }
         if let after = demo.holdAfter, playTime < after { return }
         if let tag = demo.freezeOn {
-            guard tag != .results, Self.matches(tag, s, events: events) else { return }
+            guard tag != .results, Self.matches(tag, s, events: events, hint: lastHint) else { return }
             if tag.isEvent {
                 freezePendingAt = playTime + tag.holdDelay
                 freezePendingTag = tag
@@ -1223,7 +1329,8 @@ final class GameController: ObservableObject, SceneDriver {
     }
 
     /// Whether this frame is the demo freeze moment `tag`. Pure; tested.
-    nonisolated static func matches(_ tag: DemoMode.Freeze, _ s: TrapSnapshot, events: [TrapEvent]) -> Bool {
+    nonisolated static func matches(_ tag: DemoMode.Freeze, _ s: TrapSnapshot, events: [TrapEvent],
+                                    hint: HUDHint? = nil) -> Bool {
         switch tag {
         case .landed:
             return s.bugs.contains { $0.activity == .sipping && $0.inTrap }
@@ -1266,6 +1373,22 @@ final class GameController: ObservableObject, SceneDriver {
             return AppRules.isTired(s.phase)
         case .results:
             return false
+        case .firstHint:
+            return hint == .foldInput
+        case .chain5:
+            return events.contains { e in
+                if case let .chainUp(count, _) = e { return count >= 5 }
+                return false
+            }
+        case .costlySting:
+            return events.contains { e in
+                if case let .stung(_, _, cost) = e { return cost > 0 }
+                return false
+            }
+        case .drySnap:
+            return events.contains(.drySnap)
+        case .held:
+            return AppRules.chainHeld(events, chain: s.chain)
         }
     }
 
