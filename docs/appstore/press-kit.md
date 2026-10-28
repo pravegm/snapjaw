@@ -2,7 +2,7 @@
 
 *Written Tue 27 Oct 2026 by the launch lead, from `design/GAME-DESIGN.md` and `research/01-market.md`. Everything here is **embargo-free**: anyone may write about Snapjaw from the day they receive it. The public version of the fact sheet is the Press section of `docs/site/index.html`; keep the two in step. The founder sends every email by hand; nothing is automated. **Launch: Tue 8 Dec 2026, about 08:00 UK** (manual release, `metadata.md` §12); send dates are in `social-launch.md` §4.*
 
-**Links to fill in:** `[App Store link]` = `https://apps.apple.com/app/id<Apple ID>` (App Store Connect → App Information → Apple ID, once the app record exists: runbook §1d; the link only works from launch morning, since there's no pre-order). `[clip link]`, `[press folder]`, `[TestFlight link]`, `[promo code]`, `[expiry]`, `[your name]`.
+**Links to fill in:** App Store link: `https://apps.apple.com/app/id6828066230` (Apple ID 6828066230); the link only works from launch morning, since there's no pre-order). `[clip link]`, `[press folder]`, `[TestFlight link]`, `[promo code]`, `[expiry]`, `[your name]`.
 
 **Words:** the plant first, the bees second, choosing third. Never "smash", "squish" or "Fold to …", never a competitor's name, and every "snap" is "a little shut" (`metadata.md`, "Words the copy uses").
 
@@ -36,7 +36,7 @@
 | **Privacy** | Data Not Collected. No accounts, no tracking, no third-party SDKs |
 | **Languages** | English |
 | **Size** | ~[XX] MB (fill in from App Store Connect after processing) |
-| **Links** | App Store: [App Store link] · Site: https://pravegm.github.io/snapjaw/ · Support: https://pravegm.github.io/snapjaw/support.html |
+| **Links** | App Store: https://apps.apple.com/app/id6828066230 · Site: https://pravegm.github.io/snapjaw/ · Support: https://pravegm.github.io/snapjaw/support.html |
 | **Press contact** | GitHub issues (https://github.com/pravegm/snapjaw/issues), the same channel as support. [Founder to decide: a press email, which would replace this on the page] |
 
 ---
@@ -96,7 +96,7 @@ Plain text, under 150 words, clip link in the first two lines, never attach vide
 >
 > 15-second clip, sound on: [clip link]
 >
-> Snapjaw is out today on the App Store: [App Store link]. Hold the iPhone Duo open like a book and it's a Venus flytrap: the halves are the lobes, the hinge is the midrib. Bugs land on the nectar; snap the phone a little shut to catch them. Wait for a crowd, and never eat a bee.
+> Snapjaw is out today on the App Store: https://apps.apple.com/app/id6828066230. Hold the iPhone Duo open like a book and it's a Venus flytrap: the halves are the lobes, the hinge is the midrib. Bugs land on the nectar; snap the phone a little shut to catch them. Wait for a crowd, and never eat a bee.
 >
 > - Endless runs from morning to night, three goals at a time, 8 flytraps to grow, a Daily Bog with a streak, a Zen Bog, Game Center.
 > - The snap is about 22° from however you hold it, never flat or shut.
@@ -118,7 +118,7 @@ Plain text, under 150 words, clip link in the first two lines, never attach vide
 > - Reads the hinge angle continuously, relative to the player's own resting angle; a snap is about 22°, never flat or shut, and the bite fires at 22°.
 > - It's about choosing: crowd bites multiply the score, bees must be spared, snaps are a resource.
 > - A First Bite lesson, a day cycle with 16 species, goals, a Garden of 8 flytraps, a Daily Bog with a streak, a Zen Bog and Game Center. £1.99/$1.99, no ads, no IAP.
-> - Out now: [App Store link] · Clip: [clip link] · Screenshots and icon: [press folder]
+> - Out now: https://apps.apple.com/app/id6828066230 · Clip: [clip link] · Screenshots and icon: [press folder]
 >
 > Thanks,
 > [your name], Snapjaw
@@ -135,7 +135,7 @@ Plain text, under 150 words, clip link in the first two lines, never attach vide
 > - Snaps are the resource: a run starts with 10, Feasts win them back, bees cost them. Five bugs in one bite is a FEAST.
 > - Reasons to come back: three goals at a time, a Garden of 8 flytraps, a Bug Book of 16 species, 12 plant ranks, a Daily Bog with a streak, and a Zen Bog that never ends; tap to snap on other iPhones.
 >
-> Out now: [App Store link]. Clip: [clip link] · promo code on request.
+> Out now: https://apps.apple.com/app/id6828066230. Clip: [clip link] · promo code on request.
 >
 > [your name], Snapjaw
 
@@ -149,7 +149,7 @@ Plain text, under 150 words, clip link in the first two lines, never attach vide
 >
 > I read your piece on [their article]. I liked [one specific thing they said]. Snapjaw is our fifth Duo game, after Squish, Brim, Swoop and Hush: hold the Duo like a book and it's a Venus flytrap. The snap is short (about 22°, relative to how you hold it) and the game is really about patience: crowds multiply the score, and a bee in the bite costs you.
 >
-> 15 s clip: [clip link] · App Store: [App Store link]
+> 15 s clip: [clip link] · App Store: https://apps.apple.com/app/id6828066230
 >
 > £1.99/$1.99, no ads, out now. Happy to explain how the snap detection follows your resting angle.
 >
@@ -170,7 +170,7 @@ Plain text, under 150 words, clip link in the first two lines, never attach vide
 
 ### 6. Launch-day note (only to anyone you told about Snapjaw before it went live; reply in that thread)
 
-> Snapjaw is out today: [App Store link]. The iPhone Duo held like a book is a Venus flytrap; on other iPhones you tap to snap. £1.99/$1.99, no ads, no IAP, no data collected. Everything in [press folder] is free to use. Promo code on request.
+> Snapjaw is out today: https://apps.apple.com/app/id6828066230. The iPhone Duo held like a book is a Venus flytrap; on other iPhones you tap to snap. £1.99/$1.99, no ads, no IAP, no data collected. Everything in [press folder] is free to use. Promo code on request.
 >
 > [your name]
 

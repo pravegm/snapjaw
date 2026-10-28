@@ -2,7 +2,7 @@
 
 *For the founder to post by hand from their own accounts. Tone: cheeky, glossy nature show; fond of the bees ("never eat a bee"). Lead with the plant and the bees, then choosing. Never "smash", "squish", "splat" or "Fold to …", never a competitor's name, never "break your hinge", never a clip of the phone closed fully, slammed or snapped repeatedly fast.*
 
-**Links to fill in:** `[App Store link]` = `https://apps.apple.com/app/id<Apple ID>` (runbook §1d; works from launch morning). `[site]` = `https://pravegm.github.io/snapjaw/`. `[clip]` = the 15 s teaser (§3A).
+**Links to fill in:** App Store link: `https://apps.apple.com/app/id6828066230` (Apple ID 6828066230; works from launch morning). `[site]` = `https://pravegm.github.io/snapjaw/`. `[clip]` = the 15 s teaser (§3A).
 
 ---
 
@@ -34,7 +34,7 @@ Counted with Node, with the link as 23 characters on X and Mastodon and as 40 on
 > Wait for a crowd. Never eat a bee.
 >
 > £1.99 / $1.99 · no ads · no IAP · tap to snap on other iPhones
-> [App Store link]
+> https://apps.apple.com/app/id6828066230
 
 *Alt text:* Two hands hold an iPhone Duo open like a book. Across its two screens is a glossy crimson Venus flytrap with pale teeth along both outer edges, in a mossy green bog. Three round cartoon flies sip gold nectar drops on the lobes while a striped bee with a white halo hovers nearby. The bee flies off, the hands close the phone a little, the teeth on screen clack together, and "TRIPLE ×3" pops up as the trap opens again.
 
@@ -45,7 +45,7 @@ Counted with Node, with the link as 23 characters on X and Mastodon and as 40 on
 >
 > No ads, no IAP.
 >
-> [App Store link]
+> https://apps.apple.com/app/id6828066230
 
 ### Mastodon (attach the clip)
 > Snapjaw is out. 🪴
@@ -56,11 +56,11 @@ Counted with Node, with the link as 23 characters on X and Mastodon and as 40 on
 >
 > Tap to snap on any other iPhone. £1.99 / $1.99, no ads, no IAP, no tracking.
 >
-> [App Store link]
+> https://apps.apple.com/app/id6828066230
 > #iPhoneDuo #iOSDev #IndieDev
 
 ### Threads (attach the clip)
-> Made a game where your iPhone Duo is a Venus flytrap. Snap it a little shut on a crowd of bugs, and never eat a bee. Then grow 8 flytraps, chase goals, keep a Daily streak or just relax in the Zen Bog. Snapjaw is out today: [App Store link]
+> Made a game where your iPhone Duo is a Venus flytrap. Snap it a little shut on a crowd of bugs, and never eat a bee. Then grow 8 flytraps, chase goals, keep a Daily streak or just relax in the Zen Bog. Snapjaw is out today: https://apps.apple.com/app/id6828066230
 
 ### r/iPhoneDuo (only if the rules allow a launch post; otherwise the megathread)
 **Title:** [Dev] I turned the Duo into a Venus flytrap: Snapjaw is out
@@ -76,7 +76,7 @@ Counted with Node, with the link as 23 characters on X and Mastodon and as 40 on
 
 ### Daily Bog post format (any day)
 > Snapjaw Daily Bog #[n] · [score] · biggest bite [n] · 🔥 [n] days 🪤 Beat that.
-> [App Store link]
+> https://apps.apple.com/app/id6828066230
 
 Tap **Share** on the Daily Bog's results: it gives exactly the first line ("Snapjaw Daily Bog #301 · 4,210 · biggest bite 6 · 🔥 4 days 🪤"; the streak part only once you have one). Add "Beat that." and the link yourself.
 
