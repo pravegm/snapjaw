@@ -343,12 +343,26 @@ struct HUDLayout: Equatable {
         CGFloat(snapColumns) * g + CGFloat(snapColumns - 1) * snapGap
     }
 
+    /// R7: the layout with the biggest glyphs whose every cilia rect (score, chain, numeral, rows) clears the cilia by
+    /// `AppCanvas.ciliaClear`; the glyphs step down to `glyphMin` until it does.
     static func make(_ c: AppCanvas) -> HUDLayout {
+        let outline = c.trapOutline()
+        var cap: CGFloat = c.isCompact ? glyphPhone : glyphDuo
+        while true {
+            let l = make(c, outline: outline, glyphCap: cap)
+            if cap <= glyphMin
+                || l.ciliaRects.allSatisfy({ AppCanvas.clearance($0, from: outline) >= AppCanvas.ciliaClear }) {
+                return l
+            }
+            cap -= 1
+        }
+    }
+
+    private static func make(_ c: AppCanvas, outline: [CGPoint], glyphCap: CGFloat) -> HUDLayout {
         let page = c.hudPage
         let right = !c.hudOnLeft
         let compact = c.isCompact
         let fold = c.hasFold
-        let outline = c.trapOutline()
         let pad = AppCanvas.ciliaPad
         let outer = right ? page.maxX : page.minX
         // Glyphs and text may sit nearer the screen's edge than a button (there's nothing to tap).
@@ -395,7 +409,7 @@ struct HUDLayout: Equatable {
         }
         /// The glyph size (shrunk only if a row would touch the cilia) and its rows.
         func fitRows(numeralOnRow: Bool) -> (glyph: CGFloat, rects: [CGRect]) {
-            var g: CGFloat = compact ? glyphPhone : glyphDuo
+            var g: CGFloat = glyphCap
             var rs = rowRects(g, numeralOnRow: numeralOnRow)
             while g > glyphMin && rs.contains(where: { room(textOuter, $0.minY, $0.height) < $0.width }) {
                 g -= 1
