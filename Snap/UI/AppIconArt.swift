@@ -243,18 +243,18 @@ enum AppIconPainter {
         var c = trapContext(ctx)
         cilia(&c)
         let rim = curvePath(backRim)
-        let face = region(backRim, frontRim)
+        let faceRegion = region(backRim, frontRim)
         c.stroke(rim, with: .color(leafDark), style: StrokeStyle(lineWidth: 74, lineCap: .round, lineJoin: .round))
         let marginShade = Gradient(colors: [margin, marginDeep])
         c.stroke(rim, with: .linearGradient(marginShade, startPoint: CGPoint(x: 0, y: -300), endPoint: .zero),
                  style: StrokeStyle(lineWidth: 44, lineCap: .round, lineJoin: .round))
         // The glossy crimson inner face: hot at the top, deep down toward the hidden hinge.
-        let crimson = Gradient(stops: [.init(color: faceHot, location: 0), .init(color: face, location: 0.5),
+        let crimson = Gradient(stops: [.init(color: faceHot, location: 0), .init(color: Self.face, location: 0.5),
                                        .init(color: faceDeep, location: 1)])
-        c.fill(face, with: .radialGradient(crimson, center: CGPoint(x: -70, y: -180), startRadius: 10,
+        c.fill(faceRegion, with: .radialGradient(crimson, center: CGPoint(x: -70, y: -180), startRadius: 10,
                                            endRadius: 380))
         var inside = c
-        inside.clip(to: face)
+        inside.clip(to: faceRegion)
         let depth = Gradient(colors: [Color(snapHex: 0x3C0414, alpha: 0.95), Color(snapHex: 0x3C0414, alpha: 0)])
         inside.fill(Path(CGRect(x: -cornerX, y: -400, width: cornerX * 2, height: 600)),
                     with: .linearGradient(depth, startPoint: CGPoint(x: 0, y: 170), endPoint: CGPoint(x: 0, y: -60)))
