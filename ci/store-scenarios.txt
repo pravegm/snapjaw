@@ -29,14 +29,14 @@
 
 # ---- iPhone 6.9" (2868 x 1320) and 6.3" (2622 x 1206): ten frames ---------------------------------------------------
 P01-book-hero|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd|60|Your Duo is a *flytrap* / Best on iPhone Duo. Plays on other iPhones too.|SNAP-T freeze crowd|book:D01-book-hero
-P02-feast|screen=play;seed=7;wave=8;pilot=perfect;freezeOn=feastOpen|90|Wait for a crowd. *CHOMP!* / One bite catches every bug inside.|SNAP-T event feast count=[3-9]
+P02-feast|screen=play;mode=feed;pilot=expert;progress=mid;freezeOn=bigFeast|240|Wait for a crowd. *FEAST!* / One bite catches every bug inside.|SNAP-T freeze bigFeast
 P03-bee|screen=play;seed=7;wave=15;pilot=perfect;freezeOn=bee|60|Never eat a *bee* / Bees cost snaps. Wait them out.|SNAP-T freeze bee
-P04-last-snap|screen=play;seed=7;pilot=novice;freezeOn=lastSnap|150|Every snap *counts* / Big bites win snaps back.|SNAP-T event lastSnap
-P05-dusk|screen=play;seed=7;wave=17;pilot=expert;freezeOn=crowd;freezeAfter=3|60|From morning to *night* / New bugs as the day goes on.|SNAP-T start wave 17
-P06-night|screen=play;seed=7;wave=24;pilot=expert;freezeOn=crowd;freezeAfter=3|60|Fireflies light the *night* / Crickets, moths and a rare Golden Scarab.|SNAP-T start wave 24
+P04-garden|screen=garden;progress=late|8|Grow *8 flytraps* / Real cultivars, from Red Dragon to B52.|SNAP-T screen garden
+P05-night|screen=play;seed=7;wave=24;pilot=expert;freezeOn=crowd;freezeAfter=3|60|Fireflies light the *night* / New bugs as the day goes on.|SNAP-T start wave 24
+P06-goals|screen=home;progress=mid|8|Three *goals* every run / And a Daily Bog with a streak.|SNAP-T canvas
 P07-bug-book|screen=book;progress=mid|6|Fill the *Bug Book* / 16 species, each with a joke.|SNAP-T screen book
-P08-results|screen=results;seed=7;progress=mid;pilot=expert|8|One more *go*? / Best bite, longest chain, bees spared.|SNAP-T run score=
-P09-daily|screen=home;progress=mid|6|One *Daily Bog* for everyone / Same bugs, one try that counts.|
+P08-zen|screen=play;mode=zen;pilot=casual;progress=mid;freezeAfter=40|60|Or just *relax* / Zen Bog: no rush, no end.|SNAP-T freeze
+P09-results|screen=results;pilot=casual;progress=mid|240|One more *go*? / Goals, growth and a best to beat.|SNAP-T canvas
 P10-first-bite|screen=lesson;lessonStep=6|8|Learn it in one *First Bite* / A short lesson on your first go.|SNAP-T lesson step 6
 
 # reserves (phone): not captured by default; run them with a filter like '^(P[0-9]|R[0-9])'.
