@@ -60,7 +60,7 @@ enum Achievements {
     static let monarch = def("monarch", "Bog Monarch", "Reach the top plant rank: Bog Monarch.")
     static let night = def("night", "Midnight Snack", "Keep your trap going until night falls.")
     static let daily = def("daily", "Daily Diner", "Finish a scored Daily Bog.")
-    static let score10k = def("score10k", "Well Fed", "Score 10,000 protein in one run.")
+    static let score10k = def("score10k", "Well Fed", "Score 10,000 in one run.")
     static let nobees = def("nobees", "Bee-Free Diet", "Catch 30 bugs in one run without biting a bee or wasp.")
 
     /// Exactly 12, in the store kit's order.

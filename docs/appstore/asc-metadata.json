@@ -305,13 +305,13 @@
       "localizations": {
         "en-GB": {
           "name": "Well Fed",
-          "beforeEarnedDescription": "Score 10,000 protein in one run.",
-          "afterEarnedDescription": "Ten thousand protein. Delicious."
+          "beforeEarnedDescription": "Score 10,000 in one run.",
+          "afterEarnedDescription": "Ten thousand points. Delicious."
         },
         "en-US": {
           "name": "Well Fed",
-          "beforeEarnedDescription": "Score 10,000 protein in one run.",
-          "afterEarnedDescription": "Ten thousand protein. Delicious."
+          "beforeEarnedDescription": "Score 10,000 in one run.",
+          "afterEarnedDescription": "Ten thousand points. Delicious."
         }
       },
       "image": "tools/appstore/badges/snap.ach.score10k.png"
@@ -350,13 +350,13 @@
       "localizations": {
         "en-GB": {
           "name": "Best Feast",
-          "formatterSuffix": " protein",
-          "formatterSuffixSingular": " protein"
+          "formatterSuffix": " points",
+          "formatterSuffixSingular": " point"
         },
         "en-US": {
           "name": "Best Feast",
-          "formatterSuffix": " protein",
-          "formatterSuffixSingular": " protein"
+          "formatterSuffix": " points",
+          "formatterSuffixSingular": " point"
         }
       }
     },
@@ -376,13 +376,13 @@
       "localizations": {
         "en-GB": {
           "name": "Daily Bog",
-          "formatterSuffix": " protein",
-          "formatterSuffixSingular": " protein"
+          "formatterSuffix": " points",
+          "formatterSuffixSingular": " point"
         },
         "en-US": {
           "name": "Daily Bog",
-          "formatterSuffix": " protein",
-          "formatterSuffixSingular": " protein"
+          "formatterSuffix": " points",
+          "formatterSuffixSingular": " point"
         }
       }
     }

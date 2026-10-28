@@ -16,7 +16,7 @@
 | Reference name | `Best feast` | `Daily Bog` |
 | Display name (en-GB and en-US) | `Best Feast` | `Daily Bog` |
 | Score format | Integer | Integer |
-| Format suffix (singular / plural) | ` protein` / ` protein` | ` protein` / ` protein` |
+| Format suffix (singular / plural) | ` point` / ` points` | ` point` / ` points` |
 | Sort order | High to Low | High to Low |
 | Score submission | Best score | Best score (the app submits only the day's one scored try) |
 | Score range (optional) | 0 – 10,000,000 | 0 – 10,000,000 |
@@ -45,7 +45,7 @@
 | 8 | `snap.ach.monarch` | Bog Monarch | Reach the top plant rank: Bog Monarch. | All hail the hungriest plant in the bog. | 100 | No | `PlantRanks.rank(forLifetimeBugs: lifetimeBugs) == PlantRanks.count - 1` |
 | 9 | `snap.ach.night` | Midnight Snack | Keep your trap going until night falls. | Fed from breakfast to midnight. | 25 | No | `run.waves >= 23` (waves counted from 1, as in the GAME-DESIGN §6 table: wave 23 is the first night wave; Core: use the same index base as `WaveFactory.phase(forWave:)`, so this fires exactly when a night wave has started) |
 | 10 | `snap.ach.daily` | Daily Diner | Finish a scored Daily Bog. | Same bog as everyone else today. | 15 | No | `run.mode` is `.daily(day: _, scored: true)` |
-| 11 | `snap.ach.score10k` | Well Fed | Score 10,000 protein in one run. | Ten thousand protein. Delicious. | 75 | No | `run.score >= 10000` (check with `BalanceTests`, below) |
+| 11 | `snap.ach.score10k` | Well Fed | Score 10,000 in one run. | Ten thousand points. Delicious. | 75 | No | `run.score >= 10000` (check with `BalanceTests`, below) |
 | 12 | `snap.ach.nobees` | Bee-Free Diet | Catch 30 bugs in one run without biting a bee or wasp. | Thirty bugs, and not one bee in the mix. | 50 | No | `run.bugsCaught >= 30 && run.stings == 0` |
 | | | | | | **575** | | |
 
