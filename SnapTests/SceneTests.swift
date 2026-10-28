@@ -1620,7 +1620,8 @@ struct SceneTests {
             #expect(cb.g > cb.r, "classic back \(cb.r) \(cb.g)")
             #expect(rb.r > rb.g * 1.5, "red dragon back \(rb.r) \(rb.g)")
             let orim = SceneTests.pixel(o, x: rimX, yUp: y), crim = SceneTests.pixel(c, x: rimX, yUp: y)
-            #expect(orim.r > 0.7 && orim.g > 0.5 && orim.b < 0.6,   // CI 40667000285 measured (0.98, 0.89, 0.53): pale gold "golden rim \(orim.r) \(orim.g) \(orim.b)")
+            // CI 40667000285 measured (0.98, 0.89, 0.53): pale gold, so blue may reach 0.6.
+            #expect(orim.r > 0.7 && orim.g > 0.5 && orim.b < 0.6, "golden rim \(orim.r) \(orim.g) \(orim.b)")
             #expect(crim.r < 0.4)
         } else {
             Issue.record("the lobe images did not draw")
