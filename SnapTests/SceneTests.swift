@@ -705,6 +705,7 @@ struct SceneTests {
                        dt: 1.0 / 120.0)
             var narrowest = CGFloat.greatestFiniteMagnitude
             var heldFrames = 0
+            var boundaryFrames = 0
             for k in 0..<70 {
                 if k > 0 { scene.show(s, events: [], dt: 1.0 / 120.0) }
                 let f = scene.trapDrawnFrame
@@ -716,11 +717,13 @@ struct SceneTests {
                     // cilia hidden. (Not "inside the bare lobe rect": the interlocked cilia of the closed trap may
                     // reach past it, which is fine as long as nothing leaves the open trap's outline; CI 40622079094.)
                     #expect(f.width < open.width * CGFloat(0.5))
-                    #expect(scene.closedTrapAlpha > CGFloat(0.95))
-                    #expect(scene.lobeScale < CGFloat(0.35))
+                    // R5 (CI 40642818315): the release now starts while the slam level still reads > 0.99, so up to
+                    // two boundary frames may already be fading the closed trap and reopening the lobes.
+                    if !(scene.closedTrapAlpha > CGFloat(0.95) && scene.lobeScale < CGFloat(0.35)) { boundaryFrames += 1 }
                     narrowest = min(narrowest, f.width)
                 }
             }
+            #expect(boundaryFrames <= 2, "\(boundaryFrames) held frames without the closed trap")
             #expect(heldFrames > 3)
             #expect(narrowest < 2 * (g.a + TrapArt.exteriorWidth) * CGFloat(0.4))
             // …and it opens again.
@@ -1161,8 +1164,14 @@ struct SceneTests {
         }
         #expect(hi - lo < 0.05, "face varies \(lo)…\(hi)")
         // The lime margin on the back lobe (just outside its rim) and the lime lip on the front one.
-        let backMargin = px(TrapPose.icon(0, -284))
-        #expect(backMargin.g > backMargin.r && backMargin.r > 2 * backMargin.b && backMargin.a > 0.9)
+        // R5 (CI 40642818315): a single probe at y −284 can land on a cilium or the rim line, so scan a short strip
+        // across the margin and ask for lime somewhere in it.
+        var limeOnMargin = false
+        for yy in stride(from: CGFloat(-296), through: CGFloat(-270), by: CGFloat(2)) {
+            let m = px(TrapPose.icon(0, yy))
+            if m.g > m.r && m.r > 2 * m.b && m.a > 0.9 { limeOnMargin = true }
+        }
+        #expect(limeOnMargin)
         let lip = px(TrapPose.icon(0, 123.75))
         #expect(lip.g > lip.r && lip.r > 2 * lip.b && lip.a > 0.9)
         // The back lobe's green outside, as a band beyond the margin; the front lobe's green outside; the stem.

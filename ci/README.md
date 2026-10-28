@@ -86,9 +86,22 @@ The Duo sim boots in book pose (landscape, the fold vertical), which is exactly 
 never has to ask for an orientation.
 
 **Inputs:**
-- `passes`: `hinge frames ui store` (any subset).
+- `passes`: `hinge frames ui store` (any subset; always run in that order, so the hinge checks get the youngest device).
 - `store_filter`: a regex.
 - `strict`: if true, a FAIL fails the job. The default only reports.
+- `retries`: whole re-runs of a hinge check on a new Duo when its launch dies (default 2).
+
+**Rig (R5, `design/notes/ci-R5.md`):**
+- Each hinge-driven launch (`hinge`, `close-pause`, `frames-snap`, `ui-lesson-hinge`) runs on a **fresh Duo**:
+  created, booted, settled (SpringBoard's PID steady, at least 25 s), the app installed, a warm-up `hinge get`. Only
+  one Duo is ever booted.
+- A hinge set times out after 10 s, a sweep after its length + 10 s, and a timed-out call is sent once more.
+  Repositioning sweeps over 1.5 s go as chunks; the measured CREEP sweep stays whole.
+- A Duo counts as dead only if neither `simctl list` nor `simctl getenv` sees it, twice.
+- A check whose launch died (or any INCONCLUSIVE verdict) is run again whole on a new Duo, at most twice. The best
+  attempt's rows are kept; the others are `HINGE-RETRY INFO` rows, with `logs/<launch>-attempt-<k>.*`.
+- CI-only scenario keys: `ciHinge=<deg>` (under 30°: shut, the cover display shot) and `ciShootOn=<event>` (the
+  inner panel shot 0.5 s after `SNAP-T event <event>` on a live run: D02's open-after-bite frame).
 
 **Hinge checks** (design/ROUND-1.md). Each one prints `<CHECK> PASS|FAIL|INCONCLUSIVE (detail)` to `logs/run.txt`,
 adds a row to `checks.tsv` and appears in the job-summary table.
@@ -114,7 +127,11 @@ INFO rows give evidence without a verdict:
 - `duo-04-cover-shut`, `duo-05-reopened-165`, `duo-06-pose-card`.
 - `duo-h*`: the frames from the hinge checks.
 - `duo-ui-*`: Home, lesson steps 1 and 2, Results, the Bug Book, Settings, too flat (178°) and the cover.
-- `store-*`: one frame per line of `ci/duo-scenarios.txt`, at 150° with a pilot.
+- `duo-ui-lesson-{2,3,4}-hinge-*`: the lesson walked with real hinge snaps from step 1 (`fold=1`), plus a
+  `LESSON-HINGE INFO` row.
+- `store-*`: one frame per line of `ci/duo-scenarios.txt`, at 150° with a pilot. Lines 17–25 are the R4 frames REVIEW-4
+  asked for at Duo aspect (pose, cover card and display, 13, 21, lesson 2–3 with `fold=1`, the ×5 chain, the feast
+  open after the bite); the older lines are tagged with their R4 phone numbers.
 
 **Artifact `duo-screens`:** the PNGs (the lit panel), `raw/` (both panels), `logs/run.txt`, `logs/<launch>.txt`,
 `checks.tsv` and `build.log`.
@@ -205,7 +222,7 @@ Inputs: `phones`, `duo`, `duo_from_run`, `device_69`, `device_63`, `phone_filter
   6, a 5-bug feast at wave 8, a bee at wave 15, all with the perfect pilot; feed mode, so the snaps row is real).
 - `caption` is `headline / sub-line` with one `*gold*` word. `frame` is `flat`, `book` (Duo) or `book:D01-book-hero`
   (the iPhone sets' frame 1).
-- `ci/duo-scenarios.txt` stays `duo.yml`'s 16-frame review set; `ci/duo-store-scenarios.txt` is the upload set.
+- `ci/duo-scenarios.txt` stays `duo.yml`'s 25-frame review set; `ci/duo-store-scenarios.txt` is the upload set.
 
 **What makes a frame FLAGGED** (it still gets framed, into `_flagged/`): the app log lacks
 `SNAP-T demo '…' starts`, the `SNAP-T freeze <tag>` of its `freezeOn=`, the `SNAP-T start wave <n>` of its `wave=`, the

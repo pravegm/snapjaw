@@ -10,17 +10,21 @@
 #  - Not ci/duo-scenarios.txt: that file is duo.yml's review set (16 frames, the HUD mirrored, settings, the late Bug
 #    Book). This one is the upload set, in screenshots.md's order, with captions. Their play frames share the seeds,
 #    waves and pilots proven in duo run 40603497021 (crowd wave 6, feast wave 8 count=5, bee wave 15, all perfect).
-#  - HUD on the right half (the sharp half, the Duo default): the workflow requires hudLeft=0, so never add hudLeft=1.
+#  - HUD on the right half (the sharp half, the Duo default): the workflow requires hudLeft=0, so never add hudLeft=1
+#    to a D line (the DR reserve of R4 frame 23 has it, and is FLAGGED by design: review only).
 #  - D01 `book`: this capture, split at the fold and drawn on a stylised Duo held open like a book (store-frame --book):
 #    the two lobes on the two pages, the midrib on the hinge. The split is geometric, so the layout is kept exactly.
 #  - No `fold=`: the Duo has a real one. The pilot plays every play frame (the held hinge never pauses a run).
-#  - D02 should show the teeth at the snap: the feast freeze holds 0.3 s after the bite, with the pop on screen.
+#  - D02 is an open-after-bite moment (REVIEW-4 #3, #15; Duo P2-3), not the hold or the release: `ciShootOn=feast`
+#    (a CI-only key, stripped by ci/duo.sh) shoots the live run CI_SHOOT_DELAY (0.5) s after `SNAP-T event feast`,
+#    when the lobes are open again with the pop and "Feast! +1 snap" still up. (The old `freezeOn=feast` froze 0.3 s
+#    after the bite: the dark, narrow release that read as "a plum".)
 #  - Same glossary and truthfulness notes as ci/store-scenarios.txt. "Snap it a little shut" is fine; "shut" on its
 #    own is flagged.
 
 # ---- iPhone Duo inner display (2853 x 2007): ten frames -------------------------------------------------------------
 D01-book-hero|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd|60|Your Duo is a *flytrap* / Hold it open like a book.|SNAP-T freeze crowd|book
-D02-feast|screen=play;seed=7;wave=8;pilot=perfect;freezeOn=feast|90|Wait for a crowd. *CHOMP!* / Snap it a little shut. Open again.|SNAP-T event feast count=[3-9]
+D02-feast|screen=play;seed=7;wave=8;pilot=perfect;ciShootOn=feast|90|Wait for a crowd. *CHOMP!* / Snap it a little shut. Open again.|SNAP-T event feast count=[3-9]
 D03-bee|screen=play;seed=7;wave=15;pilot=perfect;freezeOn=bee|60|Never eat a *bee* / Bees cost snaps. Wait them out.|SNAP-T freeze bee
 D04-last-snap|screen=play;seed=7;pilot=novice;freezeOn=lastSnap|150|Every snap *counts* / Big bites win snaps back.|SNAP-T event lastSnap
 D05-dusk|screen=play;seed=7;wave=17;pilot=expert;freezeOn=crowd;freezeAfter=3|60|From morning to *night* / New bugs as the day goes on.|SNAP-T start wave 17
@@ -34,3 +38,20 @@ D10-first-bite|screen=lesson;lessonStep=6|8|Learn it in one *First Bite* / A sho
 # reserves (Duo): not captured by default; run them with a filter like '^(D[0-9]|DR)'.
 DR1-closing|screen=play;mode=attract;seed=7;wave=6;closure=14;freezeAfter=12|20|The teeth follow your *hands* / Snap it a little shut. Open again.|SNAP-T trap closure 1[34]
 DR2-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=sting|90|A wasp? *Bzzt!* / Wasps sting: two extra snaps.|SNAP-T event stung .*species=wasp
+
+# R5 reserves (REVIEW-4 #1, #11, #15): the R4 phone frames the panel asked to see at Duo aspect (same args as
+# ci/scenarios.txt, "(R4 nn)"), in the upload format so a clean one can be promoted to a D slot. Two are review only
+# and FLAGGED by design: DR10 (hudLeft=1) and DR12 (the cover display is 1398 x 2034, not a Duo slot size; under a
+# '^(D[0-9]|DR)' filter store-capture.sh will also retry it as wrong-size).
+DR3-home|screen=home;progress=mid|6|Feed the *flytrap* / Spare the bees.|SNAP-T canvas|flat
+DR4-pose|screen=pose|5|Hold it like a *book* / Both halves are the trap.|SNAP-T canvas|flat
+DR5-lesson-2|screen=lesson;lessonStep=2;fold=1|7|Your first *bite* / Wait for it to sip, then snap.|SNAP-T lesson step 2|flat
+DR6-lesson-3|screen=lesson;lessonStep=3;fold=1|7|Then open *again* / Opening resets the trap.|SNAP-T lesson step 3|flat
+DR7-landed|screen=play;seed=7;pilot=expert;freezeOn=landed|30|A fly stops to *sip* / Let it settle in the lobes.|SNAP-T freeze landed|flat
+DR8-snap|screen=play;seed=7;pilot=casual;freezeOn=snap|45|One bite, one *CHOMP* / Snap it a little shut.|SNAP-T event snapped|flat
+DR9-play|screen=play;seed=7;pilot=casual;freezeAfter=8|16|Bugs land on *both* pages / The fold is the midrib.|SNAP-T input pilot|flat
+DR10-hud-left|screen=play;seed=7;pilot=casual;fold=1;hudLeft=1;freezeAfter=8|16|The score on the *left* / For left-handed holds.|hudLeft=1|flat
+DR11-daily|screen=play;mode=daily;seed=7;progress=mid;pilot=expert;freezeAfter=10|18|Today's *Daily Bog* / Same bugs for everyone.|SNAP-T input pilot|flat
+DR12-cover|screen=cover;ciHinge=0|8|Closed? It *waits* / Open it up to carry on.|SNAP-T|flat
+DR13-results|screen=results;seed=7;progress=mid;pilot=casual|8|How did you *do*? / Best bite, longest chain, bees spared.|SNAP-T run score=|flat
+DR14-chain5|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=chain5;freezeAfter=50|300|Chain bites to *x5* / Clean bites keep the chain going.|SNAP-T event chainUp count=[0-9]+ multiplier=5|flat

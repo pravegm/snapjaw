@@ -1379,7 +1379,7 @@ final class GameController: ObservableObject, SceneDriver {
                 if case .snapped = e { return true }
                 return false
             }
-        case .feast:
+        case .feast, .feastOpen:
             return events.contains { e in
                 if case .feast = e { return true }
                 return false

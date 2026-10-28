@@ -6,12 +6,15 @@ name: Duo
 # orientation request is needed. Script: ci/duo.sh. Hinge checks (design/ROUND-1.md "CI engineer"): SNAP, CREEP,
 # REARM, CLOSE-PAUSE, printed as "<CHECK> PASS|FAIL (…)" in logs/run.txt and as a table in the job summary. Frames: open
 # 165, half closed 150, snapped 130, cover shut, reopened 165, the pose card, UI frames, and the Duo store set
-# (ci/duo-scenarios.txt). Manual only (expensive: ~45–75 macOS minutes).
+# (ci/duo-scenarios.txt). Manual only (expensive: ~60–100 macOS minutes).
+# R5 (design/notes/ci-R5.md): the hinge pass always runs first; each hinge-driven launch (hinge, close-pause,
+# frames-snap, the lesson walk) gets a freshly created and booted Duo, settled and warmed up; hinge calls are short,
+# chunked and retried on a timeout; a check whose launch dies is run again whole on a new Duo, at most `retries` times.
 on:
   workflow_dispatch:
     inputs:
       passes:
-        description: "Passes: hinge (the checks), frames (165/150/130/cover/pose), ui (home, lesson, results, book, settings, too flat, cover), store (ci/duo-scenarios.txt)"
+        description: "Passes, always run in this order: hinge (the checks), frames (165/150/130/cover/pose), ui (home, lesson incl. the real-hinge walk, results, book, settings, too flat, cover), store (ci/duo-scenarios.txt)"
         type: string
         default: "hinge frames ui store"
       store_filter:
@@ -22,6 +25,10 @@ on:
         description: "Fail the job when a hinge check FAILs (default: report only)"
         type: boolean
         default: false
+      retries:
+        description: "Whole re-runs of a hinge check on a new Duo when its launch dies (0–2)"
+        type: string
+        default: "2"
 
 concurrency:
   group: duo-${{ github.ref }}
@@ -30,7 +37,7 @@ concurrency:
 jobs:
   duo:
     runs-on: xcode-27
-    timeout-minutes: 200
+    timeout-minutes: 260
     env:
       XCODE_APP: /Applications/Xcode_27.1.app
       RUNTIME_ID: com.apple.CoreSimulator.SimRuntime.iOS-27-1
@@ -71,6 +78,8 @@ jobs:
           type="${type:-$DUO_TYPE_FALLBACK}"
           udid=$(xcrun simctl create "Snapjaw Duo" "$type" "$RUNTIME_ID")
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          # ci/duo.sh creates fresh Duos of the same type and runtime for the hinge launches.
+          echo "type=$type" >> "$GITHUB_OUTPUT"
           # Boot now so the (slow) first boot overlaps the hinge install and the build.
           xcrun simctl boot "$udid"
 
@@ -113,12 +122,16 @@ jobs:
           gtimeout 30 xcrun simctl io "$UDID" enumerate || true
 
       - name: Capture
-        timeout-minutes: 120
+        # R5: up to ~8 fresh Duos (2 hinge launches, frames-snap and the lesson walk, plus whole retries) at ~1–4 min
+        # each, and 9 more review frames (the chain cap waits up to 5 min).
+        timeout-minutes: 180
         env:
           UDID: ${{ steps.sim.outputs.udid }}
+          DUO_TYPE: ${{ steps.sim.outputs.type }}
           PASSES: ${{ inputs.passes }}
           STORE_FILTER: ${{ inputs.store_filter || '.' }}
           STRICT: ${{ inputs.strict && '1' || '0' }}
+          CHECK_RETRIES: ${{ inputs.retries || '2' }}
           OUT: duo-screens
         run: bash ci/duo.sh
 

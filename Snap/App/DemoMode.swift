@@ -68,11 +68,14 @@ struct DemoMode: Equatable {
         /// R4 (REVIEW-3 #2, #9, #10, #20): the opening's fold line on its plate; the chain's fifth step; a sting that
         /// cost snaps (the crack and the row flash); a dry snap; a held chain ("×1.5 held").
         case firstHint, chain5, costlySting, drySnap, held
+        /// R5 (REVIEW-4 #3): a Feast with the trap open again (0.75 s on), for the store bite shot on phones.
+        case feastOpen
 
         /// Event moments hold a beat after the event; state moments freeze at once.
         var isEvent: Bool {
             switch self {
-            case .snap, .feast, .sting, .lastSnap, .hungry, .wilted, .chain5, .costlySting, .drySnap, .held: return true
+            case .snap, .feast, .sting, .lastSnap, .hungry, .wilted, .chain5, .costlySting, .drySnap, .held, .feastOpen:
+                return true
             case .landed, .crowd, .bee, .dusk, .night, .tired, .results, .firstHint: return false
             }
         }
@@ -86,6 +89,7 @@ struct DemoMode: Equatable {
             case .costlySting: return 0.2
             case .feast, .sting, .lastSnap, .wilted, .chain5, .drySnap, .held: return 0.3
             case .hungry: return 0.5
+            case .feastOpen: return 0.75
             case .landed, .crowd, .bee, .dusk, .night, .tired, .results, .firstHint: return 0
             }
         }

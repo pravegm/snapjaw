@@ -57,7 +57,7 @@
 # R4 (REVIEW-3 #2, #7, #9, #10, #20): standard rules unless progress=fresh / firstRun=1
 37-play-dusk-18|screen=play;seed=7;wave=18;pilot=expert;freezeOn=landed|40|Dusk at wave 18: the peach haze and the warm rim light, the trap crimson|SNAP-T canvas
 38-play-first-hint|screen=play;seed=7;freezeOn=firstHint|30|The first wave of a run, no snap yet: "Snap the halves together" (phone: "Tap to snap")|SNAP-T freeze firstHint
-39-play-chain5|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=chain5|240|The chain reaching ×5: the chip flare|SNAP-T freeze chain5
+39-play-chain5|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=chain5;freezeAfter=50|300|The chain at the ×5 cap: the chip flare (R5, REVIEW-4 #15: chain5 fires on the 5th step, ×3.5; ×5 is the 8th, ~41 s in, so only a step after 50 s counts)|SNAP-T event chainUp count=[0-9]+ multiplier=5
 40-play-costly-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=costlySting|120|A sting that costs snaps: "Stung! · +N", a glyph cracks and the row flashes crimson|SNAP-T freeze costlySting
 41-play-dry-snap|screen=play;seed=7;pilot=novice;freezeOn=drySnap|90|A dry snap: nothing caught, the chain broken|SNAP-T freeze drySnap
 42-play-held|screen=play;seed=7;wave=6;pilot=casual;freezeOn=held|150|A 1-bug clean bite holding the chain: "×1.5 held"|SNAP-T freeze held

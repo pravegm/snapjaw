@@ -35,9 +35,30 @@
 # launch; that launch's checks are INCONCLUSIVE), HINGE-TOOL FAIL when the hinge CLI keeps failing on a booted Duo, and
 # RIG INFO (failed hinge calls, simulator deaths).
 #
+# R5 rig (design/notes/ci-R5.md; Duo runs 40626586037 and 40634483657):
+#  - The passes always run in the order hinge, frames, ui, store: the hinge checks get the youngest simulator.
+#  - Each hinge-driven check launch (FRESH_FOR: hinge, close-pause, frames-snap, ui-lesson-hinge) runs on a FRESH Duo:
+#    `simctl create` (same device type and runtime), boot, `bootstatus -b`, a pause until SpringBoard is settled (the
+#    same PID for 3 polls, at least SETTLE_MIN s), install, then a warm-up `hinge get`. The old Duo is shut down first
+#    (one booted Duo at a time), and deleted when this script made it.
+#  - No hinge call runs long: a set times out after HINGE_SET_TO (10) s, a sweep after its length + HINGE_PAD (10) s,
+#    and a repositioning sweep longer than SWEEP_CHUNK (1.5) s is sent as chunks. The measured sweeps (CREEP's 3 s)
+#    stay whole. A timed-out call is retried once (HINGE_TRIES=2) while the device is still booted.
+#  - "Booted" is asked twice (simctl list, then `simctl getenv`), because a slow `simctl list` made a live Duo look
+#    dead in run 40634483657 (sim-death-1.txt lists it as Booted).
+#  - If a check's launch dies (a SIMULATOR / HINGE-TOOL row, or any INCONCLUSIVE verdict), the WHOLE check is run again
+#    on a new Duo, at most CHECK_RETRIES (2) more times. The best attempt's rows go into checks.tsv (ties: the later
+#    one); every other attempt is one HINGE-RETRY INFO row, with its rows in logs/<launch>-attempt-<k>.tsv, its app log
+#    in logs/<launch>-attempt-<k>.txt and its frames in raw/<frame>-attempt-<k>.png.
+#  - A dead Duo before a launch is replaced by a fresh one (then rebooted, then CoreSimulatorService restarted).
+#
 # Env: UDID (required), OUT (duo-screens), PASSES ("hinge frames ui store"), STRICT (1 = exit 1 when a check FAILs;
 # default 0: the frames and the PASS/FAIL table are the evidence), STORE_LIST / STORE_FILTER / STORE_ANGLE (the store
-# pass, ci/duo-scenarios.txt at 150°).
+# pass, ci/duo-scenarios.txt at 150°), DUO_TYPE / RUNTIME_ID (for fresh Duos; read from simctl when unset),
+# CHECK_RETRIES, FRESH_FOR, SETTLE_MIN, SWEEP_CHUNK, HINGE_PAD, HINGE_SET_TO, HINGE_TRIES, CI_SHOOT_DELAY.
+# CI-only scenario keys (stripped before the app sees them): `ciHinge=<deg>` (shoot at that angle; under 30° closes
+# the Duo as frames-cover does and shoots the cover display) and `ciShootOn=<event>` (no freeze: shoot the inner panel
+# CI_SHOOT_DELAY s after `SNAP-T event <event>`, i.e. the trap open again after the bite).
 # Writes: $OUT/*.png (lit panel), $OUT/raw/<shot>-inner|cover.png, $OUT/logs/<launch>.txt (app stdout+stderr),
 # $OUT/logs/run.txt (this script), $OUT/checks.tsv (check <TAB> PASS|FAIL|INFO|INCONCLUSIVE <TAB> detail) and, when
 # $GITHUB_STEP_SUMMARY is set, a summary table.
@@ -54,6 +75,20 @@ OUT_ABS="$(cd "$OUT" && pwd)"
 RUNLOG="$OUT_ABS/logs/run.txt"
 CHECKS="$OUT_ABS/checks.tsv"
 : > "$CHECKS"
+SINK="$CHECKS"    # where result() writes: checks.tsv, or the current check attempt's buffer (run_check)
+CHECK_RETRIES="${CHECK_RETRIES:-2}"
+FRESH_FOR="${FRESH_FOR:-hinge close-pause frames-snap ui-lesson-hinge}"
+SETTLE_MIN="${SETTLE_MIN:-25}"
+SWEEP_CHUNK="${SWEEP_CHUNK:-1.5}"
+HINGE_PAD="${HINGE_PAD:-10}"
+HINGE_SET_TO="${HINGE_SET_TO:-10}"
+HINGE_TRIES="${HINGE_TRIES:-2}"
+[[ "$HINGE_TRIES" =~ ^[1-9][0-9]*$ ]] || HINGE_TRIES=1
+[[ "$CHECK_RETRIES" =~ ^[0-9]+$ ]] || CHECK_RETRIES=2
+CI_SHOOT_DELAY="${CI_SHOOT_DELAY:-0.5}"
+DUO_TYPE="${DUO_TYPE:-}"
+RUNTIME_ID="${RUNTIME_ID:-}"
+BASE_UDID="$UDID"
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$RUNLOG" >&2; }
 to() {
   local s="$1"; shift
@@ -65,7 +100,7 @@ to() {
 # result <CHECK> <PASS|FAIL|INFO|INCONCLUSIVE> <detail>: one line in the run log ("SNAP PASS (…)") and in checks.tsv.
 result() {
   log "$1 $2 ($3)"
-  printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$CHECKS"
+  printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$SINK"
 }
 
 # write_summary: the checks as a table in the job summary (called on every exit path).
@@ -84,21 +119,32 @@ write_summary() {
   } >> "$GITHUB_STEP_SUMMARY"
 }
 
-INNER=""; COVER=""
-to 300 xcrun simctl install "$UDID" "$APP" || {
-  log "install failed, retrying"; sleep 5
-  to 300 xcrun simctl install "$UDID" "$APP" || { result INSTALL FAIL "simctl install failed twice"; write_summary; exit 1; }
+# bail: stop the run (exit 1), keeping the rows of a check attempt in progress.
+bail() {
+  if [[ "$SINK" != "$CHECKS" ]]; then cat "$SINK" >> "$CHECKS" 2>/dev/null; SINK="$CHECKS"; fi
+  write_summary; exit 1
 }
 
-for c in LCD-1 primary-1 3 internal; do
-  to 30 xcrun simctl io "$UDID" screenshot --display="$c" "$OUT_ABS/raw/_p.png" >/dev/null 2>>"$RUNLOG" && { INNER="$c"; break; }
-done
-for c in LCD primary 1 external; do
-  [[ "$c" == "$INNER" ]] && continue
-  to 30 xcrun simctl io "$UDID" screenshot --display="$c" "$OUT_ABS/raw/_p.png" >/dev/null 2>>"$RUNLOG" && { COVER="$c"; break; }
-done
-rm -f "$OUT_ABS/raw/_p.png"
-log "displays inner=$INNER cover=$COVER"
+INNER=""; COVER=""
+# install_app: the app onto the current Duo, 2 tries (returns 1 when both fail; the caller decides).
+install_app() {
+  to 300 xcrun simctl install "$UDID" "$APP" && return 0
+  log "install failed, retrying"; sleep 5
+  to 300 xcrun simctl install "$UDID" "$APP"
+}
+# probe_displays: the inner and cover display names (they vary: LCD/LCD-1, primary/primary-1, 1/3).
+probe_displays() {
+  local c
+  for c in LCD-1 primary-1 3 internal; do
+    to 30 xcrun simctl io "$UDID" screenshot --display="$c" "$OUT_ABS/raw/_p.png" >/dev/null 2>>"$RUNLOG" && { INNER="$c"; break; }
+  done
+  for c in LCD primary 1 external; do
+    [[ "$c" == "$INNER" ]] && continue
+    to 30 xcrun simctl io "$UDID" screenshot --display="$c" "$OUT_ABS/raw/_p.png" >/dev/null 2>>"$RUNLOG" && { COVER="$c"; break; }
+  done
+  rm -f "$OUT_ABS/raw/_p.png"
+  log "displays inner=$INNER cover=$COVER"
+}
 
 HAVE_HINGE=0; command -v hinge >/dev/null 2>&1 && HAVE_HINGE=1
 (( HAVE_HINGE )) || log "WARN no hinge tool: the hinge checks will FAIL and every frame stays at the boot angle"
@@ -119,9 +165,29 @@ HINGE_LAST=""     # the last failure: "exit <rc>: <message>"
 HINGE_DEAD_LOGGED=0
 CUR_LOG=""        # the current launch's app log
 CUR_LAUNCH=""
+FRESH_N=0         # fresh Duos made by this run
+MADE_UDIDS=" "    # the devices this script created (deleted when retired)
+HINGE_RETRIES=0   # timed-out hinge calls that were sent again
+RERUNS=0          # whole check attempts run again on a new Duo
+ATTEMPT_SHOTS=""  # the frames shot during the current check attempt
 
-# sim_booted: 0 when CoreSimulator still lists the Duo as Booted.
-sim_booted() { to 20 xcrun simctl list devices 2>/dev/null | grep -F "$UDID" | grep -q "(Booted)"; }
+# sim_booted: 0 when CoreSimulator still lists the Duo as Booted. R5: run 40634483657's first "death" was a live Duo
+# (sim-death-1.txt lists it as Booted) whose `simctl list` was slow, so a device that answers `simctl getenv` counts as
+# booted too, and both are asked twice, 5 s apart, before the Duo is called dead.
+sim_booted() {
+  local i
+  for i in 1 2; do
+    to 30 xcrun simctl list devices 2>/dev/null | grep -F "$UDID" | grep -q "(Booted)" && return 0
+    if to 20 xcrun simctl getenv "$UDID" HOME >/dev/null 2>&1; then
+      log "NOTE simctl list did not show $UDID as Booted, but the device answers (simctl getenv): booted"
+      return 0
+    fi
+    (( i == 1 )) && sleep 5
+  done
+  return 1
+}
+# loadavg: the runner's load averages (a starved host makes every simctl / hinge call slow).
+loadavg() { local l; l=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | sed 's/^ *//; s/ *$//'); echo "${l:-?}"; }
 
 # sim_diag <file>: what the host knows about the device's death (device list, the app's last lines, the device's own
 # system.log, CoreSimulator's log, fresh crash reports).
@@ -130,6 +196,7 @@ sim_diag() {
   {
     echo "== $(date -u +%FT%TZ) SIM-DEAD during launch '${CUR_LAUNCH:-none}' (hinge ${CUR}°, last hinge failure: ${HINGE_LAST:-none})"
     echo "== simctl list devices"; to 20 xcrun simctl list devices 2>&1
+    echo "== host load: $(loadavg); busiest processes"; ps -Ao pcpu,rss,comm -r 2>/dev/null | head -15
     if [[ -n "$CUR_LOG" ]]; then echo "== app log ($CUR_LOG, $(nlines "$CUR_LOG") lines), last 15"; tail -n 15 "$CUR_LOG" 2>&1; fi
     echo "== device system.log, last 300"; tail -n 300 "$HOME/Library/Logs/CoreSimulator/$UDID/system.log" 2>&1
     echo "== CoreSimulator.log, last 150"; tail -n 150 "$HOME/Library/Logs/CoreSimulator/CoreSimulator.log" 2>&1
@@ -151,35 +218,180 @@ sim_lost() {
   result SIMULATOR FAIL "the Duo simulator shut down during launch '${CUR_LAUNCH:-none}' (app log line $at; $1); diagnostics logs/$(basename "$f"); the checks of that launch are INCONCLUSIVE"
 }
 
-# sim_recover: before a launch, reboot a dead device (boot, bootstatus, re-warm the hinge helper, re-apply the wanted
-# angle). Stops the script when it cannot be rebooted: nothing after that would be evidence.
+# sim_settle <min s>: after a boot, wait until SpringBoard is settled: the same SpringBoard PID in 3 polls 3 s apart,
+# and at least <min> s since the call (first boots run data migration and crash-looping daemons: intelligencetasksd
+# crashed every few seconds in runs 40626586037 and 40634483657). At most 120 s; if launchctl can't be asked at all,
+# a plain <min> s pause.
+sim_settle() {
+  local min="${1:-0}" t0=$SECONDS pid last="" same=0 miss=0
+  while (( SECONDS - t0 < 120 )); do
+    pid=$(to 20 xcrun simctl spawn "$UDID" launchctl list 2>/dev/null \
+      | awk 'tolower($3) ~ /(^|[.:])com\.apple\.springboard$/ && $1 ~ /^[0-9]+$/ { print $1; exit }')
+    if [[ -n "$pid" ]]; then
+      miss=0
+      if [[ "$pid" == "$last" ]]; then same=$((same + 1)); else same=1; last="$pid"; fi
+    else
+      same=0; last=""; miss=$((miss + 1))
+      if (( miss >= 4 )); then
+        log "WARN SIM: SpringBoard not found by launchctl (4 polls); a plain pause to ${min} s"
+        (( SECONDS - t0 < min )) && sleep $(( min - (SECONDS - t0) ))
+        return 1
+      fi
+    fi
+    if (( same >= 3 && SECONDS - t0 >= min )); then
+      log "SIM: SpringBoard settled (pid $pid, the same in 3 polls; $((SECONDS - t0)) s; host load $(loadavg))"
+      return 0
+    fi
+    sleep 3
+  done
+  log "WARN SIM: SpringBoard not settled after 120 s (last pid ${last:-none}); going on"
+  return 1
+}
+
+# hinge_warm: the warm-up `hinge get` after a boot (the first call on a device installs the tool's in-simulator
+# helper; do it outside any timed check). Sets CUR from the reported angle when one can be read, else 180.
+hinge_warm() {
+  (( HAVE_HINGE )) || return 1
+  local tmp="$OUT_ABS/raw/_warm.txt" try a
+  for try in 1 2; do
+    if to 120 hinge -d "$UDID" get > "$tmp" 2>&1; then
+      cat "$tmp" >> "$RUNLOG"
+      a=$(grep -iE 'angle|°|^[[:space:]]*[0-9]+(\.[0-9]+)?[[:space:]]*$' "$tmp" | grep -oE '[0-9]+(\.[0-9]+)?' | tail -1)
+      a="${a%.*}"
+      if [[ "$a" =~ ^[0-9]+$ ]] && (( a <= 180 )); then CUR="$a"; else CUR=180; fi
+      log "SIM: hinge warm-up get ok on try $try (${a:-?}°)"
+      rm -f "$tmp"; return 0
+    fi
+    cat "$tmp" >> "$RUNLOG" 2>/dev/null
+    log "WARN hinge warm-up get failed (try $try): $(grep . "$tmp" 2>/dev/null | tail -1 | tr -d '\r' | cut -c1-160)"
+    sleep 3
+  done
+  rm -f "$tmp"; CUR=180; return 1
+}
+
+# boot_ready <label> <settle min s>: boot the current Duo, wait for bootstatus, settle SpringBoard, install the app,
+# warm the hinge helper. Returns 1 when it doesn't boot or the app won't install.
+boot_ready() {
+  local t0=$SECONDS
+  to 120 xcrun simctl boot "$UDID" >>"$RUNLOG" 2>&1 || true
+  to 600 xcrun simctl bootstatus "$UDID" -b >>"$RUNLOG" 2>&1 || true
+  sim_booted || { log "WARN SIM: $1 ($UDID) did not boot"; return 1; }
+  log "SIM: $1 ($UDID) booted after $((SECONDS - t0)) s"
+  sim_settle "$2"
+  install_app || { log "WARN SIM: the app did not install on $1 ($UDID)"; return 1; }
+  hinge_warm || log "WARN SIM: no warm-up hinge reading on $1"
+  SIM_LOST=0; HINGE_RUN=0
+  return 0
+}
+
+# duo_ids: DUO_TYPE and RUNTIME_ID of the current Duo (from the env, else from simctl's JSON).
+duo_ids() {
+  [[ -n "$DUO_TYPE" && -n "$RUNTIME_ID" ]] && return 0
+  local ids
+  ids=$(to 30 xcrun simctl list devices -j 2>/dev/null | python3 -I -c '
+import json, sys
+u = sys.argv[1]
+for rt, devs in json.load(sys.stdin).get("devices", {}).items():
+    for d in devs:
+        if d.get("udid") == u:
+            print(d.get("deviceTypeIdentifier", ""), rt)
+            sys.exit(0)
+' "$UDID" 2>/dev/null)
+  [[ -z "$DUO_TYPE" ]] && DUO_TYPE="${ids%% *}"
+  [[ -z "$RUNTIME_ID" ]] && RUNTIME_ID="${ids#* }"
+  [[ -z "$DUO_TYPE" ]] && DUO_TYPE="com.apple.CoreSimulator.SimDeviceType.iPhone-Duo"
+  [[ -n "$RUNTIME_ID" ]]
+}
+
+# retire <udid>: delete a device this script created (the workflow's own Duo is only shut down).
+retire() {
+  to 60 xcrun simctl shutdown "$1" >>"$RUNLOG" 2>&1 || true
+  if [[ "$MADE_UDIDS" == *" $1 "* ]]; then
+    to 60 xcrun simctl delete "$1" >>"$RUNLOG" 2>&1 || true
+    MADE_UDIDS="${MADE_UDIDS/ $1 / }"
+  fi
+}
+
+# fresh_device <why>: a new Duo (same type and runtime), freshly booted, settled, with the app and a warm hinge helper.
+# The old Duo is shut down first, so only one is ever booted; it is deleted once the new one is up (if we made it).
+# On failure the old Duo is booted again and 1 is returned.
+fresh_device() {
+  local why="$1" old="$UDID" new
+  duo_ids || { log "WARN SIM: the Duo's device type / runtime are unknown: no fresh Duo for $why"; return 1; }
+  FRESH_N=$((FRESH_N + 1))
+  new=$(to 90 xcrun simctl create "Snapjaw Duo fresh $FRESH_N" "$DUO_TYPE" "$RUNTIME_ID" 2>>"$RUNLOG" | tr -d '\r' | tail -1)
+  if [[ ! "$new" =~ ^[0-9A-Fa-f-]{36}$ ]]; then
+    log "WARN SIM: simctl create failed ($DUO_TYPE, $RUNTIME_ID) for $why"; return 1
+  fi
+  MADE_UDIDS="$MADE_UDIDS$new "
+  log "SIM: fresh Duo $FRESH_N ($new) for $why; shutting down $old first (host load $(loadavg))"
+  to 90 xcrun simctl shutdown "$old" >>"$RUNLOG" 2>&1 || true
+  UDID="$new"
+  if boot_ready "fresh Duo $FRESH_N" "$SETTLE_MIN"; then
+    retire "$old"
+    CUR_LOG=""; SIM_LOST=0; HINGE_RUN=0
+    return 0
+  fi
+  log "WARN SIM: fresh Duo $FRESH_N did not come up; back to $old"
+  retire "$new"
+  UDID="$old"
+  boot_ready "the previous Duo" 10 || log "WARN SIM: the previous Duo ($old) did not come back either"
+  return 1
+}
+
+# sim_recover: before a launch, replace a dead Duo with a fresh one; failing that, reboot it (boot, bootstatus,
+# settle, re-warm the hinge helper, re-apply the wanted angle); failing that, restart CoreSimulatorService once and try
+# a fresh one again. Stops the script when none works: nothing after that would be evidence.
 sim_recover() {
   sim_booted && return 0
   sim_lost "found shut down before launch '$1'"
-  log "SIM: rebooting the Duo"
-  to 120 xcrun simctl boot "$UDID" >>"$RUNLOG" 2>&1 || true
-  if ! to 600 xcrun simctl bootstatus "$UDID" -b >>"$RUNLOG" 2>&1 || ! sim_booted; then
-    result SIMULATOR FAIL "the Duo could not be rebooted after shutting down; stopped before launch '$1'"
-    write_summary; exit 1
+  if fresh_device "recovery before launch '$1'"; then
+    log "SIM: fresh Duo up; re-applying ${WANT}°"
+    hinge_set "$WANT" || true
+    return 0
   fi
-  (( HAVE_HINGE )) && { to 120 hinge -d "$UDID" get >>"$RUNLOG" 2>&1 || log "WARN hinge get after the reboot failed"; }
+  log "SIM: rebooting the Duo"
+  if ! boot_ready "the rebooted Duo" 10; then
+    log "SIM: restarting CoreSimulatorService (simctl itself may be wedged), then a fresh Duo"
+    killall -9 com.apple.CoreSimulator.CoreSimulatorService >>"$RUNLOG" 2>&1 || true
+    sleep 10
+    if ! fresh_device "recovery after a CoreSimulatorService restart"; then
+      result SIMULATOR FAIL "the Duo could not be rebooted after shutting down; stopped before launch '$1'"
+      bail
+    fi
+  fi
   log "SIM: rebooted; re-applying ${WANT}°"
-  SIM_LOST=0; HINGE_RUN=0; CUR=180
+  SIM_LOST=0; HINGE_RUN=0
   hinge_set "$WANT" || true
 }
 
 # hinge_call <timeout s> <args…>: one hinge invocation (its output → the run log, via a file: a lingering helper can't
 # hold a pipe open). On failure: the exit code (124/137/142 = our timeout) and the tool's last message, then either
 # SIM-DEAD (the device is gone) or, after 5 failures in a row on a booted device, one HINGE-TOOL FAIL row.
+# R5: a call that timed out is sent once more (HINGE_TRIES) while the Duo is still booted: in runs 40626586037 and
+# 40634483657 every hinge failure was a 20 s timeout of an otherwise ordinary call.
 hinge_call() {
-  local s="$1" tmp="$OUT_ABS/raw/_hinge.txt" rc why msg; shift
-  to "$s" hinge -d "$UDID" "$@" > "$tmp" 2>&1; rc=$?
-  cat "$tmp" >> "$RUNLOG" 2>/dev/null
-  if (( rc == 0 )); then HINGE_RUN=0; rm -f "$tmp"; return 0; fi
-  HINGE_ERRS=$((HINGE_ERRS + 1)); HINGE_RUN=$((HINGE_RUN + 1))
-  case "$rc" in 124|137|142) why="timed out after ${s}s (exit $rc)";; *) why="exit $rc";; esac
-  msg=$(grep . "$tmp" 2>/dev/null | tail -1 | tr -d '\r' | tr '\t' ' ' | cut -c1-160); rm -f "$tmp"
-  HINGE_LAST="hinge $*: $why${msg:+: $msg}"
+  local s="$1" tmp="$OUT_ABS/raw/_hinge.txt" rc why msg try; shift
+  for (( try = 1; try <= HINGE_TRIES; try++ )); do
+    to "$s" hinge -d "$UDID" "$@" > "$tmp" 2>&1; rc=$?
+    cat "$tmp" >> "$RUNLOG" 2>/dev/null
+    if (( rc == 0 )); then
+      HINGE_RUN=0; rm -f "$tmp"
+      (( try > 1 )) && log "hinge $*: ok on try $try/$HINGE_TRIES"
+      return 0
+    fi
+    HINGE_ERRS=$((HINGE_ERRS + 1)); HINGE_RUN=$((HINGE_RUN + 1))
+    case "$rc" in 124|137|142) why="timed out after ${s}s (exit $rc)";; *) why="exit $rc";; esac
+    msg=$(grep . "$tmp" 2>/dev/null | tail -1 | tr -d '\r' | tr '\t' ' ' | cut -c1-160); rm -f "$tmp"
+    HINGE_LAST="hinge $*: $why${msg:+: $msg}"
+    grep -qiE "no booted simulator|not booted|unknown session|current state: Shutdown" <<<"$msg" && break
+    case "$rc" in 124|137|142) ;; *) break;; esac
+    (( try < HINGE_TRIES )) || break
+    sim_booted || break
+    HINGE_RETRIES=$((HINGE_RETRIES + 1))
+    log "WARN $HINGE_LAST; sending it again (try $((try + 1))/$HINGE_TRIES)"
+    sleep 1
+  done
   if grep -qiE "no booted simulator|not booted|unknown session|current state: Shutdown" <<<"$msg" || ! sim_booted; then
     sim_lost "$HINGE_LAST"
   elif (( HINGE_RUN >= 5 && ! HINGE_DEAD_LOGGED )); then
@@ -195,17 +407,34 @@ hinge_set() {   # hinge_set <angle>: a confirmed set, 3 tries
   (( SIM_LOST )) && return 1   # the device is gone until the next launch reboots it
   local a
   for a in 1 2 3; do
-    hinge_call 20 -t 3 "$1" && { CUR="$1"; return 0; }
+    hinge_call "$HINGE_SET_TO" -t 3 "$1" && { CUR="$1"; return 0; }
     (( SIM_LOST )) && break
     sleep 1
   done
   log "WARN hinge set $1 failed (${HINGE_LAST:-no message})"; return 1
 }
-hinge_sweep() {   # hinge_sweep <to> <seconds>: continuous 60 Hz stream so the app sees a real motion
+# hinge_sweep <to> <seconds> [whole]: continuous 60 Hz stream so the app sees a real motion. R5: a sweep longer than
+# SWEEP_CHUNK s is sent as equal chunks (no single call runs long) unless it is `whole` (a measured motion: CREEP).
+hinge_sweep() {
   WANT="$1"
   (( HAVE_HINGE )) || return 1
   (( SIM_LOST )) && return 1   # CUR keeps the last angle really set
-  hinge_call $(( ${2%.*} + 20 )) sweep "$CUR" "$1" "$2" || log "WARN sweep $CUR -> $1 failed (${HINGE_LAST:-no message})"
+  local n step i a from="$CUR"
+  n=$(awk -v s="$2" -v c="$SWEEP_CHUNK" 'BEGIN { n = int(s / c - 1e-9) + 1; print (n < 1 ? 1 : n) }')
+  if [[ "${3:-}" == whole ]] || (( n <= 1 )); then
+    hinge_call $(( ${2%.*} + HINGE_PAD )) sweep "$CUR" "$1" "$2" || log "WARN sweep $CUR -> $1 failed (${HINGE_LAST:-no message})"
+  else
+    step=$(awk -v s="$2" -v n="$n" 'BEGIN { printf "%.2f", s / n }')
+    for (( i = 1; i <= n; i++ )); do
+      a=$(awk -v f="$from" -v t="$1" -v i="$i" -v n="$n" 'BEGIN { x = f + (t - f) * i / n; printf "%d", (x < 0 ? x - 0.5 : x + 0.5) }')
+      (( i == n )) && a="$1"
+      if ! hinge_call $(( ${step%.*} + HINGE_PAD )) sweep "$CUR" "$a" "$step"; then
+        log "WARN sweep $CUR -> $a failed (chunk $i/$n of $from -> $1 over $2 s; ${HINGE_LAST:-no message})"
+        (( SIM_LOST )) && break
+      fi
+      CUR="$a"
+    done
+  fi
   CUR="$1"
 }
 
@@ -257,6 +486,7 @@ png_wh() {
 
 shoot() {   # shoot <name> <inner|cover>: both panels to raw/, the lit one (or the wanted one) to <name>.png
   local name="$1" want="$2" ib=-1 cb=-1 pick
+  ATTEMPT_SHOTS="$ATTEMPT_SHOTS $name"
   [[ -n "$INNER" ]] && to 30 xcrun simctl io "$UDID" screenshot --display="$INNER" "$OUT_ABS/raw/$name-inner.png" >/dev/null 2>>"$RUNLOG" && ib=$(brightness "$OUT_ABS/raw/$name-inner.png")
   [[ -n "$COVER" ]] && to 30 xcrun simctl io "$UDID" screenshot --display="$COVER" "$OUT_ABS/raw/$name-cover.png" >/dev/null 2>>"$RUNLOG" && cb=$(brightness "$OUT_ABS/raw/$name-cover.png")
   if [[ -z "$INNER$COVER" ]]; then to 30 xcrun simctl io "$UDID" screenshot "$OUT_ABS/$name.png" >/dev/null 2>>"$RUNLOG"; return; fi
@@ -270,6 +500,7 @@ shoot() {   # shoot <name> <inner|cover>: both panels to raw/, the lit one (or t
 # be missed (the bite). ~3–7 s instead of ~15 s.
 shoot_now() {
   local name="$1"
+  ATTEMPT_SHOTS="$ATTEMPT_SHOTS $name"
   if [[ -n "$INNER" ]]; then to 30 xcrun simctl io "$UDID" screenshot --display="$INNER" "$OUT_ABS/$name.png" >/dev/null 2>>"$RUNLOG"
   else to 30 xcrun simctl io "$UDID" screenshot "$OUT_ABS/$name.png" >/dev/null 2>>"$RUNLOG"; fi
   log "shot $name (inner only, at once, hinge ${CUR}°) size=$(png_wh "$OUT_ABS/$name.png")"
@@ -349,8 +580,72 @@ snap_once() {
   hinge_sweep "$2" 0.15
 }
 
+# attempt_bad <rows file>: 0 when an attempt's rows show the rig failed (a SIMULATOR / HINGE-TOOL row, an INCONCLUSIVE
+# verdict, or an INFO row recorded on a dead Duo).
+attempt_bad() {
+  awk -F'\t' '$1 == "SIMULATOR" || $1 == "HINGE-TOOL" || $2 == "INCONCLUSIVE" || $3 ~ /SIMULATOR DEAD/ { f = 1 } END { exit !f }' "$1"
+}
+# attempt_score <rows file>: how much evidence an attempt gave (PASS/FAIL verdicts and live INFO rows).
+attempt_score() {
+  awk -F'\t' '($2 == "PASS" || $2 == "FAIL") && $1 != "SIMULATOR" && $1 != "HINGE-TOOL" { n++ }
+    $2 == "INFO" && $3 !~ /SIMULATOR DEAD/ { n++ } END { print n + 0 }' "$1"
+}
+# attempt_rows <rows file>: "SNAP PASS, REARM INCONCLUSIVE, …"
+attempt_rows() { awk -F'\t' '{ printf "%s%s %s", (NR > 1 ? ", " : ""), $1, $2 }' "$1"; }
+
+# run_check <launch name> <function>: one check (its launch, moves, verdicts and frames) with whole retries. The first
+# attempt runs on a fresh Duo when the launch is in FRESH_FOR; a retry always does. An attempt whose launch died is run
+# again, up to CHECK_RETRIES times; the best attempt's rows go into checks.tsv and its frames and app log are put back.
+run_check() {
+  local name="$1" fn="$2" k=0 max=$(( CHECK_RETRIES + 1 )) best=1 bestscore=-1 score buf clean ran j s
+  while (( k < max )); do
+    k=$((k + 1))
+    if (( k > 1 )) || [[ " $FRESH_FOR " == *" $name "* ]]; then
+      fresh_device "'$name' attempt $k/$max" || log "WARN $name: no fresh Duo for attempt $k/$max; it runs on $UDID"
+    fi
+    buf="$OUT_ABS/logs/$name-attempt-$k.tsv"; : > "$buf"
+    SINK="$buf"; ATTEMPT_SHOTS=""; HINGE_DEAD_LOGGED=0
+    log "CHECK-RUN '$name' attempt $k/$max on $UDID (host load $(loadavg))"
+    "$fn"
+    (( SIM_LOST )) || sim_booted || sim_lost "found shut down at the end of '$name'"
+    SINK="$CHECKS"
+    cp "$OUT_ABS/logs/$name.txt" "$OUT_ABS/logs/$name-attempt-$k.txt" 2>/dev/null || true
+    echo "$ATTEMPT_SHOTS" > "$OUT_ABS/logs/$name-attempt-$k.shots"
+    for s in $ATTEMPT_SHOTS; do cp "$OUT_ABS/$s.png" "$OUT_ABS/raw/$s-attempt-$k.png" 2>/dev/null || true; done
+    score=$(attempt_score "$buf")
+    (( score >= bestscore )) && { best=$k; bestscore=$score; }
+    clean=1; (( SIM_LOST )) && clean=0; attempt_bad "$buf" && clean=0
+    if (( clean )); then log "CHECK-RUN '$name' attempt $k/$max: clean ($(attempt_rows "$buf"))"; break; fi
+    if (( k < max )); then
+      RERUNS=$((RERUNS + 1))
+      log "CHECK-RUN '$name' attempt $k/$max: the rig failed ($(attempt_rows "$buf")); the whole check again on a new Duo"
+    fi
+  done
+  ran=$k
+  cat "$OUT_ABS/logs/$name-attempt-$best.tsv" >> "$CHECKS"
+  if (( best != ran )); then
+    for s in $(cat "$OUT_ABS/logs/$name-attempt-$best.shots" 2>/dev/null); do
+      cp "$OUT_ABS/raw/$s-attempt-$best.png" "$OUT_ABS/$s.png" 2>/dev/null || true
+    done
+    cp "$OUT_ABS/logs/$name-attempt-$best.txt" "$OUT_ABS/logs/$name.txt" 2>/dev/null || true
+  fi
+  for (( j = 1; j <= ran; j++ )); do
+    (( j == best )) && continue
+    result HINGE-RETRY INFO "'$name' attempt $j/$max set aside ($(attempt_rows "$OUT_ABS/logs/$name-attempt-$j.tsv")); kept attempt $best of $ran run; rows logs/$name-attempt-$j.tsv, app log logs/$name-attempt-$j.txt"
+  done
+  (( ran > 1 )) && log "CHECK-RUN '$name': $ran attempts, kept $best"
+  return 0
+}
+
+# ---- set-up: settle the workflow's Duo, install, probe the displays -----------------------------------------------
+log "passes: $PASSES (always run in the order hinge, frames, ui, store); fresh Duo for: $FRESH_FOR; whole retries: $CHECK_RETRIES; host load $(loadavg)"
+sim_settle 0 || true
+install_app || { result INSTALL FAIL "simctl install failed twice"; write_summary; exit 1; }
+probe_displays
+
 # ---- pass: the hinge checks (design/ROUND-1.md, CI engineer) ---------------------------------------------------
-if [[ " $PASSES " == *" hinge "* ]]; then
+# Run first (R5): the hinge checks get the youngest simulator, each launch on its own freshly booted Duo.
+check_hinge() {
   hinge_set 160
   launch hinge "screen=play;mode=attract;seed=7"
   HL="$OUT_ABS/logs/hinge.txt"
@@ -397,7 +692,7 @@ if [[ " $PASSES " == *" hinge "* ]]; then
   #    (over the 6° creep depth) and never reach 22°. The max closure is in the detail for exactly that reason.
   hinge_wiggle 160 2
   c0=$(nlines "$HL")
-  hinge_sweep 128 3; sleep 1
+  hinge_sweep 128 3 whole; sleep 1   # whole: chunks would let the rest reference settle between them
   c1=$(nlines "$HL")
   creeps=$(between "$HL" "$c0" "$c1" | trap_vals creep | grep -c '^1$')
   cmax=$(between "$HL" "$c0" "$c1" | trap_vals closure | max_of)
@@ -419,10 +714,12 @@ if [[ " $PASSES " == *" hinge "* ]]; then
   fsl=$(first_line "$HL" "SNAP-T event snapped" "$f0"); [[ -n "$fsl" && "$fsl" -gt "$f1" ]] && fsl=""
   result CREEP-FAST INFO "160 → 128 over 1.5 s: creep-1 lines=$(between "$HL" "$f0" "$f1" | trap_vals creep | grep -c '^1$'); max closure $(between "$HL" "$f0" "$f1" | trap_vals closure | max_of)°; snapped: ${fsl:-none}$(simnote)"
   hinge_sweep 160 1.0; sleep 1
+}
 
-  # 4. CLOSE-PAUSE (fresh launch at 150). First NO-PAUSE-95 (INFO): a hard snap often reaches 90–100° on hardware and
-  #    must never pause (the closing gate is θ < 50° for 0.6 s). Then on down to 40° → `paused closing`; back to 150
-  #    → `resumed`.
+# 4. CLOSE-PAUSE (fresh launch at 150, on its own fresh Duo). First NO-PAUSE-95 (INFO): a hard snap often reaches
+#    90–100° on hardware and must never pause (the closing gate is θ < 50° for 0.6 s). Then on down to 40° →
+#    `paused closing`; back to 150 → `resumed`.
+check_close_pause() {
   hinge_set 150
   launch close-pause "screen=play;mode=attract;seed=7"
   CP="$OUT_ABS/logs/close-pause.txt"
@@ -452,6 +749,11 @@ if [[ " $PASSES " == *" hinge "* ]]; then
   d="paused@${p:-none} ($( [[ -n "$p" ]] && angle_before "$CP" "$p" || echo -)°; first pause line: ${other:-none}); reopened to ${went}°; resumed@${r:-none} ($( [[ -n "$r" ]] && angle_before "$CP" "$r" || echo -)°); $(canvas_line "$CP")"
   if [[ -n "$p" && -n "$r" ]]; then verdict CLOSE-PAUSE PASS "$d"; else verdict CLOSE-PAUSE FAIL "$d"; fi
   shoot "duo-h4-resumed-$went" inner
+}
+
+if [[ " $PASSES " == *" hinge "* ]]; then
+  run_check hinge check_hinge
+  run_check close-pause check_close_pause
 fi
 
 # ---- pass: the book-pose frames (open 165, half closed 150, snapped 130, cover shut, reopened, pose card) ---------
@@ -467,15 +769,19 @@ if [[ " $PASSES " == *" frames "* ]]; then
   launch frames-half "screen=play;mode=attract;seed=7;closure=11"
   sleep 2; shoot duo-02-half-150 inner
   # The bite itself: `freezeOn=snap` stops the session 0.12 s after the bite (the scene keeps drawing the jaw slam),
-  # and the inner panel is shot the moment `SNAP-T freeze snap` is logged.
-  hinge_set 160
-  launch frames-snap "screen=play;mode=attract;seed=7;freezeOn=snap"
-  FS="$OUT_ABS/logs/frames-snap.txt"
-  wait_for "$FS" "SNAP-T event bugSipping" 40 || log "WARN frames-snap: no bugSipping in 40 s (snapping anyway)"
-  snap_once "$FS" 130
-  if wait_for "$FS" "SNAP-T freeze snap" 3; then fz="froze on the snap"; else fz="no 'SNAP-T freeze snap' within 3 s"; fi
-  shoot_now duo-03-snapped-130
-  result FRAME-SNAP INFO "$fz; $(grep -m1 -E 'SNAP-T event snapped' "$FS" | tr -d '\r' || echo 'no snapped line')$(simnote)"
+  # and the inner panel is shot the moment `SNAP-T freeze snap` is logged. R5: a hinge launch, so on a fresh Duo with
+  # whole retries (run 40634483657 lost it to a hung hinge call).
+  frame_snap() {
+    hinge_set 160
+    launch frames-snap "screen=play;mode=attract;seed=7;freezeOn=snap"
+    FS="$OUT_ABS/logs/frames-snap.txt"
+    wait_for "$FS" "SNAP-T event bugSipping" 40 || log "WARN frames-snap: no bugSipping in 40 s (snapping anyway)"
+    snap_once "$FS" 130
+    if wait_for "$FS" "SNAP-T freeze snap" 3; then fz="froze on the snap"; else fz="no 'SNAP-T freeze snap' within 3 s"; fi
+    shoot_now duo-03-snapped-130
+    result FRAME-SNAP INFO "$fz; $(grep -m1 -E 'SNAP-T event snapped' "$FS" | tr -d '\r' || echo 'no snapped line')$(simnote)"
+  }
+  run_check frames-snap frame_snap
   # Shut (the cover display) and reopened, on a live (unfrozen) run.
   hinge_set 160
   launch frames-cover "screen=play;mode=attract;seed=7"
@@ -498,6 +804,29 @@ if [[ " $PASSES " == *" ui "* ]]; then
   # First Bite step 1 (pose) passes when 125° ≤ θ ≤ 176° for 0.6 s, so at 160° it should pass by itself.
   launch ui-lesson-1 "screen=lesson;lessonStep=1"; sleep 2; shoot duo-ui-lesson-1-160 inner
   launch ui-lesson-2 "screen=lesson;lessonStep=2"; sleep 3; shoot duo-ui-lesson-2 inner
+  # R5 (REVIEW-4 #11, Duo P1-3): lesson steps 2 and 3 with `fold=1` and the real hinge, played the way a player gets
+  # there: step 1 (pose) passes at 160°, step 2 is shot with its fly sipping, a hinge snap (160 → 128) moves it to
+  # step 3 ("Open up…"), shot at 128°, and the reopen to 160° moves it to step 4. (Run 40634483657: a launch straight
+  # into lessonStep=2 logs "tap to snap!", because the step starts before the first hinge sample; via step 1 it says
+  # "snap shut!".) A hinge launch: a fresh Duo and whole retries.
+  lesson_hinge() {
+    hinge_set 160 || true
+    launch ui-lesson-hinge "screen=lesson;lessonStep=1;fold=1"
+    LH="$OUT_ABS/logs/ui-lesson-hinge.txt"
+    wait_for "$LH" "SNAP-T lesson step 2 " 20 || log "WARN ui-lesson-hinge: no 'SNAP-T lesson step 2' in 20 s (the pose step did not pass at 160°?)"
+    wait_for "$LH" "SNAP-T event bugSipping" 30 || log "WARN ui-lesson-hinge: no bugSipping in 30 s (snapping anyway)"
+    shoot duo-ui-lesson-2-hinge-160 inner
+    snap_once "$LH" 128
+    wait_for "$LH" "SNAP-T lesson step 3 " 5 || log "WARN ui-lesson-hinge: no 'SNAP-T lesson step 3' within 5 s of the hinge snap"
+    sleep 1; shoot duo-ui-lesson-3-hinge-128 inner
+    hinge_sweep 160 1.0
+    wait_for "$LH" "SNAP-T lesson step 4 " 6 || log "WARN ui-lesson-hinge: no 'SNAP-T lesson step 4' within 6 s of the reopen"
+    sleep 1; shoot duo-ui-lesson-4-hinge-160 inner
+    lsn=$(first_line "$LH" "SNAP-T event snapped" "$S0")
+    result LESSON-HINGE INFO "step 2: $(grep 'SNAP-T lesson step 2 ' "$LH" | tail -1 | tr -d '\r' | grep . || echo none); hinge snap: $( [[ -n "$lsn" ]] && sed -n "${lsn}p" "$LH" | tr -d '\r' || echo 'no snapped line'); step 3: $(grep 'SNAP-T lesson step 3 ' "$LH" | tail -1 | tr -d '\r' | grep . || echo none); after the reopen: $(grep 'SNAP-T lesson step 4 ' "$LH" | tail -1 | tr -d '\r' | grep . || echo none); input $(input_of "$LH"); $(canvas_line "$LH")$(simnote)"
+  }
+  run_check ui-lesson-hinge lesson_hinge
+  hinge_set 160 || true
   launch ui-results "screen=results;seed=7;progress=mid;pilot=casual"; sleep 3; shoot duo-ui-results inner
   launch ui-book "screen=book;progress=late"; sleep 2; shoot duo-ui-book inner
   launch ui-settings "screen=settings"; sleep 2; shoot duo-ui-settings inner
@@ -515,6 +844,9 @@ fi
 # open, so no closing pause; the pilot drives the trap itself). A freezeOn= line waits for "SNAP-T freeze <tag>" (at
 # least `wait`, at least 20 s), a freezeAfter= line for any "SNAP-T freeze" line, then 2 s for the held frame; others
 # wait `wait` s. Writes store-<name>.png (the lit panel) and logs/store-<name>.at-capture.txt (the log at capture).
+# R5 CI-only keys (stripped before launch): `ciHinge=<deg>` moves the hinge there after the launch (under 30°: closed
+# as frames-cover does, and the cover panel is shot); `ciShootOn=<event>` shoots the inner panel CI_SHOOT_DELAY s after
+# `SNAP-T event <event>` on a live run (no freeze): the trap open again after the bite, not the hold (REVIEW-4 #15).
 if [[ " $PASSES " == *" store "* ]]; then
   LIST="${STORE_LIST:-ci/duo-scenarios.txt}"
   SANGLE="${STORE_ANGLE:-150}"
@@ -524,10 +856,30 @@ if [[ " $PASSES " == *" store "* ]]; then
     [[ -z "$name" || "$name" == \#* ]] && continue
     [[ "$name" =~ ${STORE_FILTER:-.} ]] || continue
     wait="${wait%%.*}"; [[ "$wait" =~ ^[0-9]+$ ]] || wait=6
+    ang="$SANGLE"; [[ "$args" =~ (^|;)ciHinge=([0-9]+) ]] && ang="${BASH_REMATCH[2]}"
+    shot_on=""; [[ "$args" =~ (^|;)ciShootOn=([A-Za-z]+) ]] && shot_on="${BASH_REMATCH[2]}"
+    app_args=$(sed -E 's/(^|;)ci(Hinge|ShootOn)=[^;]*//g; s/^;//' <<< "$args")
+    panel=inner
     hinge_set "$SANGLE" || true
-    launch "store-$name" "$args"
+    launch "store-$name" "$app_args"
     SF="$OUT_ABS/logs/store-$name.txt"
     lim=$(( wait > 20 ? wait : 20 ))
+    if (( ang < 30 )); then
+      # The cover display: closed as frames-cover does (iOS hands over somewhere between ~60° and ~20°).
+      hinge_sweep 60 1.5; hinge_sweep 10 0.6; hinge_set "$ang" || true; sleep 3; panel=cover
+    elif (( ang != SANGLE )); then
+      hinge_sweep "$ang" 1.0; sleep 2
+    fi
+    if [[ -n "$shot_on" ]]; then
+      if wait_for "$SF" "SNAP-T event $shot_on( |\$)" "$lim"; then
+        sleep "$CI_SHOOT_DELAY"; shoot_now "store-$name"
+        log "store-$name: shot ${CI_SHOOT_DELAY} s after '$(grep -m1 -E "SNAP-T event $shot_on( |\$)" "$SF" | tr -d '\r')' (live, unfrozen)"
+      else
+        log "WARN store-$name: no 'SNAP-T event $shot_on' in ${lim} s (shooting anyway)"; shoot "store-$name" "$panel"
+      fi
+      cp "$SF" "$OUT_ABS/logs/store-$name.at-capture.txt" 2>/dev/null || true
+      continue
+    fi
     if [[ "$args" =~ freezeOn=([A-Za-z]+) ]]; then
       tag="${BASH_REMATCH[1]}"
       if wait_for "$SF" "SNAP-T freeze $tag" "$lim"; then sleep 2; else log "WARN store-$name: no 'SNAP-T freeze $tag' in ${lim} s (shooting anyway)"; fi
@@ -536,14 +888,16 @@ if [[ " $PASSES " == *" store "* ]]; then
     else
       sleep "$wait"
     fi
-    shoot "store-$name" inner
+    shoot "store-$name" "$panel"
     cp "$SF" "$OUT_ABS/logs/store-$name.at-capture.txt" 2>/dev/null || true
+    # Back open after a cover shot: the cover stays lit up to ~150° on a reopen, so via 165°.
+    [[ "$panel" == cover ]] && { hinge_sweep 165 1.5; sleep 2; }
   done 3< "$LIST"
 fi
 
 ls -la "$OUT_ABS" | tee -a "$RUNLOG" >&2
 (( SIM_LOST )) || sim_booted || sim_lost "found shut down at the end of the run"
-result RIG INFO "hinge calls failed: $HINGE_ERRS (last: ${HINGE_LAST:-none}); simulator deaths: $SIM_DEATHS"
+result RIG INFO "hinge calls failed: $HINGE_ERRS (last: ${HINGE_LAST:-none}); simulator deaths: $SIM_DEATHS; timed-out calls sent again: $HINGE_RETRIES; fresh Duos: $FRESH_N; checks run again: $RERUNS; host load $(loadavg)"
 log "checks: $(awk -F'\t' '$2=="PASS"' "$CHECKS" | wc -l | tr -d ' ') PASS, $(awk -F'\t' '$2=="FAIL"' "$CHECKS" | wc -l | tr -d ' ') FAIL, $(awk -F'\t' '$2=="INCONCLUSIVE"' "$CHECKS" | wc -l | tr -d ' ') INCONCLUSIVE"
 grep -E $'\t(PASS|FAIL|INCONCLUSIVE)\t' "$CHECKS" | awk -F'\t' '{ printf "%s %s (%s)\n", $1, $2, $3 }' || true
 write_summary
