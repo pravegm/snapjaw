@@ -14,15 +14,21 @@ struct BugBookView: View {
         let first = Array(all.prefix(half))
         let second = Array(all.dropFirst(half))
         let pause = HUDLayout.make(info).pause
-        let headerH: CGFloat = c ? 46 : 64
+        // The header row is tall enough that the back button sits in it, never over the first card (REVIEW-1 #13).
+        let headerH = BugBookView.headerHeight(compact: c, pauseMaxY: pause.maxY, top: info.top)
         ZStack {
-            SnapBackdrop()
+            BogBackdrop(controller: controller)
             page(first, rect: info.leftPage, headerH: headerH, header: true, c)
             page(second, rect: info.rightPage, headerH: headerH, header: false, c)
             SnapRoundButton(systemImage: "chevron.backward", label: "Back") { controller.show(.home) }
                 .position(x: pause.midX, y: pause.midY)
         }
         .frame(width: info.size.width, height: info.size.height)
+    }
+
+    /// The header's height: at least the type's, and down past the back button. Pure; tested.
+    static func headerHeight(compact: Bool, pauseMaxY: CGFloat, top: CGFloat) -> CGFloat {
+        max(compact ? 46 : 64, pauseMaxY + 4 - (top - 8))
     }
 
     private func page(_ species: [BugSpecies], rect: CGRect, headerH: CGFloat, header: Bool, _ c: Bool) -> some View {
@@ -52,8 +58,10 @@ struct BugBookView: View {
                         BugBookCard(species: s, data: store.data, compact: c)
                     }
                 }
-                .padding(.bottom, 16)
+                .padding(.bottom, 28)
             }
+            // A fade at the foot says "there's more below" (the fourth row peeks under it).
+            .mask { SettingsView.footFade }
         }
         .padding(.top, info.top - 8)
         .frame(width: rect.width, height: info.size.height, alignment: .top)
@@ -86,40 +94,40 @@ struct BugBookCard: View {
     var body: some View {
         let found = data.isFound(species)
         let info = BugCatalog.info(species)
-        HStack(alignment: .top, spacing: compact ? 8 : 10) {
-            ZStack {
-                Circle()
-                    .fill(found ? (species.isProtected ? SnapTheme.bee.opacity(0.18) : SnapTheme.lime.opacity(0.16))
-                                : Color.black.opacity(0.25))
-                BugPortrait(species: species, found: found)
-                    .padding(compact ? 4 : 6)
-            }
-            .frame(width: compact ? 46 : 60, height: compact ? 46 : 60)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(found ? info.name : "???")
-                    .font(SnapType.headline(compact))
-                    .foregroundStyle(SnapTheme.cream)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                if found {
-                    Text(Self.countLine(species, data: data))
-                        .font(SnapType.caption(compact).monospacedDigit())
-                        .foregroundStyle(species.isProtected ? SnapTheme.bee : SnapTheme.gold)
-                    Text(info.joke)
-                        .font(SnapType.caption(compact))
-                        .foregroundStyle(SnapTheme.mist)
-                        .lineLimit(compact ? 2 : 3)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text(Self.clue(species))
-                        .font(SnapType.caption(compact))
-                        .foregroundStyle(SnapTheme.haze)
-                        .lineLimit(2)
+        // The joke runs the card's full width under the portrait row, so it is never cut (REVIEW-1 #13).
+        VStack(alignment: .leading, spacing: compact ? 4 : 6) {
+            HStack(alignment: .center, spacing: compact ? 8 : 10) {
+                ZStack {
+                    Circle()
+                        .fill(found ? (species.isProtected ? SnapTheme.bee.opacity(0.18) : SnapTheme.lime.opacity(0.16))
+                                    : Color.black.opacity(0.25))
+                    BugPortrait(species: species, found: found)
+                        .padding(compact ? 2 : 3)
                 }
+                .frame(width: compact ? 44 : 56, height: compact ? 44 : 56)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(found ? info.name : "???")
+                        .font(SnapType.headline(compact))
+                        .foregroundStyle(SnapTheme.cream)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    if found {
+                        Text(Self.countLine(species, data: data))
+                            .font(SnapType.caption(compact).monospacedDigit())
+                            .foregroundStyle(species.isProtected ? SnapTheme.bee : SnapTheme.gold)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            Text(found ? info.joke : Self.clue(species))
+                .font(SnapType.caption(compact))
+                .foregroundStyle(found ? SnapTheme.mist : SnapTheme.haze)
+                .lineLimit(3)
+                .minimumScaleFactor(0.85)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, minHeight: compact ? 70 : 104, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: compact ? 92 : 118, alignment: .topLeading)
         .snapCard(padding: compact ? 8 : 10, radius: 18)
         .opacity(found ? 1 : 0.8)
         .accessibilityElement(children: .combine)

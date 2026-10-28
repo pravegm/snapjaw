@@ -1,0 +1,36 @@
+# Snapjaw App Store frames, iPhone Duo inner-display set (docs/appstore/screenshots.md, section B, 27 Oct). Run by
+# .github/workflows/store.yml: ci/store-capture.sh duo → ci/duo.sh store pass (STORE_LIST=this file,
+# STORE_FILTER='^D[0-9]'; the Duo simulator starts in book pose with a real fold and the pass holds the hinge at 150°,
+# open, so a run never pauses), writing store-<name>.png at 2853 x 2007 (fold band x ≈ 1368–1488 px: the app logs
+# "SNAP-T fold active 456,0 40x669"). ci/store-set.sh then captions them with REQUIRE_LOG
+# 'SNAP-T canvas 951x669 fold=1 hudLeft=0', and D01 also feeds frame 1 of the iPhone sets. Names are zero-padded
+# (D01–D10) and are exactly the file names docs/appstore/asc-metadata.json lists.
+#
+# Same format as ci/store-scenarios.txt: name|demo args|wait|caption|expect|frame (frame: flat or book).
+#  - Not ci/duo-scenarios.txt: that file is duo.yml's review set (16 frames, the HUD mirrored, settings, the late Bug
+#    Book). This one is the upload set, in screenshots.md's order, with captions. Their play frames share the seeds,
+#    waves and pilots proven in duo run 40603497021 (crowd wave 6, feast wave 8 count=5, bee wave 15, all perfect).
+#  - HUD on the right half (the sharp half, the Duo default): the workflow requires hudLeft=0, so never add hudLeft=1.
+#  - D01 `book`: this capture, split at the fold and drawn on a stylised Duo held open like a book (store-frame --book):
+#    the two lobes on the two pages, the midrib on the hinge. The split is geometric, so the layout is kept exactly.
+#  - No `fold=`: the Duo has a real one. The pilot plays every play frame (the held hinge never pauses a run).
+#  - D02 should show the teeth at the snap: the feast freeze holds 0.3 s after the bite, with the pop on screen.
+#  - Same glossary and truthfulness notes as ci/store-scenarios.txt. "Snap it a little shut" is fine; "shut" on its
+#    own is flagged.
+
+# ---- iPhone Duo inner display (2853 x 2007): ten frames -------------------------------------------------------------
+D01-book-hero|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd|60|Your Duo is a *flytrap* / Hold it open like a book.|SNAP-T freeze crowd|book
+D02-feast|screen=play;seed=7;wave=8;pilot=perfect;freezeOn=feast|90|Wait for a crowd. *CHOMP!* / Snap it a little shut. Open again.|SNAP-T event feast count=[3-9]
+D03-bee|screen=play;seed=7;wave=15;pilot=perfect;freezeOn=bee|60|Never eat a *bee* / Bees cost snaps. Wait them out.|SNAP-T freeze bee
+D04-last-snap|screen=play;seed=7;pilot=novice;freezeOn=lastSnap|150|Every snap *counts* / Big bites win snaps back.|SNAP-T event lastSnap
+D05-dusk|screen=play;seed=7;wave=17;pilot=expert;freezeOn=crowd;freezeAfter=3|60|From morning to *night* / New bugs as the day goes on.|SNAP-T start wave 17
+D06-night|screen=play;seed=7;wave=24;pilot=expert;freezeOn=crowd;freezeAfter=3|60|Fireflies light the *night* / Crickets, moths and a rare Golden Scarab.|SNAP-T start wave 24
+D07-bug-book|screen=book;progress=mid|6|Fill the *Bug Book* / 16 species, each with a joke.|SNAP-T screen book
+D08-results|screen=results;seed=7;progress=mid;pilot=expert|8|One more *go*? / Best bite, longest chain, bees spared.|SNAP-T run score=
+D09-daily|screen=home;progress=mid|6|One *Daily Bog* for everyone / Same bugs, one try that counts.|
+# D10: the lesson's Duo wording. Duo run 40603497021 logged step 2 as "tap to snap!" on the Duo: eyeball D10's hint.
+D10-first-bite|screen=lesson;lessonStep=6|8|Learn it in one *First Bite* / A short lesson on your first go.|SNAP-T lesson step 6
+
+# reserves (Duo): not captured by default; run them with a filter like '^(D[0-9]|DR)'.
+DR1-closing|screen=play;mode=attract;seed=7;wave=6;closure=14;freezeAfter=12|20|The teeth follow your *hands* / Snap it a little shut. Open again.|SNAP-T trap closure 1[34]
+DR2-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=sting|90|A wasp? *Bzzt!* / Wasps sting: two extra snaps.|SNAP-T event stung .*species=wasp

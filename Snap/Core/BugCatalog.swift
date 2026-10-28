@@ -5,39 +5,45 @@ import Foundation
 
 enum BugCatalog {
 
+    /// R2 (REVIEW-1 #4): the R1 art radius × Tuning.bugRadiusScale (1.8). The Scene draws at BugInfo.radius, and the
+    /// rules (spacing, the rim test, landing spots) use the same number, so art and rules agree.
+    static func scaled(_ base: Double) -> CGFloat {
+        return CGFloat(base * Tuning.bugRadiusScale)
+    }
+
     static let all: [BugInfo] = [
         BugInfo(species: .housefly, name: "Housefly", joke: "Has never once wiped its feet.",
-                points: 10, reaction: 0.24, nerve: 7, radius: 14, firstPhase: .morning),
+                points: 10, reaction: 0.24, nerve: 7, radius: BugCatalog.scaled(14), firstPhase: .morning),
         BugInfo(species: .gnat, name: "Gnat", joke: "Travels in a cloud of five. Thinks for none.",
-                points: 3, reaction: 0.32, nerve: 10, radius: 7, firstPhase: .morning),
+                points: 3, reaction: 0.32, nerve: 10, radius: BugCatalog.scaled(7), firstPhase: .morning),
         BugInfo(species: .fruitFly, name: "Fruit Fly", joke: "Came for the banana. Stayed for the nectar.",
-                points: 6, reaction: 0.28, nerve: 9, radius: 9, firstPhase: .morning),
+                points: 6, reaction: 0.28, nerve: 9, radius: BugCatalog.scaled(9), firstPhase: .morning),
         BugInfo(species: .bluebottle, name: "Bluebottle", joke: "Shiny, loud, and in a terrible hurry.",
-                points: 25, reaction: 0.16, nerve: 5, radius: 16, firstPhase: .noon),
+                points: 25, reaction: 0.16, nerve: 5, radius: BugCatalog.scaled(16), firstPhase: .noon),
         BugInfo(species: .ant, name: "Ant", joke: "Walks in single file. Will not be taking questions.",
-                points: 8, reaction: 0.60, nerve: 15, radius: 10, firstPhase: .noon),
+                points: 8, reaction: 0.60, nerve: 15, radius: BugCatalog.scaled(10), firstPhase: .noon),
         BugInfo(species: .ladybird, name: "Ladybird", joke: "Lucky for you. Less so for her.",
-                points: 15, reaction: 0.30, nerve: 10, radius: 14, firstPhase: .noon),
+                points: 15, reaction: 0.30, nerve: 10, radius: BugCatalog.scaled(14), firstPhase: .noon),
         BugInfo(species: .grasshopper, name: "Grasshopper", joke: "Treats the midrib like a long jump pit.",
-                points: 20, reaction: 0.22, nerve: 7, radius: 18, firstPhase: .noon),
+                points: 20, reaction: 0.22, nerve: 7, radius: BugCatalog.scaled(18), firstPhase: .noon),
         BugInfo(species: .moth, name: "Moth", joke: "Mistook your trap for a very romantic lamp.",
-                points: 20, reaction: 0.30, nerve: 9, radius: 18, firstPhase: .dusk),
+                points: 20, reaction: 0.30, nerve: 9, radius: BugCatalog.scaled(18), firstPhase: .dusk),
         BugInfo(species: .mosquito, name: "Mosquito", joke: "Nobody will miss this one. Nobody.",
-                points: 12, reaction: 0.14, nerve: 4, radius: 9, firstPhase: .dusk),
+                points: 12, reaction: 0.14, nerve: 4, radius: BugCatalog.scaled(9), firstPhase: .dusk),
         BugInfo(species: .dragonfly, name: "Dragonfly", joke: "Four wings, zero patience, one sharp snap.",
-                points: 50, reaction: 0.12, nerve: 4, radius: 24, firstPhase: .dusk),
+                points: 50, reaction: 0.12, nerve: 4, radius: BugCatalog.scaled(24), firstPhase: .dusk),
         BugInfo(species: .firefly, name: "Firefly", joke: "Brought its own night light. Brave.",
-                points: 35, reaction: 0.26, nerve: 8, radius: 13, firstPhase: .night),
+                points: 35, reaction: 0.26, nerve: 8, radius: BugCatalog.scaled(13), firstPhase: .night),
         BugInfo(species: .cricket, name: "Cricket", joke: "Chirps loudest right before dinner.",
-                points: 25, reaction: 0.34, nerve: 11, radius: 17, firstPhase: .night),
+                points: 25, reaction: 0.34, nerve: 11, radius: BugCatalog.scaled(17), firstPhase: .night),
         BugInfo(species: .goldenScarab, name: "Golden Scarab", joke: "Rare, regal, and surprisingly crunchy.",
-                points: 150, reaction: 0.40, nerve: 12, radius: 20, firstPhase: .noon),
+                points: 150, reaction: 0.40, nerve: 12, radius: BugCatalog.scaled(20), firstPhase: .noon),
         BugInfo(species: .bee, name: "Bee", joke: "Busy. Important. Absolutely not on the menu.",
-                points: 0, reaction: 1.0, nerve: 8, radius: 16, firstPhase: .morning),
+                points: 0, reaction: 1.0, nerve: 8, radius: BugCatalog.scaled(16), firstPhase: .morning),
         BugInfo(species: .bumblebee, name: "Bumblebee", joke: "A fuzzy tank with a flight plan. Spare it.",
-                points: 0, reaction: 1.0, nerve: 10, radius: 22, firstPhase: .noon),
+                points: 0, reaction: 1.0, nerve: 10, radius: BugCatalog.scaled(22), firstPhase: .noon),
         BugInfo(species: .wasp, name: "Wasp", joke: "Bites back. Literally. Leave it be.",
-                points: 0, reaction: 1.0, nerve: 6, radius: 16, firstPhase: .dusk),
+                points: 0, reaction: 1.0, nerve: 6, radius: BugCatalog.scaled(16), firstPhase: .dusk),
     ]
 
     static func info(_ s: BugSpecies) -> BugInfo {
@@ -148,6 +154,19 @@ enum TrapRules {
         if flying { r *= Tuning.flyingReactionFactor }
         if onRim { r *= Tuning.rimReactionFactor }
         return r
+    }
+
+    /// R2: on the rim when the bug's outer edge (its centre pushed out from the trap centre by its radius) reaches
+    /// the rim band, and its centre is in the trap. A bug at the very centre is never on the rim.
+    static func onRim(_ g: TrapGeometry, _ p: CGPoint, radius: CGFloat) -> Bool {
+        if g.normalizedRadius(p) > 1 { return false }
+        let dx: Double = Double(p.x - g.center.x)
+        let dy: Double = Double(p.y - g.center.y)
+        let len: Double = hypot(dx, dy)
+        if len < 1e-6 { return false }
+        let r: Double = Double(radius)
+        let q = CGPoint(x: Double(p.x) + dx / len * r, y: Double(p.y) + dy / len * r)
+        return g.normalizedRadius(q) >= TrapGeometry.rimStart
     }
 
     /// The multiplier a productive clean snap gets after `chain` of them in a row.

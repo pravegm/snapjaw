@@ -98,6 +98,10 @@ enum AppTrace {
             return "beeSpared species=\(species.rawValue)"
         case .lastSnap:
             return "lastSnap"
+        case let .hungry(secondsLeft):
+            return "hungry secondsLeft=\(fixed(secondsLeft, 1))"
+        case let .wilted(snapsLeft):
+            return "wilted snapsLeft=\(snapsLeft)"
         case .tired:
             return "tired"
         case .newBest:

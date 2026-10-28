@@ -146,7 +146,9 @@ You don't need to make any certificate or profile. The build uses **Apple's clou
 
 ## §3. Game Center on, then the App Store Connect tool (when Claude says "first green build")
 
-Claude copies Swoop's App Store Connect tool into this repo and tells you once the first build is green, because the app itself draws the 12 achievement pictures and the tool needs them.
+The App Store Connect tool is already in this repo (`tools/appstore/`, run by the **App Store Connect tool** workflow). Claude tells you when to run it: once the first build is green and the app draws the 12 achievement pictures, because the tool uploads them with the achievements.
+
+*If it stops with a red cross at **Check the secrets exist** ("App Store Connect is not set up") or at **check** ("No App Store Connect app record"):* it is telling you a one-time step is missing. The run's summary page says which: the app record for bundle ID `com.pravegm.snapjaw` (§1b–§1c) or the 4 secrets (§2). Do that step, then run it again. Nothing was changed.
 
 **3a. Turn on Game Center.** appstoreconnect.apple.com → Apps → Snapjaw → **Services** (in some layouts **Features**) → **Game Center** → turn it on.
 
@@ -246,7 +248,7 @@ In App Store Connect → the app:
 
 ### 6c. The last robot run (Wed 2 Dec, after Claude names the release build)
 
-Claude makes the final screenshots on Mon 30 Nov and tells you the release build number. Then: **Actions** → **App Store Connect tool** → **Run workflow** → tick **Contact App Store Connect** → mode **push** → in **"Release build number"** type the number Claude gave you → **Run workflow**. This uploads the screenshots (6.9", 6.3" and iPhone Duo, 10 each) and puts the build on the 1.0 page with Game Center attached. Green tick = done.
+Claude makes the final screenshots on Mon 30 Nov (the **App Store screenshots** workflow), puts that run's number into the tool for you, and tells you the release build number. Then: **Actions** → **App Store Connect tool** → **Run workflow** → tick **Contact App Store Connect** → mode **push** → in **"Release build number"** type the number Claude gave you → if Claude also gave you a "header and search art" run number, type it in the box that starts **"ID of a store.yml run with a store-placements artifact"** → **Run workflow**. This uploads the screenshots (6.9", 6.3" and iPhone Duo, 10 each, the first one the Duo open like a book) and puts the build on the 1.0 page with Game Center attached. It refuses any set with a flagged or missing frame, so a green tick means every frame passed its checks. Green tick = done.
 
 ### 6d. Check the build and screenshots (Wed 2 Dec)
 
@@ -279,7 +281,7 @@ On the 1.0 page: **Build** shows the number Claude named (if it's empty: **+** �
 
 ## Reference: what the tool sets (no action needed)
 
-Claude runs the App Store Connect tool (GitHub → Actions → **App Store Connect tool**, ported from Swoop). It reads `docs/appstore/asc-metadata.json`, which is built from the docs, and changes only what differs. It never submits for review and never releases.
+Claude runs the App Store Connect tool (GitHub → Actions → **App Store Connect tool**; `tools/appstore/README.md`). It reads `docs/appstore/asc-metadata.json`, which is built from the docs, and changes only what differs. It never submits for review and never releases. The screenshots and the optional header and search art come from the **App Store screenshots** workflow (`store.yml`, `ci/README.md`).
 
 | What | Value | Source |
 |---|---|---|

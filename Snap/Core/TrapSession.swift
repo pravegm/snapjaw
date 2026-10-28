@@ -12,6 +12,12 @@ struct SessionOptions: Equatable {
     var stingCosts: Bool = true
     /// Demo `wave=<n>`: the first wave of the run (1 = the normal start). The nectar block and day follow it.
     var firstWave: Int = 1
+    /// R2 (REVIEW-1 #24): the snaps a run starts with (nil = Tuning.startSnaps). The App passes 12 while the plant
+    /// rank is Sprout. Clamped to 1…Tuning.maxSnaps.
+    var startSnaps: Int? = nil
+    /// R2 hunger (GAME-DESIGN §5): snaps wilt without a catching bite. Only runs whose snaps run out ever wilt, so
+    /// the lesson and attract never do; false switches it off for a feed run too (tests, tools).
+    var hunger: Bool = true
 
     init(snapsRunOut: Bool = true, waves: Bool = true, stingCosts: Bool = true) {
         self.snapsRunOut = snapsRunOut
@@ -40,6 +46,10 @@ struct SessionOptions: Equatable {
 // dart and hover → linger over → leave toward the nearest edge. Ants walk in from the bottom in single file and walk
 // out again (always catchable while in the trap). Linger counts from landing. One bug per drop; landed bugs keep
 // radius + radius + 4 pt apart.
+// R2: bug radii are ×1.8 (BugCatalog.scaled) and the rim test uses the bug's outer edge (TrapRules.onRim). Hunger:
+// with no catching bite for the phase's wilt time (Tuning.wilt*), a snap wilts (`wilted`), and `hungry` fires
+// Tuning.hungryWarning s before. Chain: a clean bite of ≥ 2 adds a step, a clean 1-bug bite holds, a dry snap or a
+// stinger breaks it.
 // Mirrored by Session in tools/balance-sim.js (minus events, hints, telemetry and results).
 
 final class TrapSession {
@@ -143,6 +153,9 @@ final class TrapSession {
     private var retiring: Set<Int> = []
 
     private var snapsLeft: Int = Tuning.startSnaps
+    /// R2 hunger: 0 just fed … 1 a snap wilts. Grows by dt / (the current phase's wilt time).
+    private var hunger: Double = 0
+    private var hungrySent: Bool = false
     private var score: Int = 0
     private var chain: Int = 0
     private var lastInput: TrapInput = TrapInput()
@@ -179,6 +192,7 @@ final class TrapSession {
         self.wave = first - 1
         self.dayPhase = WaveFactory.phase(forWave: first)
         self.nectarBlock = (first - 1) / Tuning.nectarReseedWaves
+        self.snapsLeft = min(max(options.startSnaps ?? Tuning.startSnaps, 1), Tuning.maxSnaps)
         installNectar(block: nectarBlock)
         bugs.reserveCapacity(Tuning.maxBugsOnScreen)
     }
@@ -195,6 +209,21 @@ final class TrapSession {
         return false
     }
 
+    /// R2: does this run wilt (feed and daily; never the lesson or attract)?
+    private var wilts: Bool {
+        return options.snapsRunOut && options.hunger
+    }
+
+    /// R2: seconds without a catching bite before a snap wilts, in this day phase.
+    static func wiltSeconds(_ ph: DayPhase) -> Double {
+        switch ph {
+        case .morning: return Tuning.wiltMorning
+        case .noon: return Tuning.wiltNoon
+        case .dusk: return Tuning.wiltDusk
+        case .night: return Tuning.wiltNight
+        }
+    }
+
     var snapshot: TrapSnapshot {
         var states: [BugState] = []
         states.reserveCapacity(bugs.count)
@@ -203,7 +232,8 @@ final class TrapSession {
             let inT: Bool = inTrap(b)
             states.append(BugState(id: b.id, species: b.species, position: b.point, heading: b.heading, activity: a,
                                    height: b.height, sipProgress: b.mode == .sip ? b.sip : 0, inTrap: inT,
-                                   onRim: inT && geometry.onRim(b.point), restless: b.restless))
+                                   onRim: inT && TrapRules.onRim(geometry, b.point, radius: b.info.radius),
+                                   restless: b.restless))
         }
         var drops: [NectarDrop] = nectar
         var k: Int = 0
@@ -218,7 +248,7 @@ final class TrapSession {
                             snapsLeft: snapsLeft, snapsMax: Tuning.maxSnaps, score: score, best: best, chain: chain,
                             chainMultiplier: TrapRules.chainMultiplier(chain), wave: wave, dayPhase: dayPhase,
                             dayClock: dayClock, lastBite: lastBite, hint: currentHint(), bugsCaught: bugsCaught,
-                            beesSpared: beesSpared)
+                            beesSpared: beesSpared, hunger: wilts ? hunger : 0)
     }
 
     /// The continuous feedback state for this frame.
@@ -326,6 +356,7 @@ final class TrapSession {
         }
         for b in bugs { updateBug(b, h) }
         bugs.removeAll { (b: Bug) -> Bool in b.gone }
+        if isPlaying && wilts { tickHunger(h) }
         if case .tired(let e) = phase {
             let ne: Double = e + h
             if ne >= Tuning.tiredSeconds {
@@ -335,6 +366,40 @@ final class TrapSession {
                 out.append(.finished)
             } else {
                 phase = .tired(elapsed: ne)
+            }
+        }
+    }
+
+    /// R2 hunger (GAME-DESIGN §5): no catching bite for the phase's wilt time wilts one snap and restarts the timer;
+    /// `hungry` fires once per cycle Tuning.hungryWarning s before. A wilt can tire the trap.
+    private func tickHunger(_ h: Double) {
+        let w: Double = TrapSession.wiltSeconds(dayPhase)
+        hunger += h / w
+        if !hungrySent && (1 - hunger) * w <= Tuning.hungryWarning {
+            hungrySent = true
+            out.append(.hungry(secondsLeft: max(0, (1 - hunger) * w)))
+        }
+        if hunger >= 1 {
+            hunger = 0
+            hungrySent = false
+            let before: Int = snapsLeft
+            snapsLeft = max(snapsLeft - 1, 0)
+            out.append(.wilted(snapsLeft: snapsLeft))
+            if snapsLeft == 1 && before != 1 { out.append(.lastSnap) }
+            if snapsLeft == 0 { becomeTired() }
+        }
+    }
+
+    /// Snaps reached 0: "Your trap is tired." Every bug still about takes off.
+    private func becomeTired() {
+        out.append(.tired)
+        phase = .tired(elapsed: 0)
+        tiredAt = time
+        pending = []
+        for b in bugs {
+            switch b.mode {
+            case .caught, .leave, .escape, .release: continue
+            case .approach, .hover, .sip, .pause, .dash, .hop, .cross: takeOff(b, .leave)
             }
         }
     }
@@ -377,7 +442,7 @@ final class TrapSession {
             var clash: Bool = false
             for k in kept {
                 if hypot(Double(k.position.x - d.position.x), Double(k.position.y - d.position.y))
-                    < Tuning.nectarSpacing * 0.6 { clash = true }
+                    < Tuning.nectarKeptClearance { clash = true }
             }
             if clash { continue }
             fresh.append(NectarDrop(id: nextDropID, position: d.position, radius: d.radius))
@@ -497,7 +562,9 @@ final class TrapSession {
         var i: Int = 0
         while i < Tuning.spotTries {
             let t: Double = b.rng.between(0, 2 * Double.pi)
-            let dd: Double = b.rng.between(max(dMin, 8), max(dMax, 20))
+            // R2: the search reaches at least this bug's own spacing need (radii are ×1.8).
+            let reach: Double = Double(b.info.radius) * 2 + Tuning.landSpacing + 10
+            let dd: Double = b.rng.between(max(dMin, 8), max(dMax, 20, reach))
             let p: (Double, Double) = clampIn(x + cos(t) * dd, y + sin(t) * dd, maxR)
             let s: Double = spotScore(b, p.0, p.1)
             if s > bestScore {
@@ -672,7 +739,8 @@ final class TrapSession {
             let e: Double = u * u * (3 - 2 * u)
             b.x = b.fx + (Double(geometry.center.x) - b.fx) * e
             b.y = b.fy
-            b.height = 0
+            // R2 (QA-1 #21): eases down from the height it was caught at (a hopper caught mid-hop no longer drops).
+            b.height = b.startHeight * (1 - e)
             if b.el >= Tuning.caughtSeconds { b.gone = true }
         }
         let mx: Double = b.x - px
@@ -805,7 +873,8 @@ final class TrapSession {
     /// Off toward the nearest edge (walkers never toward the top). `kind` is .leave, .escape or .release.
     private func takeOff(_ b: Bug, _ kind: Mode) {
         freeDrop(b)
-        if kind == .leave && b.species.isProtected && b.landedInTrap && !b.sparedSent {
+        // R2 (QA-1 #12): a protected bug that escapes a slow bite left the trap uneaten too, so it counts as spared.
+        if (kind == .leave || kind == .escape) && b.species.isProtected && b.landedInTrap && !b.sparedSent {
             b.sparedSent = true
             beesSpared += 1
             sparedBySpecies[b.species.rawValue, default: 0] += 1
@@ -870,7 +939,8 @@ final class TrapSession {
             var sipping: Bool = false
             if case .sipping = a { sipping = true }
             let r: Double = TrapRules.reaction(b.info, sipping: sipping, flying: TrapRules.isFlying(a),
-                                               onRim: geometry.onRim(b.point), wave: wave)
+                                               onRim: TrapRules.onRim(geometry, b.point, radius: b.info.radius),
+                                               wave: wave)
             if d <= r {
                 if b.species.isProtected {
                     stingers.append(b.species)
@@ -882,6 +952,7 @@ final class TrapSession {
                     caught.append(b.species)
                     perBug.append(.bugCaught(id: b.id, species: b.species, position: b.point))
                     freeDrop(b)
+                    b.startHeight = b.height
                     b.mode = .caught
                     b.el = 0
                     b.fx = b.x
@@ -896,6 +967,11 @@ final class TrapSession {
         snapsMade += 1
         lastBiteTime = time
         let n: Int = caught.count
+        // R2 hunger: any catch feeds the trap (a dry snap or a bee-only bite does not).
+        if n >= 1 {
+            hunger = 0
+            hungrySent = false
+        }
         var sum: Int = 0
         for s in caught { sum += BugCatalog.info(s).points }
         let mult: Double = TrapRules.chainMultiplier(chain)
@@ -936,11 +1012,14 @@ final class TrapSession {
         out.append(contentsOf: perBug)
         if n >= Tuning.feastCount { out.append(.feast(count: n, snapsBack: feastBack)) }
         for s in lucky { out.append(.luckySnap(species: s)) }
-        if n >= 1 && stingers.isEmpty {
+        // R2 chain rule (GAME-DESIGN §5): a clean bite of ≥ 2 adds a step; a clean 1-bug bite holds the chain (no
+        // event); a dry snap or a stinger breaks it.
+        let clean: Bool = n >= 1 && stingers.isEmpty
+        if clean && n >= Tuning.chainMinBite {
             chain += 1
             longestChain = max(longestChain, chain)
             out.append(.chainUp(count: chain, multiplier: TrapRules.chainMultiplier(chain)))
-        } else {
+        } else if !clean {
             if chain >= 2 { out.append(.chainBroken(count: chain)) }
             chain = 0
         }
@@ -949,18 +1028,7 @@ final class TrapSession {
             let before: Int = snapsLeft
             snapsLeft = min(max(snapsLeft - Tuning.snapCost - lost + back, 0), Tuning.maxSnaps)
             if snapsLeft == 1 && before != 1 { out.append(.lastSnap) }
-            if snapsLeft == 0 {
-                out.append(.tired)
-                phase = .tired(elapsed: 0)
-                tiredAt = time
-                pending = []
-                for b in bugs {
-                    switch b.mode {
-                    case .caught, .leave, .escape, .release: continue
-                    case .approach, .hover, .sip, .pause, .dash, .hop, .cross: takeOff(b, .leave)
-                    }
-                }
-            }
+            if snapsLeft == 0 { becomeTired() }
         }
         if !newBestSent && best > 0 && score > best {
             newBestSent = true
@@ -974,6 +1042,7 @@ final class TrapSession {
         guard isPlaying else { return nil }
         if lastInput.tooFlat { return .bendALittle }
         if lastInput.creeping { return .quick }
+        if wilts && hungrySent { return .hungry }
         if !lastInput.armed && snapsMade > 0 && time - lastBiteTime > Tuning.openUpDelay { return .openUp }
         var beeLanded: Bool = false
         var beeAny: Bool = false

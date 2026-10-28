@@ -113,6 +113,11 @@ struct BookPoseDrawing: View {
                 }
                 .frame(width: 196, height: 136)
                 .rotationEffect(.degrees(-90 * (1 - turn)))
+                // A fly sipping on the right lobe: the clap is for it (shown once the phone is open).
+                BugPortrait(species: .housefly)
+                    .frame(width: 34, height: 34)
+                    .offset(x: 46, y: -8)
+                    .opacity(openIn * (1 - snap))
             }
         }
         .accessibilityHidden(true)
@@ -125,12 +130,12 @@ struct BookPoseDrawing: View {
             UnevenRoundedRectangle(topLeadingRadius: left ? 20 : 4, bottomLeadingRadius: left ? 20 : 4,
                                    bottomTrailingRadius: left ? 4 : 20, topTrailingRadius: left ? 4 : 20,
                                    style: .continuous)
-                .fill(SnapTheme.lime)
+                .fill(Color(snapHex: 0x2F6A2C))
             UnevenRoundedRectangle(topLeadingRadius: left ? 15 : 3, bottomLeadingRadius: left ? 15 : 3,
                                    bottomTrailingRadius: left ? 3 : 15, topTrailingRadius: left ? 3 : 15,
                                    style: .continuous)
-                .fill(LinearGradient(colors: left ? [SnapTheme.pink, SnapTheme.crimson]
-                                                  : [SnapTheme.crimson, SnapTheme.pink],
+                .fill(LinearGradient(colors: left ? [Color(snapHex: 0xD23048), Color(snapHex: 0x7A0C26)]
+                                                  : [Color(snapHex: 0x7A0C26), Color(snapHex: 0xD23048)],
                                      startPoint: .leading, endPoint: .trailing))
                 .padding(6)
             // Teeth along the outer edge.
@@ -187,7 +192,10 @@ struct CoverCard: View {
     @ObservedObject var store: ProgressStore
     var insets: EdgeInsets = EdgeInsets()
 
-    static func title(midRun: Bool) -> String { midRun ? "Open to carry on" : "Open it like a book" }
+    /// One line for "open to carry on" everywhere (the closing card says it too: REVIEW-1-ux P2 #14).
+    static let carryOn = "Open it up to carry on"
+
+    static func title(midRun: Bool) -> String { midRun ? carryOn : "Open it like a book" }
     static func detail(midRun: Bool) -> String {
         midRun ? "Your trap is waiting, jaws open." : "Bugs are gathering in the bog."
     }
@@ -195,6 +203,7 @@ struct CoverCard: View {
     var body: some View {
         let midRun = controller.isLiveRun
         GeometryReader { geo in
+            let side = min(geo.size.width * 0.78, 320)
             ZStack {
                 Color.black.ignoresSafeArea()
                 RadialGradient(colors: [SnapTheme.moss.opacity(0.55), Color.black], center: .center, startRadius: 20,
@@ -202,8 +211,10 @@ struct CoverCard: View {
                     .ignoresSafeArea()
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 16) {
-                        TrapPortrait(closure01: 1)
-                            .frame(width: min(geo.size.width * 0.7, 300), height: min(geo.size.width * 0.7, 300) * 0.7)
+                        // The play trap, drawn by the scene's own code (one art language, REVIEW-1 #12).
+                        TrapArtImage()
+                            .frame(width: side, height: side * 0.7)
+                            .shadow(color: Color.black.opacity(0.6), radius: 18, y: 6)
                             .padding(.top, 8)
                         Text(Self.title(midRun: midRun))
                             .font(SnapType.title(false))

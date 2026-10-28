@@ -1,0 +1,345 @@
+{
+  "_comment": "CI fixture for asc.swift validate (a placeholder URL, a partial en-US, missing images, no screenshots). The real data is docs/appstore/asc-metadata.json; this file only exercises the validator in asc.yml's tool job.",
+  "bundleId": "com.pravegm.snapjaw",
+  "primaryLocale": "en-GB",
+  "copyrightHolder": "© 2026 pravegm",
+  "contentRights": "DOES_NOT_USE_THIRD_PARTY_CONTENT",
+  "categories": {
+    "_comment": "Fixture copy of categories from docs/appstore/asc-metadata.json (see that file's comment).",
+    "primary": "GAMES",
+    "primarySubcategories": [
+      "GAMES_CASUAL",
+      "GAMES_ARCADE"
+    ],
+    "fallbackSubcategories": [
+      "GAMES_ACTION"
+    ],
+    "secondary": "ENTERTAINMENT"
+  },
+  "localizations": {
+    "en-GB": {
+      "name": "Snapjaw",
+      "subtitle": "Feed the flytrap. Spare bees.",
+      "privacyPolicyUrl": "https://pravegm.github.io/snapjaw/privacy.html",
+      "description": "Your iPhone Duo is a Venus flytrap.\n\nHold your Duo open like a book. The two halves are the trap's two lobes and the hinge is its midrib. Bugs fly in and land on the glistening nectar to sip. Snap the phone a little shut and the trap bites with you, teeth clacking together: CHOMP. Then open it again and wait for the next ones.\n\nThe trick is choosing when. Wait for a crowd and catch them all in one bite, because your score is multiplied by the number of bugs in it. But bees love nectar too, and you must never eat a bee.\n\nNo ads. No in-app purchases. No accounts. No data collected. Pay once and it's yours.\n\nPATIENCE, GREED AND BEES\n• Snaps are what you spend. A run starts with 10, and every snap costs one\n• Catch 3 or more bugs in one bite for a Feast, and win snaps back\n• Your score is the bugs' points, times the number of bugs, times your chain\n• Bite after bite with no bee in it, and the chain climbs all the way to ×4\n• A bee in the bite is let go, unharmed and cross, and costs an extra snap. A wasp stings: two extra\n• Sipping bugs are distracted. Flying ones are quick. Close too slowly and the twitchy ones leave\n• When the snaps run out, your trap is tired. One more go?\n\nA DAY IN THE BOG\nEvery run moves from morning to night, and the bugs change with the light. Houseflies, gnats and fruit flies at breakfast; bluebottles, lines of ants, ladybirds and grasshoppers by noon; moths, mosquitoes, dragonflies and wasps at dusk; fireflies and crickets in the dark. Keep an eye out for the rare Golden Scarab.\n\nTHE BUG BOOK\n16 species, each with its own drawing and a one-line joke, from the humble housefly to the bumblebee. Catch a bug to add its page; bees and wasps go in when you spare them. As your lifetime catch grows, your plant climbs 12 ranks, from Sprout to Bog Monarch.\n\nFIRST BITE\nYour first go starts with a short lesson that teaches by doing: one fat fly, your first snap, a bee to wait out and your first triple. Replay it from Settings any time.\n\nDAILY BOG\nThe same bugs for everyone, every day, and one try that counts. Then practise as much as you like.\n\nMADE FOR THE FOLD. PLAYS ON OTHER iPhone MODELS TOO.\nOn iPhone Duo, the hinge is the trap: a short snap of about 22° from however you like to hold it, then open again. You never close the phone or lay it flat. The bite happens at 22°, so there is nothing to gain by going further. iPhone Duo softens one half of the screen for a moment when a fold starts from flat, so your score and snaps sit on the half that stays sharp, and Settings can move them. On any other iPhone, tap anywhere to snap. Same bog, same scores, but the fold is the best way to play.\n\nSOUND AND FEEL\nThe CHOMP, the teeth clacking shut, every buzz and hum, the frogs by day and the crickets at night are all synthesised live in the app. Each bug's buzz comes from where it is, and you feel a soft tick in your hands when one lands. Sound plays with the silent switch on; a setting makes Snapjaw respect it instead. Sound and haptics each have a switch, and there's a Reduce motion setting.\n\nGAME CENTER\nLeaderboards for your Best Feast and the Daily Bog, and 12 achievements. It's optional: Snapjaw works fully without signing in.\n\nPRIVATE BY DESIGN\nNo accounts, no tracking, no data collected. Your progress stays on your iPhone.",
+      "keywords": "venus,plant,carnivorous,bug,insect,fly,catch,trap,bite,swamp,bog,foldable,hinge,ladybug,dragonfly",
+      "promotionalText": "On iPhone Duo, hold it like a book and snap it a little shut to catch the bugs sipping inside. Wait for a crowd. Never eat a bee. Other iPhones: tap to snap. No ads.",
+      "supportUrl": "https://[SITE]/support.html",
+      "marketingUrl": "https://pravegm.github.io/snapjaw/"
+    },
+    "en-US": {
+      "description": "Your iPhone Duo is a Venus flytrap.\n\nHold your Duo open like a book. The two halves are the trap's two lobes and the hinge is its midrib. Bugs fly in and land on the glistening nectar to sip. Snap the phone a little shut and the trap bites with you, teeth clacking together: CHOMP. Then open it again and wait for the next ones.\n\nThe trick is choosing when. Wait for a crowd and catch them all in one bite, because your score is multiplied by the number of bugs in it. But bees love nectar too, and you must never eat a bee.\n\nNo ads. No in-app purchases. No accounts. No data collected. Pay once and it's yours.\n\nPATIENCE, GREED AND BEES\n• Snaps are what you spend. A run starts with 10, and every snap costs one\n• Catch 3 or more bugs in one bite for a Feast, and win snaps back\n• Your score is the bugs' points, times the number of bugs, times your chain\n• Bite after bite with no bee in it, and the chain climbs all the way to ×4\n• A bee in the bite is let go, unharmed and cross, and costs an extra snap. A wasp stings: two extra\n• Sipping bugs are distracted. Flying ones are quick. Close too slowly and the twitchy ones leave\n• When the snaps run out, your trap is tired. One more go?\n\nA DAY IN THE BOG\nEvery run moves from morning to night, and the bugs change with the light. Houseflies, gnats and fruit flies at breakfast; bluebottles, lines of ants, ladybirds and grasshoppers by noon; moths, mosquitoes, dragonflies and wasps at dusk; fireflies and crickets in the dark. Keep an eye out for the rare Golden Scarab.\n\nTHE BUG BOOK\n16 species, each with its own drawing and a one-line joke, from the humble housefly to the bumblebee. Catch a bug to add its page; bees and wasps go in when you spare them. As your lifetime catch grows, your plant climbs 12 ranks, from Sprout to Bog Monarch.\n\nFIRST BITE\nYour first go starts with a short lesson that teaches by doing: one fat fly, your first snap, a bee to wait out and your first triple. Replay it from Settings any time.\n\nDAILY BOG\nThe same bugs for everyone, every day, and one try that counts. Then practice as much as you like.\n\nMADE FOR THE FOLD. PLAYS ON OTHER iPhone MODELS TOO.\nOn iPhone Duo, the hinge is the trap: a short snap of about 22° from however you like to hold it, then open again. You never close the phone or lay it flat. The bite happens at 22°, so there is nothing to gain by going further. iPhone Duo softens one half of the screen for a moment when a fold starts from flat, so your score and snaps sit on the half that stays sharp, and Settings can move them. On any other iPhone, tap anywhere to snap. Same bog, same scores, but the fold is the best way to play.\n\nSOUND AND FEEL\nThe CHOMP, the teeth clacking shut, every buzz and hum, the frogs by day and the crickets at night are all synthesized live in the app. Each bug's buzz comes from where it is, and you feel a soft tick in your hands when one lands. Sound plays with the silent switch on; a setting makes Snapjaw respect it instead. Sound and haptics each have a switch, and there's a Reduce motion setting.\n\nGAME CENTER\nLeaderboards for your Best Feast and the Daily Bog, and 12 achievements. It's optional: Snapjaw works fully without signing in.\n\nPRIVATE BY DESIGN\nNo accounts, no tracking, no data collected. Your progress stays on your iPhone."
+    }
+  },
+  "ageRating": {
+    "_comment": "Fixture copy of ageRating from docs/appstore/asc-metadata.json (see that file's comment).",
+    "parentalControls": false,
+    "ageAssurance": false,
+    "unrestrictedWebAccess": false,
+    "userGeneratedContent": false,
+    "messagingAndChat": false,
+    "advertising": false,
+    "socialMedia": false,
+    "socialMediaAgeRestricted": false,
+    "profanityOrCrudeHumor": "NONE",
+    "horrorOrFearThemes": "NONE",
+    "alcoholTobaccoOrDrugUseOrReferences": "NONE",
+    "matureOrSuggestiveThemes": "NONE",
+    "medicalOrTreatmentInformation": "NONE",
+    "healthOrWellnessTopics": false,
+    "sexualContentOrNudity": "NONE",
+    "sexualContentGraphicAndNudity": "NONE",
+    "violenceCartoonOrFantasy": "NONE",
+    "violenceRealistic": "NONE",
+    "violenceRealisticProlongedGraphicOrSadistic": "NONE",
+    "gunsOrOtherWeapons": "NONE",
+    "gamblingSimulated": "NONE",
+    "contests": "NONE",
+    "gambling": false,
+    "lootBox": false,
+    "kidsAgeBand": null,
+    "ageRatingOverrideV2": "NONE",
+    "koreaAgeRatingOverride": "NONE"
+  },
+  "review": {
+    "notes": "Thanks for reviewing Snapjaw: a paid game with no ads, no in-app purchases, no accounts, no data collection and no network requests of its own.\n\n1. TESTING WITHOUT AN iPHONE DUO (start here)\nYou don't need a Duo. Everything works on any iPhone, on iPad (as an iPhone app) and in the Simulator, in landscape.\n- Control: tap anywhere to snap the trap shut. It opens again by itself.\n- The first launch starts First Bite, a short lesson. A fly lands on a nectar drop: tap while it is sipping to catch it. Skip appears after the second step; Settings > Replay First Bite plays it again.\n- Quickest look (about a minute): the first two lesson steps, Skip, then Feed on Home.\n- In Feed, bugs fly in and land on the gold nectar drops to sip. A tap bites: every bug inside the trap is caught at once. Score = the bugs' points x the number of bugs x the chain, so waiting for a crowd pays.\n- Bees, bumblebees and wasps wear a white halo. Never eat them: a bee in a bite is let go unharmed and costs an extra snap.\n- A run starts with 10 snaps and each snap costs 1. Catching 3 or more at once (a Feast) earns snaps back. At 0, \"Your trap is tired\" and a results card shows the score.\n\n2. HOW THE HINGE IS USED (iPhone Duo)\nSnapjaw reads the hinge angle only through the public iOS 27.1 API (SwiftUI onHingeChange), behind an availability check. No private API. The angle works the trap while the game is on screen and is never sent anywhere.\na) Hold the Duo open like a book (landscape, fold top to bottom), relaxed, anywhere from about 135 to 175 degrees. The game follows the player's own resting angle; there is no target angle.\nb) To snap, close the halves about 22 degrees from that resting angle, then open again. The bite is decided the moment the closure reaches 22 degrees, so going further gains nothing and nothing has to be held. Creeping closed very slowly never bites, and lets twitchy bugs fly off, so the snap is a short, brisk stroke, like turning a page.\nc) The score, snaps and hints sit on the right half, which stays sharp when iOS briefly softens one half of the screen as a fold starts from flat. Settings > HUD on the left moves them.\nd) Folded below about 50 degrees for over half a second, the run pauses and a card asks to open it like a book; it carries on when reopened. Closed, the outer display shows a card to open it. Portrait shows a card: hold it open like a book.\ne) Nearly flat only shows a hint: \"Bend it a little, like a book\". No penalty.\n\n3. KIND TO THE DEVICE (Guidelines 2.4.2 and 1.4.5)\n- Every snap is a short stroke of about 22 to 40 degrees from a relaxed book pose, in the middle of the hinge's range. Snapjaw never asks the user to close the phone, lay it flat or slam it.\n- Snaps are a limited resource (10 to start, 12 at most), so the game rewards waiting for the right moment, not snapping often: a run is about 25 to 40 snaps over 2 to 3 minutes.\n- No achievement or leaderboard rewards snap speed or snap count.\n- Nothing is placed on the screens.\n\n4. MODES (nothing hidden, nothing to buy)\n- Feed: endless waves of bugs from morning to night, until the snaps run out.\n- Daily Bog: the same bugs for everyone that day; one scored try, then practice.\n- First Bite: the lesson.\n- Bug Book: 16 species to collect. Plant rank: 12 cosmetic ranks by lifetime bugs caught.\n\n5. CONTENT\nA cartoon Venus flytrap catching cartoon bugs, the way a frog catches flies. No blood or injury is shown: caught bugs are gulped into the trap, and bees and wasps are always let go unharmed.\n\n6. PRIVACY\nNo third-party SDKs, analytics, ads, accounts or tracking. Progress and settings stay on the device. App Privacy: Data Not Collected.\n\n7. GAME CENTER\nOptional. 2 leaderboards (Best Feast, Daily Bog), 12 achievements (575 points), none hidden.\n\n8. OTHER\n- No notifications. Debug and demo modes are disabled in Release builds.\n- Sound plays with the silent switch on; Settings > Respect silent switch turns that off. All sound is synthesized in the app.",
+    "demoAccountRequired": false,
+    "contact": {
+      "firstName": null,
+      "lastName": null,
+      "phone": null,
+      "email": null
+    }
+  },
+  "release": {
+    "_comment": "metadata.md §9 and §12: manual release; the founder presses Release This Version on Tue 8 Dec 2026 at about 08:00 UK (runbook §7). The tool never releases or submits.",
+    "type": "MANUAL",
+    "earliestReleaseDate": null
+  },
+  "price": {
+    "baseTerritory": "GBR",
+    "customerPrice": "1.99"
+  },
+  "availability": {
+    "_comment": "Fixture copy of availability from docs/appstore/asc-metadata.json (see that file's comment).",
+    "excludedTerritories": [
+      "CHN",
+      "VNM"
+    ],
+    "availableInNewTerritories": true
+  },
+  "achievements": [
+    {
+      "vendorIdentifier": "snap.ach.feast",
+      "referenceName": "First Feast",
+      "points": 10,
+      "showBeforeEarned": true,
+      "repeatable": false,
+      "localizations": {
+        "en-GB": {
+          "name": "First Feast",
+          "beforeEarnedDescription": "Catch 3 bugs or more in one bite.",
+          "afterEarnedDescription": "Three in one gulp. A proper Feast."
+        }
+      },
+      "image": "tools/appstore/fixtures/missing.png"
+    },
+    {
+      "vendorIdentifier": "snap.ach.bite5",
+      "referenceName": "Mouthful",
+      "points": 25,
+      "showBeforeEarned": true,
+      "repeatable": false,
+      "localizations": {
+        "en-GB": {
+          "name": "Mouthful",
+          "beforeEarnedDescription": "Catch 5 bugs or more in one bite.",
+          "afterEarnedDescription": "Five bugs, one bite, no regrets."
+        }
+      },
+      "image": "tools/appstore/fixtures/missing.png"
+    },
+    {
+      "vendorIdentifier": "snap.ach.chain4",
+      "referenceName": "Four Times Hungry",
+      "points": 50,
+      "showBeforeEarned": true,
+      "repeatable": false,
+      "localizations": {
+        "en-GB": {
+          "name": "Four Times Hungry",
+          "beforeEarnedDescription": "Score a bite at x4: seven clean bites in a row.",
+          "afterEarnedDescription": "The chain hit x4. Bite after bite after bite."
+        }
+      },
+      "image": "tools/appstore/fixtures/missing.png"
+    },
+    {
+      "vendorIdentifier": "snap.ach.scarab",
+      "referenceName": "Pure Gold",
+      "points": 50,
+      "showBeforeEarned": true,
+      "repeatable": false,
+      "localizations": {
+        "en-GB": {
+          "name": "Pure Gold",
+          "beforeEarnedDescription": "Catch a Golden Scarab.",
+          "afterEarnedDescription": "The rarest bug in the bog. Shiny."
+        }
+      },
+      "image": "tools/appstore/fixtures/missing.png"
+    },
+    {
+      "vendorIdentifier": "snap.ach.dragonfly",
+      "referenceName": "Here Be Dragonflies",
+      "points": 25,
+      "showBeforeEarned": true,
+      "repeatable": false,
+      "localizations": {
+        "en-GB": {
+          "name": "Here Be Dragonflies",
+          "beforeEarnedDescription": "Catch a dragonfly.",
+          "afterEarnedDescription": "It hovered. You timed it."
+        }
+      },
+      "image": "tools/appstore/fixtures/missing.png"
+    },
+    {
+      "vendorIdentifier": "snap.ach.spare50",
+      "referenceName": "Bee Kind",
+      "points": 50,
+      "showBeforeEarned": true,
+      "repeatable": false,
+      "localizations": {
+        "en-GB": {
+          "name": "Bee Kind",
+          "beforeEarnedDescription": "Spare 50 bees, bumblebees or wasps.",
+          "afterEarnedDescription": "Fifty stripy visitors, all sent home."
+        }
+      },
+      "image": "tools/appstore/fixtures/missing.png"
+    },
+    {
+      "vendorIdentifier": "snap.ach.bugbook",
+      "referenceName": "Every Bug in the Book",
+      "points": 100,
+      "showBeforeEarned": true,
+      "repeatable": false,
+      "localizations": {
+        "en-GB": {
+          "name": "Every Bug in the Book",
+          "beforeEarnedDescription": "Fill all 16 pages of the Bug Book.",
+          "afterEarnedDescription": "Sixteen species. A true naturalist."
+        }
+      },
+      "image": "tools/appstore/fixtures/missing.png"
+    },
+    {
+      "vendorIdentifier": "snap.ach.monarch",
+      "referenceName": "Bog Monarch",
+      "points": 100,
+      "showBeforeEarned": true,
+      "repeatable": false,
+      "localizations": {
+        "en-GB": {
+          "name": "Bog Monarch",
+          "beforeEarnedDescription": "Reach the top plant rank: Bog Monarch.",
+          "afterEarnedDescription": "All hail the hungriest plant in the bog."
+        }
+      },
+      "image": "tools/appstore/fixtures/missing.png"
+    },
+    {
+      "vendorIdentifier": "snap.ach.night",
+      "referenceName": "Midnight Snack",
+      "points": 25,
+      "showBeforeEarned": true,
+      "repeatable": false,
+      "localizations": {
+        "en-GB": {
+          "name": "Midnight Snack",
+          "beforeEarnedDescription": "Keep your trap going until night falls.",
+          "afterEarnedDescription": "Fed from breakfast to midnight."
+        }
+      },
+      "image": "tools/appstore/fixtures/missing.png"
+    },
+    {
+      "vendorIdentifier": "snap.ach.daily",
+      "referenceName": "Daily Diner",
+      "points": 15,
+      "showBeforeEarned": true,
+      "repeatable": false,
+      "localizations": {
+        "en-GB": {
+          "name": "Daily Diner",
+          "beforeEarnedDescription": "Finish a scored Daily Bog.",
+          "afterEarnedDescription": "Same bog as everyone else today."
+        }
+      },
+      "image": "tools/appstore/fixtures/missing.png"
+    },
+    {
+      "vendorIdentifier": "snap.ach.score10k",
+      "referenceName": "Well Fed",
+      "points": 75,
+      "showBeforeEarned": true,
+      "repeatable": false,
+      "localizations": {
+        "en-GB": {
+          "name": "Well Fed",
+          "beforeEarnedDescription": "Score 10,000 protein in one run.",
+          "afterEarnedDescription": "Ten thousand protein. Delicious."
+        }
+      },
+      "image": "tools/appstore/fixtures/missing.png"
+    },
+    {
+      "vendorIdentifier": "snap.ach.nobees",
+      "referenceName": "Bee-Free Diet",
+      "points": 50,
+      "showBeforeEarned": true,
+      "repeatable": false,
+      "localizations": {
+        "en-GB": {
+          "name": "Bee-Free Diet",
+          "beforeEarnedDescription": "Catch 30 bugs in one run without biting a bee or wasp.",
+          "afterEarnedDescription": "Thirty bugs, and not one bee in the mix."
+        }
+      },
+      "image": "tools/appstore/fixtures/missing.png"
+    }
+  ],
+  "leaderboards": [
+    {
+      "vendorIdentifier": "snap.best",
+      "referenceName": "Best feast",
+      "defaultFormatter": "INTEGER",
+      "scoreSortType": "DESC",
+      "submissionType": "BEST_SCORE",
+      "scoreRangeStart": 0,
+      "scoreRangeEnd": 10000000,
+      "recurrence": null,
+      "localizations": {
+        "en-GB": {
+          "name": "Best Feast",
+          "formatterSuffix": " protein",
+          "formatterSuffixSingular": " protein"
+        },
+        "en-US": {
+          "name": "Best Feast",
+          "formatterSuffix": " protein",
+          "formatterSuffixSingular": " protein"
+        }
+      }
+    },
+    {
+      "vendorIdentifier": "snap.daily",
+      "referenceName": "Daily Bog",
+      "defaultFormatter": "INTEGER",
+      "scoreSortType": "DESC",
+      "submissionType": "BEST_SCORE",
+      "scoreRangeStart": 0,
+      "scoreRangeEnd": 10000000,
+      "recurrence": {
+        "startDate": "2026-11-02T00:00:00Z",
+        "duration": "PT24H",
+        "rule": "FREQ=DAILY;INTERVAL=1"
+      },
+      "localizations": {
+        "en-GB": {
+          "name": "Daily Bog",
+          "formatterSuffix": " protein",
+          "formatterSuffixSingular": " protein"
+        },
+        "en-US": {
+          "name": "Daily Bog",
+          "formatterSuffix": " protein",
+          "formatterSuffixSingular": " protein"
+        }
+      }
+    }
+  ],
+  "nomination": {
+    "_comment": "docs/appstore/featuring-nomination.md. notes = Helpful Details. submit: true presses Submit (a saved draft is not a nomination). Submit by Mon 16 Nov 2026 (3 weeks before the Tue 8 Dec launch); the tool submits it in runbook §3.",
+    "name": "Snapjaw - App Launch - iPhone Duo Venus flytrap game",
+    "type": "APP_LAUNCH",
+    "description": "Snapjaw turns iPhone Duo into a Venus flytrap. Hold the Duo open like a book: the two halves are the trap's lobes and the hinge is its midrib. Bugs land on the glistening nectar to sip; snap the phone a little shut and the trap bites with you, teeth clacking together, then open it again.\n\nIt's a game of choosing, not hitting. Wait for a crowd and catch them all in one bite, for a score multiplied by the number of bugs, but bees love nectar too and must never be eaten. Snaps are the resource, and big bites earn them back. Every run passes from morning to night with new bugs, from houseflies to dragonflies and fireflies, and a Bug Book of 16 species to fill.\n\nA First Bite lesson teaches by doing. A Daily Bog that's the same for everyone, 12 plant ranks and Game Center. Other iPhones play by tapping. Every sound, from the CHOMP to the frogs, is synthesized in the app. No ads, no in-app purchases, no data collected.",
+    "notes": "Optimized for iPhone Duo: built for book pose on the inner display. Public iOS 27.1 hinge API: a snap is a short close of about 22 degrees from the player's own resting angle, never flat and never shut, and the bite fires at 22 degrees, so closing further gains nothing. The score stays on the half that doesn't blur when a fold starts from flat. Snaps are a limited resource, so patience beats folding often. Taught by doing.",
+    "publishStartDate": "2026-12-08T08:00:00Z",
+    "deviceFamilies": [
+      "IPHONE"
+    ],
+    "locales": [
+      "en-GB",
+      "en-US"
+    ],
+    "supplementalMaterialsUris": [
+      "https://pravegm.github.io/snapjaw/"
+    ],
+    "hasInAppEvents": false,
+    "launchInSelectMarketsFirst": false,
+    "preOrderEnabled": false,
+    "submit": true
+  }
+}

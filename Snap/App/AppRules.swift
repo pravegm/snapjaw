@@ -58,6 +58,14 @@ enum AppRules {
         return false
     }
 
+    // MARK: Drawn closure (Scene R2 #20)
+
+    /// Degrees closed from the rest reference for the drawn teeth: ≥ 0, finite, capped at 90. Pure; tested.
+    static func drawnClosure(reference: Double, predicted: Double) -> Double? {
+        guard reference.isFinite, predicted.isFinite else { return nil }
+        return min(max(reference - predicted, 0), 90)
+    }
+
     // MARK: Hinge pause
 
     /// The closing pause lifts once the hinge is back open past this (a natural snap often reaches 90–100°, so the
@@ -82,15 +90,75 @@ enum AppRules {
         case .beeInside: return "Bee! Wait…"
         case .crowd: return "Now!"
         case .lastSnap: return "Last snap — make it count"
+        case .hungry: return "Hungry… bite!"
         }
     }
 
     /// Warnings get the crimson plate; the rest the cream one.
     static func hintIsWarning(_ hint: TrapHint) -> Bool {
         switch hint {
-        case .beeInside, .quick, .lastSnap: return true
+        case .beeInside, .quick, .lastSnap, .hungry: return true
         case .bendALittle, .openUp, .crowd: return false
         }
+    }
+
+    /// The lesson shows only the hints it teaches with ("Bee! Wait…" in the bee step, "Now!" when the crowd sips).
+    static func lessonShowsHint(_ hint: TrapHint) -> Bool {
+        switch hint {
+        case .beeInside, .crowd: return true
+        case .bendALittle, .quick, .openUp, .lastSnap, .hungry: return false
+        }
+    }
+
+    /// The HUD's hunger (the next snap glyph's drain): 0 outside play, clamped, in steps of 1/40 so the HUD
+    /// republishes only when the glyph visibly changes. Pure; tested.
+    static func hudHunger(_ hunger: Double, live: Bool) -> Double {
+        guard live, hunger.isFinite else { return 0 }
+        return (min(max(hunger, 0), 1) * 40).rounded() / 40
+    }
+
+    // MARK: First runs
+
+    /// The snaps a run starts with: 12 while the plant rank is Sprout (GAME-DESIGN §5 "First runs"), else Core's
+    /// default (nil). Only Feed: the Daily is everyone's bog, so it stays the same for every player. Pure; tested.
+    static let sproutStartSnaps = 12
+
+    static func startSnaps(mode: RunMode, lifetimeBugs: Int) -> Int? {
+        guard case .feed = mode else { return nil }
+        return PlantRanks.rank(forLifetimeBugs: max(lifetimeBugs, 0)) == 0 ? sproutStartSnaps : nil
+    }
+
+    // MARK: Short labels (tiles and stats)
+
+    /// A species' name for small tiles ("Scarab", not "Golden Scarab"). Pure; tested.
+    static func shortName(_ s: BugSpecies) -> String {
+        switch s {
+        case .goldenScarab: return "Scarab"
+        default: return BugCatalog.info(s).name
+        }
+    }
+
+    /// Results' best bite: "4 bugs · 48" ("1 bug · 10"; "–" for none). Pure; tested.
+    static func bestBiteText(bugs: Int, points: Int) -> String {
+        guard bugs > 0 else { return "–" }
+        return "\(bugs) \(bugs == 1 ? "bug" : "bugs") · \(formatted(max(points, 0)))"
+    }
+
+    /// Results' longest chain as the multiplier it built: "×1.5 (1 bite)", "×2 (2 bites)"; "–" for none.
+    /// Pure; tested.
+    static func chainText(longest n: Int) -> String {
+        guard n > 0 else { return "–" }
+        return multiplierText(TrapRules.chainMultiplier(n)) + " (\(n) \(n == 1 ? "bite" : "bites"))"
+    }
+
+    /// Under the rank title: what grows it next ("Catch 30 bugs to grow", "12 more bugs to Nibbler"). Pure; tested.
+    static func rankHint(lifetimeBugs: Int) -> String {
+        let bugs = max(lifetimeBugs, 0)
+        let rank = PlantRanks.rank(forLifetimeBugs: bugs)
+        guard rank + 1 < PlantRanks.count else { return "Top rank. The bog bows." }
+        let left = max(PlantRanks.threshold(rank + 1) - bugs, 1)
+        if bugs == 0 { return "Catch \(left) bugs to grow" }
+        return "\(left) more \(left == 1 ? "bug" : "bugs") to \(PlantRanks.title(rank + 1))"
     }
 
     /// The run-start line (≤ 6 words), shown while no hint is up.
@@ -203,9 +271,63 @@ enum AppRules {
     static func lessonSpot(slot: Int, geometry g: TrapGeometry) -> (entry: CGPoint, target: CGPoint) {
         let spot = lessonSpots[((slot % lessonSpots.count) + lessonSpots.count) % lessonSpots.count]
         let target = CGPoint(x: g.center.x + g.a * CGFloat(spot.dx), y: g.center.y + g.b * CGFloat(spot.dy))
+        return (lessonEntry(for: target, geometry: g), target)
+    }
+
+    /// Where a scripted bug flies in from: above the top edge, on its target's side.
+    static func lessonEntry(for target: CGPoint, geometry g: TrapGeometry) -> CGPoint {
         let side: CGFloat = target.x < g.center.x ? -1 : 1
         let entryX = min(max(target.x + side * 220, -30), g.sceneSize.width + 30)
-        return (CGPoint(x: entryX, y: g.sceneSize.height + 60), target)
+        return CGPoint(x: entryX, y: g.sceneSize.height + 60)
+    }
+
+    /// The lesson's target for `slot` ON a real nectar drop, so the bug sips (Core sips only when the target is within
+    /// 1.5 pt of a free drop: QA-1 #3, REVIEW-1 #8). The drop nearest the slot's spot that is free (no occupant) and not
+    /// in `taken` (drops already given to this step's other bugs). Falls back to the spot when there's no free drop.
+    /// Returns the drop id used (nil: the fallback). Pure; tested.
+    static func lessonSpot(slot: Int, geometry g: TrapGeometry, nectar: [NectarDrop],
+                           taken: Set<Int>) -> (entry: CGPoint, target: CGPoint, drop: Int?) {
+        let spot = lessonSpot(slot: slot, geometry: g).target
+        var best: NectarDrop?
+        var bestD = Double.infinity
+        for d in nectar where d.occupant == nil && !taken.contains(d.id) && g.contains(d.position) {
+            // Keep the lesson's bugs off the crease (the midrib band distorts small sprites on a Duo).
+            guard abs(d.position.x - g.center.x) > ScreenLayout.creaseHalfWidth + 8 else { continue }
+            let dist = Double(hypot(d.position.x - spot.x, d.position.y - spot.y))
+            if dist < bestD {
+                bestD = dist
+                best = d
+            }
+        }
+        guard let drop = best else { return (lessonEntry(for: spot, geometry: g), spot, nil) }
+        return (lessonEntry(for: drop.position, geometry: g), drop.position, drop.id)
+    }
+
+    /// Whether a bug is still part of the scene's play (not leaving, caught, escaped or let go).
+    static func inPlay(_ a: BugActivity) -> Bool {
+        switch a {
+        case .arriving, .walking, .sipping, .hopping: return true
+        case .leaving, .caught, .escaped, .released: return false
+        }
+    }
+
+    /// The lesson's drop claims kept only for bugs still in play. Pure; tested.
+    static func liveClaims(_ claims: [Int: Int], snapshot s: TrapSnapshot) -> [Int: Int] {
+        var live = Set<Int>()
+        for b in s.bugs where inPlay(b.activity) { live.insert(b.id) }
+        return claims.filter { live.contains($0.key) }
+    }
+
+    /// The lesson's pointer targets: every bug in play (scene space, rounded so the HUD publishes only on movement),
+    /// bees marked (they get the "wait" ring). Pure; tested.
+    static func lessonTargets(_ s: TrapSnapshot) -> [LessonTarget] {
+        var out: [LessonTarget] = []
+        for b in s.bugs where inPlay(b.activity) {
+            let p = CGPoint(x: (b.position.x / 2).rounded() * 2, y: (b.position.y / 2).rounded() * 2)
+            out.append(LessonTarget(id: b.id, point: p, bee: b.species.isProtected,
+                                    sipping: b.activity == .sipping))
+        }
+        return out
     }
 
     // MARK: Results
@@ -290,7 +412,8 @@ struct RunTally: Equatable {
         case let .chainUp(count, _):
             longestChain = max(longestChain, count)
         case .waveStarted, .dayPhaseChanged, .bugArrived, .bugLanded, .bugSipping, .bugHopped, .bugLeft, .bugSpooked,
-             .snapStarted, .bugEscaped, .luckySnap, .chainBroken, .rearmed, .lastSnap, .tired, .newBest, .finished:
+             .snapStarted, .bugEscaped, .luckySnap, .chainBroken, .rearmed, .lastSnap, .hungry, .wilted, .tired,
+             .newBest, .finished:
             break
         }
     }

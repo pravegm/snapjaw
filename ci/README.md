@@ -2,8 +2,9 @@
 
 There is no Mac on our side. GitHub Actions on the `xcode-27` runner (Apple silicon, Xcode 27.1) is the only compiler.
 Everything here is adapted from the sister projects' CI, which has run hundreds of times on these runners and on a real
-Duo (`C:\Users\59527\Wing` and `C:\Users\59527\Lid`, read-only). Their hard-won fixes are kept, with the run numbers
-in the comments.
+Duo (the book-pose and tabletop sisters; their folders are listed in `CLAUDE.md`, read-only). Their hard-won fixes are
+kept, with the run numbers in the comments. The store pipeline (`store.yml`, `asc.yml`, `ci/store-*`,
+`tools/appstore/`) is the book-pose sister's, which took that game through App Store Connect on the same Apple account.
 
 **Before anything runs:** the repo `pravegm/snapjaw` must be **public**. This account's billing blocks Actions on
 private repos.
@@ -19,6 +20,8 @@ app `Snap.app`, bundle id `com.pravegm.snapjaw`, display name `Snapjaw`, demo ar
 | `duo.yml` (Duo) | by hand only (~45–75 min) | The app on an iPhone Duo simulator with a real hinge: the hinge checks and book-pose frames | `duo-screens` |
 | `testflight.yml` (TestFlight) | by hand | A signed Release uploaded to App Store Connect (or `check_only`: an unsigned Release archive) | `testflight-logs` / `release-check-log` |
 | `tf-status.yml` | by hand | Read-only: the latest builds' processing state in App Store Connect | (job summary) |
+| `store.yml` (App Store screenshots) | by hand only (~2–3 h of runners: phones, Duo, then assembly) | The 10-frame App Store sets for 6.9", 6.3" and the iPhone Duo, captioned; plus the header and search art | `store-69`, `store-63`, `store-duo`, `store-placements`, `raw-*` |
+| `asc.yml` (App Store Connect tool) | every push touching `tools/appstore/`, `docs/appstore/asc-metadata.json` or itself (offline checks); by hand with `asc` ticked (contacts Apple) | Typecheck and validate the listing; `check` / `plan` / `push` it into App Store Connect | `badges`, `asc-output` |
 
 Run one by hand: the repo's **Actions** tab → the workflow → **Run workflow**, or
 `gh workflow run ci.yml -R pravegm/snapjaw` (add `-f filter=play` etc. for inputs).
@@ -172,6 +175,78 @@ writes the key to a temporary file (mode 600), never prints it, and deletes it a
 A read-only job, on Ubuntu. It uses the same `ASC_*` secrets to list the 10 latest builds of `com.pravegm.snapjaw`:
 version, upload time, processing state, internal testing state and expiry. Use it to answer "I can't see build N in
 TestFlight" without opening the website.
+
+## store.yml: the App Store screenshot sets (manual)
+
+The sets and captions are `docs/appstore/screenshots.md`; once the scenario files exist **they are the source of
+truth** for captions. Four jobs:
+
+1. **phones**: builds Debug, then `ci/store-capture.sh phone` runs `ci/store-scenarios.txt` (P01–P10) through
+   `ci/screenshots.sh` on the iPhone 18 Pro Max (6.9", 2868 × 1320) and the iPhone 18 Pro (6.3", 2622 × 1206).
+   Artifacts `raw-69`, `raw-63`.
+2. **duo**: the same runtime / simulator / `hinge` setup as `duo.yml` (keep them in step), then
+   `ci/store-capture.sh duo` runs `ci/duo-store-scenarios.txt` (D01–D10) through `ci/duo.sh`'s store pass, hinge held
+   at 150°. Artifact `raw-duo`. Skipped with `duo_from_run=<run id>` (reuses that run's `raw-duo`).
+3. **assemble**: `ci/store-set.sh` + `ci/store-frame.swift` caption each set. **Frame 1 of every set is D01 drawn as
+   the book-pose composite** (the Duo open like a book, each half of the real capture warped onto its page: the lobes
+   on the pages, the midrib on the hinge). Artifacts `store-duo`, `store-69`, `store-63`: the upload PNGs (named as
+   `asc-metadata.json` lists them), `MANIFEST.txt` / `.tsv`, and `_flagged/` (never upload those).
+4. **placements**: `ci/store-placements.sh` + `ci/store-banner.swift` draw the product page header (3840 × 1646, the
+   app's wordmark and tagline beside the book) and the search results art (3840 × 2560, D01's caption over the book)
+   from clean Duo captures only. Artifact `store-placements`. `placements_from=<run id>` re-renders them alone from
+   an earlier run (nothing captured, its own concurrency group).
+
+Inputs: `phones`, `duo`, `duo_from_run`, `device_69`, `device_63`, `phone_filter` (`^P[0-9]`), `duo_filter`
+(`^D[0-9]`; add `|DR` for the reserves), `book_angle` (`auto` = the capture's real hinge angle from `SNAP-H`, else 140),
+`placements_from`, `banner_args` (e.g. `bee=--kind search --from D03-bee` for a review variant).
+
+**Scenario files** (`ci/store-scenarios.txt`, `ci/duo-store-scenarios.txt`): `name|demo args|wait|caption|expect|frame`.
+- The play frames reuse the seeds, waves and pilots proven in duo run 40603497021 and `ci/scenarios.txt` (crowd at wave
+  6, a 5-bug feast at wave 8, a bee at wave 15, all with the perfect pilot; feed mode, so the snaps row is real).
+- `caption` is `headline / sub-line` with one `*gold*` word. `frame` is `flat`, `book` (Duo) or `book:D01-book-hero`
+  (the iPhone sets' frame 1).
+- `ci/duo-scenarios.txt` stays `duo.yml`'s 16-frame review set; `ci/duo-store-scenarios.txt` is the upload set.
+
+**What makes a frame FLAGGED** (it still gets framed, into `_flagged/`): the app log lacks
+`SNAP-T demo '…' starts`, the `SNAP-T freeze <tag>` of its `freezeOn=`, the `SNAP-T start wave <n>` of its `wave=`, the
+expect regex, or the set's canvas line (`REQUIRE_LOG`: Duo `SNAP-T canvas 951x669 fold=1 hudLeft=0`; iPhones
+`fold=0 hudLeft=0`; book sources `fold=1`); a wrong size; alpha; or a caption over 30 characters / 7 words, without
+exactly one highlight, or with "flat", "shut" on its own, quick, fast, free, a price or "#1". **REJECTED** (no frame):
+smash, squish, squash, splat, kill, slam, "Fold to", or the competitor's name (`store-frame.swift`). A missing D01
+makes every set's frame 1 a flat, FLAGGED fallback. One bad frame never fails the run.
+
+**Look:** bog green #0E2A1B → moss #1F4A2C, a lime glow #9BCB3C behind the picture and a faint crimson ember in the
+far corner; SF Pro Rounded Heavy dew-white headlines, the one highlight in bog ink on a nectar-gold #F2B632 swash, the
+sub-line in mist green. The light (and the lit bezel page) falls on the HUD's half: the right, unless `hudLeft=1`.
+
+```
+gh workflow run store.yml -R pravegm/snapjaw                                  # everything
+gh workflow run store.yml -R pravegm/snapjaw -f duo=false -f duo_from_run=<id> # recaption with an earlier Duo pass
+gh workflow run store.yml -R pravegm/snapjaw -f placements_from=<id>           # header + search art only
+```
+
+## asc.yml + tools/appstore: the App Store Connect tool
+
+Details in `tools/appstore/README.md`. On every push it typechecks `asc.swift` and `badges.swift`, collects the 12
+Game Center badges from the latest green CI run (a warning and a gap until the app has `screen=badges`,
+`docs/appstore/achievements.md` "Images"), self-tests the validator on `tools/appstore/fixtures/`, and validates
+`docs/appstore/asc-metadata.json` (leaderboards `snap.best` / `snap.daily` and the 12 `snap.ach.*` achievements,
+checked against `GameCenterManager.Leaderboard` and `Achievements.all` in `Snap/Core/Progression.swift`).
+
+By hand with `asc` ticked it contacts App Store Connect: `mode` = `check` (read-only; its AUDIT reads the whole 1.0
+page back), `plan` (dry run) or `push` (writes; never submits, never releases). Screenshots come from the store run in
+`DEFAULT_STORE_RUN` (**empty until the first clean `store.yml` run**: put its ID there) or the `store_run` input.
+
+**It stops with a plain error, not a cryptic one,** when the founder's two one-time steps aren't done:
+- no `ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_PRIVATE_KEY` → *App Store Connect is not set up* (lists the missing
+  secrets; `APPLE_TEAM_ID` is reported too, since TestFlight needs it);
+- no app record for `com.pravegm.snapjaw` (Apple's API can't create apps) → *No App Store Connect app record*.
+
+Both write the instructions (create the record: Apps → + → New App, bundle ID `com.pravegm.snapjaw`, SKU
+`snapjaw-2026`; add the 4 secrets above) into the run summary. Kept from the sister tool as it shipped: requests that
+fail with an `NSURLErrorDomain` error are retried (reads 8×, writes 3×; matched by error domain, because Apple's hangs
+arrive as an `NSError`), each library image may take up to 20 minutes to process, and the `asc` job's timeout is 180
+minutes.
 
 ## ci/flatten-png.swift
 `xcrun swift ci/flatten-png.swift <png…>` rewrites each PNG as opaque RGB over white. testflight.yml runs it on the

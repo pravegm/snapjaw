@@ -57,6 +57,8 @@ struct RecordOutcome: Equatable {
     var practice = false
     /// Nothing was recorded (attract, lesson).
     var ignored = false
+    /// The player's very first recorded run (Results celebrates it: REVIEW-1 #23).
+    var firstRun = false
 
     /// "New best!" only when an earlier best was beaten (never on the very first score).
     var showsNewBest: Bool { isNewBest && previousBest > 0 }
@@ -308,6 +310,7 @@ enum ProgressRules {
         data.lifetimeScore += score
         outcome.lifetimeAfter = data.lifetimeBugs
         outcome.rankAfter = rankFor(data.lifetimeBugs)
+        outcome.firstRun = data.runs == 0
         data.runs += 1
         data.snaps += max(result.snaps, 0)
         data.feasts += max(result.feasts, 0)

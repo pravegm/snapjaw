@@ -46,7 +46,7 @@ struct SceneTests {
         // Closing foreshortens the lobe towards the midrib, by a little.
         let shut = TrapArt.lobePath(side: 1, geometry: g, closure01: 1).boundingBoxOfPath
         #expect(shut.width < right.width - CGFloat(5))
-        #expect(shut.width > right.width * CGFloat(0.9))
+        #expect(shut.width > right.width * CGFloat(0.8))
         // The face sits inside the lobe.
         let face = TrapArt.lobeFacePath(side: -1, geometry: g).boundingBoxOfPath
         #expect(face.minX > left.minX && face.height < left.height)
@@ -64,7 +64,9 @@ struct SceneTests {
                 if side < 0 { #expect(t.root.x < g.center.x) } else { #expect(t.root.x > g.center.x) }
                 let out = CGPoint(x: t.root.x + cos(t.angle) * 10, y: t.root.y + sin(t.angle) * 10)
                 #expect(g.normalizedRadius(out) > r)
-                #expect(t.length >= CGFloat(18) && t.length <= CGFloat(44))
+                #expect(t.length >= CGFloat(18) && t.length <= CGFloat(66))
+                // Cilia, not spikes (R2: 40 % thinner than R1).
+                #expect(t.width <= CGFloat(7.2))
                 // The tip stays on the canvas when open.
                 let tip = CGPoint(x: t.root.x + cos(t.angle) * t.length, y: t.root.y + sin(t.angle) * t.length)
                 #expect(tip.x > CGFloat(0) && tip.x < g.sceneSize.width)
@@ -165,9 +167,21 @@ struct SceneTests {
     }
 
     @Test func defaultRadiiMatchTheBrief() {
-        #expect(abs(TrapArt.defaultRadius(.gnat) - CGFloat(7)) < CGFloat(0.01))
-        #expect(abs(TrapArt.defaultRadius(.dragonfly) - CGFloat(24)) < CGFloat(0.01))
-        #expect(abs(TrapArt.defaultRadius(.bumblebee) - CGFloat(22)) < CGFloat(0.01))
+        // R2: R1's radii × 1.8 (a housefly is 50 pt across, a gnat 25).
+        #expect(abs(TrapArt.defaultRadius(.housefly) - CGFloat(25.2)) < CGFloat(0.01))
+        #expect(abs(TrapArt.defaultRadius(.gnat) - CGFloat(12.6)) < CGFloat(0.01))
+        #expect(abs(TrapArt.defaultRadius(.dragonfly) - CGFloat(43.2)) < CGFloat(0.01))
+        #expect(abs(TrapArt.defaultRadius(.bumblebee) - CGFloat(39.6)) < CGFloat(0.01))
+        #expect(abs(TrapArt.baseRadius(.gnat) - CGFloat(7)) < CGFloat(0.01))
+        // The scene's art radius is never smaller than that, and never Core's radius scaled twice.
+        let layer = BogBugLayer()
+        for s in BugSpecies.allCases {
+            let r = layer.radius(s)
+            #expect(r >= TrapArt.defaultRadius(s) - CGFloat(0.01))
+            #expect(r <= max(BugCatalog.info(s).radius, TrapArt.defaultRadius(s)) + CGFloat(0.01))
+        }
+        // Nectar drops are drawn 30 % smaller than Core's radius (the bugs are the subject).
+        #expect(abs(BogTextures.nectarDrawnRadius(14) - CGFloat(10)) < CGFloat(0.01))
     }
 
     // MARK: Palette and light
@@ -212,6 +226,9 @@ struct SceneTests {
         #expect(BogScene.countLabel(6) == "FEAST ×6")
         #expect(BogScene.feastLabel(1) == "Feast! +1 snap")
         #expect(BogScene.feastLabel(2) == "Feast! +2 snaps")
+        #expect(BogScene.heroLabel(count: 5, points: 255) == "FEAST ×5 · +255")
+        #expect(BogScene.heroLabel(count: 1, points: 12) == "+12")
+        #expect(BogScene.luckyLabel(.goldenScarab) == "Golden!")
         #expect(BogScene.multiplier(1.5) == "×1.5")
         #expect(BogScene.multiplier(2) == "×2")
     }
@@ -294,8 +311,10 @@ struct SceneTests {
         for _ in 0..<9 { scene.show(s, events: [], dt: 1.0 / 120.0) }
         #expect(scene.jawSlam > CGFloat(0.95))
         #expect(scene.toothReach < CGFloat(-0.8))
-        #expect(scene.popTexts.contains("+26"))
-        #expect(scene.popTexts.contains("DOUBLE ×2"))
+        #expect(scene.popTexts.contains("DOUBLE ×2 · +26"))
+        // One hero callout: the chain step is the HUD chip's, never a line on the lobe.
+        let chainLine = scene.popTexts.contains { $0.hasPrefix("chain") }
+        #expect(!chainLine)
         #expect(scene.activeEffects > 0)
         #expect(scene.cameraScale > CGFloat(1.001))
 
@@ -335,13 +354,16 @@ struct SceneTests {
             .bugCaught(id: 0, species: .housefly, position: p), .bugEscaped(id: 2, species: .fruitFly),
             .stung(id: 15, species: .wasp, cost: 2), .drySnap, .feast(count: 5, snapsBack: 2),
             .luckySnap(species: .goldenScarab), .chainUp(count: 3, multiplier: 2), .chainBroken(count: 3), .rearmed,
-            .beeSpared(species: .bee), .lastSnap, .tired, .newBest, .finished,
+            .beeSpared(species: .bee), .lastSnap, .hungry(secondsLeft: 3), .wilted(snapsLeft: 6), .tired, .newBest,
+            .finished,
         ]
         scene.show(s, events: events, dt: 1.0 / 120.0)
         for _ in 0..<30 { scene.show(s, events: [], dt: 1.0 / 120.0) }
-        #expect(scene.popTexts.contains("FEAST ×5"))
+        #expect(scene.popTexts.contains("FEAST ×5 · +900"))
         #expect(scene.popTexts.contains("Stung!"))
-        #expect(scene.popTexts.contains("Golden! +2 snaps"))
+        #expect(scene.popTexts.contains("Golden!"))
+        #expect(scene.popTexts.contains(BogScene.wiltedLabel))
+        #expect(scene.popTexts.contains("New best!"))
         #expect(scene.drawnFrames == 31)
     }
 
@@ -385,5 +407,235 @@ struct SceneTests {
         scene.update(10 + 1.0 / 120.0)
         #expect(scene.drawnFrames == 2)
         #expect(scene.liveBugNodes == BugSpecies.allCases.count)
+    }
+
+    // MARK: R2
+
+    /// REVIEW-1 #1: the long pale streaks were a pooled bug's wings, resized while folded to a 0.001 y scale (SpriteKit's
+    /// `size` is the scaled size), so the next bug drew them hundreds of times too tall. Every bug child must stay
+    /// within 6 × its bug's radius through catches, folding, leaving and pool reuse.
+    @Test func bugChildrenNeverStreak() {
+        let scene = BogScene(layout: SceneTests.duo)
+        let g = SceneTests.geometry
+        let a = CGPoint(x: g.center.x - 220, y: g.center.y + 40)
+        let b = CGPoint(x: g.center.x + 200, y: g.center.y - 60)
+        let c = CGPoint(x: g.center.x - 120, y: g.center.y - 120)
+        var s = TrapSnapshot(bugs: [SceneTests.bug(1, .housefly, a, .sipping), SceneTests.bug(2, .ant, b, .walking),
+                                    SceneTests.bug(3, .bee, c, .arriving, height: 0.6)])
+        var worst: CGFloat = 0
+        for _ in 0..<10 {
+            scene.show(s, events: [], dt: 1.0 / 120.0)
+            worst = max(worst, scene.bugExtentRatio)
+        }
+        // The fly is caught (its wings fold to nothing, its shadow to zero).
+        s.bugs[0].activity = .caught(elapsed: 0)
+        scene.show(s, events: [.bugCaught(id: 1, species: .housefly, position: a)], dt: 1.0 / 120.0)
+        for k in 1...70 {
+            s.bugs[0].activity = .caught(elapsed: min(Double(k) / 120, 0.5))
+            scene.show(s, events: [], dt: 1.0 / 120.0)
+            worst = max(worst, scene.bugExtentRatio)
+        }
+        // Everyone leaves; new bugs reuse the pooled nodes, flying, hopping and landing.
+        s.bugs = []
+        scene.show(s, events: [], dt: 1.0 / 120.0)
+        #expect(scene.liveBugNodes == 0)
+        s.bugs = [SceneTests.bug(4, .bluebottle, a, .arriving, height: 0.5),
+                  SceneTests.bug(5, .grasshopper, b, .hopping, height: 0.8),
+                  SceneTests.bug(6, .moth, c, .leaving, height: 0.4)]
+        for k in 0..<60 {
+            if k == 30 { s.bugs[0].activity = .sipping }
+            scene.show(s, events: [], dt: 1.0 / 120.0)
+            worst = max(worst, scene.bugExtentRatio)
+        }
+        #expect(worst > CGFloat(1))
+        #expect(worst <= CGFloat(6))
+    }
+
+    @Test func theBiteReads() {
+        let scene = BogScene(layout: SceneTests.duo)
+        var s = SceneTests.crowd()
+        scene.show(s, events: [], dt: 1.0 / 120.0)
+        s.closure = Tuning.snapDepth
+        let report = BiteReport(caught: [.housefly, .gnat], escaped: 0, stingers: [], points: 26, countMultiplier: 2,
+                                chainMultiplier: 1, snapsBack: 0, snapsLost: 0, duration: 0.1, time: 1)
+        scene.show(s, events: [.snapped(report), .bugCaught(id: 0, species: .housefly, position: s.bugs[0].position),
+                               .bugCaught(id: 1, species: .gnat, position: s.bugs[1].position)], dt: 1.0 / 120.0)
+        // A 50 ms hit-stop, and the caught bugs flash white.
+        #expect(scene.inHitStop)
+        #expect(scene.flashingBugs >= 1)
+        for _ in 0..<8 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        #expect(!scene.inHitStop)
+        #expect(scene.flashingBugs == 0)
+        // The lobes squeeze to 0.6 towards the midrib for the hold.
+        #expect(scene.lobeScale < CGFloat(0.65))
+        #expect(scene.jawSlam > CGFloat(0.95))
+        // …and spring back past 1 on re-arm.
+        s.closure = 0
+        for _ in 0..<60 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        scene.show(s, events: [.rearmed], dt: 1.0 / 120.0)
+        var peak: CGFloat = 0
+        for _ in 0..<40 {
+            scene.show(s, events: [], dt: 1.0 / 120.0)
+            peak = max(peak, scene.lobeScale)
+        }
+        #expect(peak > CGFloat(1.03) && peak < CGFloat(1.1))
+    }
+
+    @Test func closureTracksTheHandsAndTheApp() {
+        let scene = BogScene(layout: SceneTests.duo)
+        var s = SceneTests.crowd()
+        s.closure = Tuning.snapDepth
+        scene.show(s, events: [], dt: 1.0 / 120.0)
+        // 15 % foreshortening at the snap depth.
+        #expect(abs(scene.lobeScale - CGFloat(0.85)) < CGFloat(0.01))
+        // The App's predicted closure wins over the snapshot's.
+        scene.drawnClosure = Tuning.snapDepth * 0.5
+        scene.show(s, events: [], dt: 1.0 / 120.0)
+        #expect(abs(scene.drawnClosure01 - CGFloat(0.5)) < CGFloat(0.01))
+        scene.drawnClosure = nil
+        s.closure = 0
+        scene.show(s, events: [], dt: 1.0 / 120.0)
+        #expect(scene.drawnClosure01 < CGFloat(0.01))
+    }
+
+    @Test func ringsFollowTheRules() {
+        let scene = BogScene(layout: SceneTests.duo)
+        let g = SceneTests.geometry
+        let s = TrapSnapshot(bugs: [SceneTests.bug(1, .bee, CGPoint(x: g.center.x - 200, y: g.center.y), .sipping),
+                                    SceneTests.bug(2, .housefly, CGPoint(x: g.center.x + 200, y: g.center.y), .sipping),
+                                    SceneTests.bug(3, .wasp, CGPoint(x: g.center.x + 150, y: g.center.y + 150),
+                                                   .walking)])
+        for _ in 0..<30 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        // Bees and wasps never get the sip ring; they always show their own crisp ring.
+        #expect(!scene.showsSipRing(ofBug: 1))
+        #expect(scene.showsProtectedRing(ofBug: 1))
+        #expect(scene.showsProtectedRing(ofBug: 3))
+        // A catchable sipper shows the lime-white sip ring and no protected ring.
+        #expect(scene.showsSipRing(ofBug: 2))
+        #expect(!scene.showsProtectedRing(ofBug: 2))
+        // Gold stays for nectar and score: the sip ring is pale lime, not gold.
+        #expect(TrapArt.sipRing.b > TrapArt.palette.gold.b + 0.2)
+    }
+
+    @Test func popsStayClearOfTheCrease() {
+        for hudLeft in [false, true] {
+            let layout = ScreenLayout(hasFold: true, hudOnLeft: hudLeft)
+            let scene = BogScene(layout: layout)
+            let g = layout.geometry
+            let mid = layout.midX
+            let pts = [CGPoint(x: mid - 30, y: g.center.y + 10), CGPoint(x: mid + 12, y: g.center.y - 40),
+                       CGPoint(x: mid + 40, y: g.center.y + 60), CGPoint(x: mid - 5, y: g.center.y - 250)]
+            var bugs: [BugState] = []
+            for (i, p) in pts.enumerated() { bugs.append(SceneTests.bug(i, .housefly, p, .sipping)) }
+            var s = TrapSnapshot(bugs: bugs)
+            scene.show(s, events: [], dt: 1.0 / 120.0)
+            for i in 0..<s.bugs.count { s.bugs[i].activity = .caught(elapsed: 0) }
+            let report = BiteReport(caught: [.housefly, .housefly, .housefly, .goldenScarab], escaped: 0,
+                                    stingers: [.bee], points: 1_234_567, countMultiplier: 4, chainMultiplier: 3,
+                                    snapsBack: 3, snapsLost: 1, duration: 0.08, time: 1)
+            var events: [TrapEvent] = [.snapped(report)]
+            for (i, p) in pts.enumerated() { events.append(.bugCaught(id: i, species: .housefly, position: p)) }
+            events += [.stung(id: 9, species: .bee, cost: 1), .feast(count: 4, snapsBack: 1),
+                       .luckySnap(species: .goldenScarab), .newBest, .wilted(snapsLeft: 4)]
+            scene.show(s, events: events, dt: 1.0 / 120.0)
+            var seen = 0
+            for _ in 0..<40 {
+                scene.show(s, events: [], dt: 1.0 / 120.0)
+                for r in scene.popRects {
+                    seen += 1
+                    let clear = r.maxX <= layout.creaseMinX - BogScene.creaseClear + CGFloat(0.5)
+                        || r.minX >= layout.creaseMaxX + BogScene.creaseClear - CGFloat(0.5)
+                    #expect(clear)
+                    #expect(r.minX >= CGFloat(0) && r.maxX <= layout.size.width)
+                    #expect(r.minY >= CGFloat(20) && r.maxY <= layout.size.height)
+                }
+            }
+            #expect(seen > 0)
+        }
+    }
+
+    @Test func theEconomyFliesToTheHUD() {
+        let scene = BogScene(layout: SceneTests.duo)
+        scene.hudSnapsAnchor = CGPoint(x: 760, y: 40)
+        var s = SceneTests.crowd()
+        scene.show(s, events: [], dt: 1.0 / 120.0)
+        s.bugs[0].activity = .caught(elapsed: 0)
+        let report = BiteReport(caught: [.housefly, .gnat, .fruitFly, .ant, .ladybird], escaped: 0, stingers: [],
+                                points: 255, countMultiplier: 5, chainMultiplier: 1, snapsBack: 3, snapsLost: 0,
+                                duration: 0.1, time: 1)
+        scene.show(s, events: [.snapped(report), .bugCaught(id: 0, species: .housefly, position: s.bugs[0].position),
+                               .feast(count: 5, snapsBack: 2), .luckySnap(species: .ladybird)], dt: 1.0 / 120.0)
+        #expect(scene.glyphFlights == 3)
+        #expect(scene.popTexts.contains("FEAST ×5 · +255"))
+        for _ in 0..<150 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        #expect(scene.glyphsLanded == 3)
+        #expect(scene.glyphFlights == 0)
+        // A sting cracks a glyph on the row.
+        let sting = BiteReport(caught: [], escaped: 0, stingers: [.wasp], points: 0, countMultiplier: 0,
+                               chainMultiplier: 1, snapsBack: 0, snapsLost: 2, duration: 0.1, time: 3)
+        scene.show(s, events: [.snapped(sting), .stung(id: 5, species: .wasp, cost: 2)], dt: 1.0 / 120.0)
+        for _ in 0..<10 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        #expect(scene.glyphCracking)
+        scene.reset()
+        #expect(!scene.glyphCracking)
+        #expect(scene.glyphFlights == 0)
+    }
+
+    @Test func hungerDroopsAndWilts() {
+        let scene = BogScene(layout: SceneTests.duo)
+        var s = SceneTests.crowd()
+        s.hunger = 0.2
+        scene.show(s, events: [], dt: 1.0 / 120.0)
+        #expect(scene.hungerDroop < CGFloat(0.01))
+        let fed = scene.toothReach
+        s.hunger = 0.97
+        scene.show(s, events: [.hungry(secondsLeft: 3)], dt: 1.0 / 120.0)
+        #expect(scene.hungerDroop > CGFloat(0.8))
+        #expect(scene.toothReach < fed)
+        scene.show(s, events: [.wilted(snapsLeft: 5)], dt: 1.0 / 120.0)
+        for _ in 0..<12 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        #expect(scene.popTexts.contains(BogScene.wiltedLabel))
+        #expect(scene.glyphWilting)
+        // The wilt pop sits off the crease too.
+        let l = SceneTests.duo
+        for r in scene.popRects {
+            let clear = r.maxX <= l.creaseMinX - BogScene.creaseClear + CGFloat(0.5)
+                || r.minX >= l.creaseMaxX + BogScene.creaseClear - CGFloat(0.5)
+            #expect(clear)
+        }
+    }
+
+    @Test func nightKeepsTheTrapCrimson() {
+        let scene = BogScene(layout: SceneTests.duo)
+        var s = SceneTests.crowd()
+        s.dayClock = 1
+        scene.show(s, events: [], dt: 1.0 / 60.0)
+        #expect(scene.lobeOverlayAlpha < CGFloat(0.01))
+        s.dayClock = 3.5
+        scene.show(s, events: [], dt: 1.0 / 60.0)
+        // A ≤ 25 % normal-alpha overlay on the lobes; the multiply tint sits under the trap (the bog only).
+        #expect(scene.lobeOverlayAlpha > CGFloat(0.15) && scene.lobeOverlayAlpha <= CGFloat(0.2501))
+        #expect(scene.tintZ < CGFloat(10))
+        let dusk = BogLight.lobeLight(BogLight.key(at: 2)).1
+        #expect(dusk > CGFloat(0.05) && dusk < CGFloat(0.25))
+    }
+
+    @Test func theTrapIsAFlytrapNotAWatermelon() {
+        let p = TrapArt.palette
+        // The face runs #7A0C26 at the midrib to #D23048 at the rim; the lip and the back are green, not lime.
+        #expect(p.lobeInner == RGBA(hex: 0x7A0C26))
+        #expect(p.lobeOuter == RGBA(hex: 0xD23048))
+        #expect(TrapArt.lip.g > TrapArt.lip.r && TrapArt.lip.g < 0.4)
+        #expect(TrapArt.exteriorWidth >= CGFloat(24) && TrapArt.exteriorWidth <= CGFloat(32))
+        #expect(TrapArt.rimBand < CGFloat(8))
+        // The green back fits on the Duo's canvas.
+        let g = SceneTests.geometry
+        let back = TrapArt.exteriorPath(side: -1, geometry: g).boundingBoxOfPath
+        #expect(back.minX > CGFloat(0) && back.minY > CGFloat(0) && back.maxY < g.sceneSize.height)
+        // SwiftUI gets the same trap as an image.
+        let img = TrapArt.trapImage(width: 300, scale: 1)
+        #expect(img != nil)
+        let w = CGFloat(img?.width ?? 0)
+        #expect(abs(w - CGFloat(300)) < CGFloat(2))
     }
 }

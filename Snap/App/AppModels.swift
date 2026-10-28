@@ -43,6 +43,23 @@ struct HUDValues: Equatable {
     var dayPhase: DayPhase = .morning
     /// Lesson runs hide the score and snaps.
     var lesson = false
+    /// R2 hunger: 0 just fed … 1 a snap wilts (the next snap glyph drains with it). Rounded to 1/40.
+    var hunger = 0.0
+    /// Snaps wilted this run (the scene pops "wilted −1" and droops a glyph at the snaps anchor).
+    var wilts = 0
+    /// Stings this run (the snaps row flashes crimson when it rises).
+    var stings = 0
+    /// The lesson's pointer rings (scene space).
+    var lessonTargets: [LessonTarget] = []
+}
+
+/// A bug the lesson points at (a pulsing ring, and an arrow from the card).
+struct LessonTarget: Equatable, Identifiable {
+    var id: Int
+    var point: CGPoint
+    /// A bee: a white "wait" ring instead of the lime "bite" ring.
+    var bee: Bool
+    var sipping: Bool
 }
 
 /// The HUD's state over the scene, published at ≤ 15 Hz (and at once on snaps and hint changes).

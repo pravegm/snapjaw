@@ -1,9 +1,16 @@
 import CoreGraphics
 import Foundation
 
-/// The First Bite lesson (GAME-DESIGN §8), taught by doing: one sentence per step, a scripted bug cast, and a step that
-/// passes only when the player has done the thing. Pure (the GameController feeds it each frame's state and events and
-/// performs its actions); tested.
+/// The First Bite lesson (GAME-DESIGN §8), taught by doing: one sentence per step, a scripted bug cast that lands ON
+/// nectar drops (so it sips), and a step that passes only when the player has done the thing. Pure (the GameController
+/// feeds it each frame's state and events and performs its actions); tested.
+///
+/// R2 (QA-1 #3, #10; REVIEW-1 #8, #9, #22):
+/// - step 2 passes on any snap with a fly in the trap (a miss is praised too: "Snap! Quicker catches more.");
+/// - Skip is offered from step 1;
+/// - the pose step moves on after 3 s with no hinge reading;
+/// - the bee lingers 6 s, long enough to learn the halo and "Bee! Wait…";
+/// - on touch the dead "It opens again" step is merged into step 2's praise, and the visible steps are numbered 1–4.
 struct LessonScript: Equatable {
     enum Step: Int, CaseIterable, Equatable {
         case pose = 1, firstSnap, openAgain, tooSlow, bee, triple, done
@@ -14,7 +21,7 @@ struct LessonScript: Equatable {
         /// Session seconds.
         var time: Double
         var angle: Double?
-        /// The trap is driven by a hinge (else the pose step is skipped and the texts say "tap").
+        /// The trap is (or will be) driven by a hinge: the pose step applies. Else it is skipped.
         var hasHinge: Bool
         var armed: Bool
         var events: [TrapEvent]
@@ -22,15 +29,20 @@ struct LessonScript: Equatable {
         var liveFlies: Int
         /// Protected bugs on screen still in play.
         var liveBees: Int
+        /// Edible bugs in play that are inside the trap zone (landed, walking or sipping on a lobe).
+        var fliesInTrap: Int
+        /// Taps drive the trap (the texts say "tap"; the re-arm step is merged into step 2).
+        var touch: Bool
 
         init(time: Double, angle: Double? = nil, hasHinge: Bool, armed: Bool = true, events: [TrapEvent] = [],
-             liveFlies: Int = 0, liveBees: Int = 0) {
+             liveFlies: Int = 0, liveBees: Int = 0, fliesInTrap: Int = 0, touch: Bool? = nil) {
             self.time = time; self.angle = angle; self.hasHinge = hasHinge; self.armed = armed; self.events = events
-            self.liveFlies = liveFlies; self.liveBees = liveBees
+            self.liveFlies = liveFlies; self.liveBees = liveBees; self.fliesInTrap = fliesInTrap
+            self.touch = touch ?? !hasHinge
         }
     }
 
-    /// What the controller should do: put a scripted bug in (`slot` = `AppRules.lessonSpot`).
+    /// What the controller should do: put a scripted bug in (`slot` = `AppRules.lessonSpot`, aimed at a real drop).
     enum Action: Equatable {
         case spawn(BugSpecies, slot: Int, linger: Double)
     }
@@ -40,16 +52,27 @@ struct LessonScript: Equatable {
     /// The pose step passes after this long held like a book.
     static let poseHold: Double = 0.6
     static let poseRange: ClosedRange<Double> = 125...176
+    /// With no hinge reading this long into the pose step, the lesson goes on with taps (QA-1 #10).
+    static let poseNoHinge: Double = 3
     /// Praise stays up this long before the next step.
     static let praiseSeconds: Double = 1.3
     /// A bug that flew off comes back after this.
     static let respawnDelay: Double = 1.2
     /// The re-arm step shows at least this long.
     static let openDwell: Double = 0.8
-    /// The bee leaves after this long sipping.
-    static let beeLinger: Double = 3
+    /// The bee leaves after this long on its drop (REVIEW-1 #9: 3 s was gone before it could be learned).
+    static let beeLinger: Double = 6
     /// A bitten bee is let go and flies off; the next bee comes after this, and the old one's leaving never counts.
     static let stungBeeExit: Double = 2.4
+
+    // MARK: Words (pure; tested)
+
+    static let praiseCatch = "CHOMP!"
+    static let praiseMiss = "Snap! Quicker catches more."
+    /// Touch: step 3 ("It opens again by itself") is merged into step 2's praise.
+    static let praiseCatchTouch = "CHOMP! It opens again by itself."
+    static let praiseMissTouch = "Snap! It opens again by itself."
+    static let waitForSip = "Wait till it's sipping…"
 
     private(set) var step: Step
     let replay: Bool
@@ -63,6 +86,8 @@ struct LessonScript: Equatable {
     private var ignoreLeavesUntil: Double = -Double.infinity
     /// The step's attempts (a repeat after a sting, a miss…).
     private(set) var attempts = 0
+    /// Taps drive the trap (latched from the last input).
+    private(set) var touch = false
 
     init(start: Step = .pose, replay: Bool = false) {
         self.step = start
@@ -70,18 +95,20 @@ struct LessonScript: Equatable {
     }
 
     var isDone: Bool { step == .done }
-    /// Skip is offered after step 2 (and always on a replay).
-    var allowsSkip: Bool { replay || step.rawValue > Step.firstSnap.rawValue }
+    /// Skip is offered on every step (QA-1 #3: a first-timer stuck on step 2 had no way out).
+    var allowsSkip: Bool { step != .done }
 
     // MARK: Update
 
     mutating func update(_ i: Input) -> [Action] {
         var actions: [Action] = []
+        touch = i.touch
         if step == .pose && !i.hasHinge { enter(.firstSnap) }
+        if step == .openAgain && i.touch && advanceAt == nil { enter(.tooSlow) }
         if let at = advanceAt {
             guard i.time >= at else { return actions }
             advanceAt = nil
-            enter(next(step))
+            enter(Self.next(step, touch: i.touch))
         }
         if !entered {
             entered = true
@@ -100,28 +127,48 @@ struct LessonScript: Equatable {
                 if i.time - since >= Self.poseHold { pass("That's it!", at: i.time) }
             } else {
                 poseSince = nil
+                if i.angle == nil && i.time - stepStart >= Self.poseNoHinge && !isPassing {
+                    // No hinge reading at all: carry on with taps rather than wait for ever.
+                    enter(.firstSnap)
+                    entered = true
+                    stepStart = i.time
+                    actions += spawns(.firstSnap)
+                }
             }
         case .firstSnap:
-            if Self.caught(i.events) > 0 {
-                pass("CHOMP!", at: i.time)
-            } else if Self.snapped(i.events) != nil && i.liveFlies == 0 {
-                miss("It got away. Here comes another.", at: i.time)
+            guard !isPassing else { break }
+            if let report = Self.snapped(i.events) {
+                // Any snap with a fly in the trap passes (GAME-DESIGN §8: the first snap can be any speed).
+                if Self.caught(i.events) > 0 {
+                    pass(i.touch ? Self.praiseCatchTouch : Self.praiseCatch, at: i.time)
+                } else if report.escaped > 0 || i.fliesInTrap > 0 {
+                    pass(i.touch ? Self.praiseMissTouch : Self.praiseMiss, at: i.time)
+                } else {
+                    warning = Self.waitForSip
+                }
             } else if i.liveFlies == 0 && respawnAt == nil && i.time - stepStart > 0.5 {
                 respawnAt = i.time + Self.respawnDelay
             }
         case .openAgain:
-            if i.armed && i.time - stepStart >= Self.openDwell { pass("Ready to bite!", at: i.time) }
+            if i.armed && i.time - stepStart >= Self.openDwell && !isPassing { pass("Ready to bite!", at: i.time) }
         case .tooSlow:
-            if Self.caught(i.events) > 0 {
-                pass("Quick snap!", at: i.time)
+            guard !isPassing else { break }
+            let caught = Self.caught(i.events)
+            // Touch: "Two flies. Get both in one bite." Hinge: any catch (the lesson is speed).
+            let need = i.touch ? 2 : 1
+            if caught >= need {
+                pass(caught >= 2 ? "Double ×2!" : "Quick snap!", at: i.time)
+            } else if caught > 0 {
+                warning = "Wait for both…"
             } else if Self.spooked(i.events) || Self.escaped(i.events) {
-                warning = i.hasHinge ? "Snap it — quick!" : "Tap as soon as they sip!"
+                warning = i.touch ? "Tap as soon as they sip!" : "Snap it — quick!"
             }
-            if !isPassing && i.liveFlies == 0 && respawnAt == nil && i.time - stepStart > 0.5 {
+            if !isPassing && i.liveFlies < 2 && respawnAt == nil && i.time - stepStart > 0.5 {
                 respawnAt = i.time + Self.respawnDelay
                 attempts += 1
             }
         case .bee:
+            guard !isPassing else { break }
             if Self.stung(i.events) {
                 miss("Bzzt! Never eat a bee.", at: i.time)
                 // The bitten bee flies off cross: its leaving is not a spare.
@@ -129,17 +176,18 @@ struct LessonScript: Equatable {
                 respawnAt = i.time + Self.stungBeeExit
             } else if Self.beeLeft(i.events) && warning == nil && i.time >= ignoreLeavesUntil {
                 pass("Good. Bees are friends.", at: i.time)
-            } else if i.liveBees == 0 && respawnAt == nil && i.time - stepStart > 0.5 && !isPassing {
+            } else if i.liveBees == 0 && respawnAt == nil && i.time - stepStart > 0.5 {
                 respawnAt = i.time + Self.respawnDelay
             }
         case .triple:
+            guard !isPassing else { break }
             if let report = Self.snapped(i.events) {
                 if report.caught.filter({ !$0.isProtected }).count >= 3 {
                     pass("TRIPLE ×3!", at: i.time)
                 } else {
                     miss("Wait for all three…", at: i.time)
                 }
-            } else if i.liveFlies < 3 && respawnAt == nil && i.time - stepStart > 0.5 && !isPassing {
+            } else if i.liveFlies < 3 && respawnAt == nil && i.time - stepStart > 0.5 {
                 respawnAt = i.time + Self.respawnDelay
             }
         case .done:
@@ -175,8 +223,11 @@ struct LessonScript: Equatable {
         attempts = 0
     }
 
-    private func next(_ s: Step) -> Step {
-        Step(rawValue: s.rawValue + 1) ?? .done
+    /// The next step: on touch the re-arm step is skipped (taps re-arm by themselves). Pure; tested.
+    static func next(_ s: Step, touch: Bool) -> Step {
+        let n = Step(rawValue: s.rawValue + 1) ?? .done
+        if touch && n == .openAgain { return .tooSlow }
+        return n
     }
 
     /// The cast a step starts with.
@@ -196,6 +247,7 @@ struct LessonScript: Equatable {
     private mutating func respawns(_ s: Step, _ i: Input) -> [Action] {
         switch s {
         case .firstSnap:
+            warning = nil
             return i.liveFlies == 0 ? [.spawn(.housefly, slot: 0, linger: .infinity)] : []
         case .tooSlow:
             let need = max(2 - i.liveFlies, 0)
@@ -262,12 +314,30 @@ struct LessonScript: Equatable {
 
     // MARK: Display
 
-    func display(touch: Bool) -> LessonDisplay {
-        let total = Step.done.rawValue - 1
-        let shown = min(step.rawValue, total)
-        return LessonDisplay(step: step.rawValue, stepOf: "Step \(shown) of \(total)", line: Self.line(step, touch: touch),
-                             praise: praise, warning: warning, allowsSkip: allowsSkip && step != .done,
-                             isFinal: step == .done)
+    /// The steps a player sees, in order: on touch there is no pose step and no re-arm step (REVIEW-1 #22).
+    static func visibleSteps(touch: Bool, hasPose: Bool) -> [Step] {
+        Step.allCases.filter { s in
+            switch s {
+            case .done: return false
+            case .pose: return hasPose
+            case .openAgain: return !touch
+            case .firstSnap, .tooSlow, .bee, .triple: return true
+            }
+        }
+    }
+
+    /// "Step 2 of 4", counted over the visible steps only. Pure; tested.
+    static func stepLabel(_ s: Step, touch: Bool, hasPose: Bool) -> String {
+        let steps = visibleSteps(touch: touch, hasPose: hasPose)
+        let index = (steps.firstIndex(of: s) ?? 0) + 1
+        return "Step \(min(index, steps.count)) of \(steps.count)"
+    }
+
+    /// `hasPose`: the pose step counts (a hinge drives, or a Duo-shaped layout is waiting for one).
+    func display(touch: Bool, hasPose: Bool) -> LessonDisplay {
+        LessonDisplay(step: step.rawValue, stepOf: Self.stepLabel(step, touch: touch, hasPose: hasPose),
+                      line: Self.line(step, touch: touch), praise: praise, warning: warning,
+                      allowsSkip: allowsSkip, isFinal: step == .done)
     }
 
     /// One sentence per step (GAME-DESIGN §8). Pure; tested (≤ 8 words each).
@@ -276,7 +346,7 @@ struct LessonScript: Equatable {
         case .pose: return "Hold it open like a book."
         case .firstSnap: return touch ? "When it's sipping… tap to snap!" : "When it's sipping… snap shut!"
         case .openAgain: return touch ? "It opens again by itself." : "Open up to reset the trap."
-        case .tooSlow: return touch ? "Two flies. Tap to snap!" : "Quick snaps catch more."
+        case .tooSlow: return touch ? "Two flies. Get both in one bite." : "Quick snaps catch more."
         case .bee: return "Never eat a bee. Wait…"
         case .triple: return touch ? "Wait for a crowd… now tap!" : "Wait for a crowd… now!"
         case .done: return "Snaps run out. Big bites earn them back."

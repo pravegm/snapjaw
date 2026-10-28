@@ -14,6 +14,9 @@ import UIKit
 /// `FeelHapticBook`. The bite frame is choreographed: the CHOMP first, each caught bug's crunch inside it, escapes'
 /// whiffs, the stings' "Bzzt!" after the teeth, then the Feast sparkle and pop, the chain chime after the gulp.
 ///
+/// R2: hunger speaks too (`hungry`: a stomach rumble and its haptic; `wilted`: a soft droop and a weak haptic), and
+/// every haptic cue of one frame plays as one merged pattern.
+///
 /// Battery: with `idle` set (menus), or after `idleDelay` s with no play and no events, the engines idle by themselves
 /// (the haptic player stops, the audio engine naps once quiet). A playing frame, an event, a menu sound or Home's
 /// creaking trap wakes them. If the frames stop without a `silence()` (the app went away), a watchdog fades the
@@ -43,6 +46,10 @@ final class FeedbackDirector: FeedbackSink {
     static let warnAt: Float = 0.75
     static let tiredAt: Float = 0.9
     static let newBestAt: Float = 0.6
+    /// After a wilt (s): the last-snap knocks or the tired yawn wait for the droop.
+    static let afterWiltAt: Float = 0.7
+    /// Caught bugs past this many get the light crunch (QA-1 #4: voices for the reward sounds).
+    static let fullCrunches = 4
 
     var soundOn: Bool = true {
         didSet {
@@ -137,6 +144,14 @@ final class FeedbackDirector: FeedbackSink {
 
     /// CHOMPs played (bites with a catch, and Home's chomps), for diagnostics and tests.
     private(set) var chomps = 0
+    /// Hunger cues played (rumbles, droops), for diagnostics and tests.
+    private(set) var rumbles = 0
+    private(set) var droops = 0
+    /// Haptic patterns built (one per frame with cues, after merging), for diagnostics and tests.
+    private(set) var hapticPatterns = 0
+
+    /// While `react` runs, haptic cues are collected here and played as one pattern (QA-1 #18).
+    private var frameCues: [FeelHapticCue]?
 
     init() {
         // Menus play before any game frame: start from an audible, empty bed (a master of 0 mutes one-shots too).
@@ -265,12 +280,14 @@ final class FeedbackDirector: FeedbackSink {
 
     func uiTap() {
         ensureStarted()
+        heal(now: CACurrentMediaTime())
         audio.play(FeelSoundBook.uiTap())
         playHaptic(FeelHapticBook.uiTap)
     }
 
     func uiConfirm() {
         ensureStarted()
+        heal(now: CACurrentMediaTime())
         audio.play(FeelSoundBook.uiConfirm())
         playHaptic(FeelHapticBook.uiConfirm)
     }
@@ -289,13 +306,17 @@ final class FeedbackDirector: FeedbackSink {
         // The bite frame: `snapped` comes first, then the per-bug events, then the feast/lucky/chain/… (ARCHITECTURE).
         var biting = false
         var stung = false
+        var wilting = false
         for event in events {
             switch event {
             case .snapped: biting = true
             case .stung: stung = true
+            case .wilted: wilting = true
             default: break
             }
         }
+        frameCues = []
+        defer { flushHaptics() }
         var caught = 0
         var escaped = 0
         var stings = 0
@@ -338,7 +359,8 @@ final class FeedbackDirector: FeedbackSink {
                     audio.play(FeelSoundBook.drySnap(dice: &dice))
                 }
             case .bugCaught(_, _, let position):
-                audio.play(FeelSoundBook.crunch(index: caught, pan: pan(x: Double(position.x)), dice: &dice))
+                audio.play(FeelSoundBook.crunch(index: caught, pan: pan(x: Double(position.x)),
+                                                light: caught >= Self.fullCrunches, dice: &dice))
                 caught += 1
             case .bugEscaped(let id, _):
                 if escaped < Self.maxWhiffsPerFrame {
@@ -374,11 +396,21 @@ final class FeedbackDirector: FeedbackSink {
                 audio.play(FeelSoundBook.spared(species, dice: &dice))
                 playHaptic(FeelHapticBook.spared)
             case .lastSnap:
-                let delay: Float = biting ? Self.warnAt : 0
+                let delay: Float = biting ? Self.warnAt : (wilting ? Self.afterWiltAt : 0)
                 audio.play(FeelSoundBook.lastSnap(delay: delay))
                 playHaptic(FeelHapticBook.lastSnap(at: Double(delay)))
+            case .hungry:
+                // The trap's tummy rumbles (3 s before a snap wilts; once per hunger cycle).
+                rumbles += 1
+                audio.play(FeelSoundBook.hungry(dice: &dice))
+                playHaptic(FeelHapticBook.hungry)
+            case .wilted:
+                // A snap wilted: a soft droop and a weak haptic.
+                droops += 1
+                audio.play(FeelSoundBook.wilted(dice: &dice))
+                playHaptic(FeelHapticBook.wilted())
             case .tired:
-                let delay: Float = biting ? Self.tiredAt : 0
+                let delay: Float = biting ? Self.tiredAt : (wilting ? Self.afterWiltAt : 0)
                 audio.play(FeelSoundBook.tired(delay: delay))
                 playHaptic(FeelHapticBook.tired(at: Double(delay)))
             case .newBest:
@@ -436,8 +468,25 @@ final class FeedbackDirector: FeedbackSink {
         if !started { start() }
     }
 
+    /// Inside `react` the cue joins the frame's single pattern; elsewhere it plays at once.
     private func playHaptic(_ cue: FeelHapticCue) {
-        haptics.play(FeelHapticBook.adapt(cue, to: profile))
+        let adapted = FeelHapticBook.adapt(cue, to: profile)
+        if frameCues != nil {
+            frameCues?.append(adapted)
+            return
+        }
+        hapticPatterns += 1
+        haptics.play(adapted)
+    }
+
+    /// The frame's cues as one pattern (QA-1 #18).
+    private func flushHaptics() {
+        let cues = frameCues ?? []
+        frameCues = nil
+        for cue in FeelHapticBook.merge(cues) {
+            hapticPatterns += 1
+            haptics.play(cue)
+        }
     }
 
     private func applyProfile(_ newProfile: FeelHapticProfile) {
@@ -452,7 +501,8 @@ final class FeedbackDirector: FeedbackSink {
     private func heal(now: CFTimeInterval) {
         guard now - lastHeal > 1 else { return }
         lastHeal = now
-        if !audioIdle { audio.heal() }
+        // QA-1 #13: audio heals in menus too (`heal()` itself leaves a napping engine alone).
+        audio.heal()
         if !hapticIdle { haptics.heal() }
     }
 
@@ -505,6 +555,8 @@ final class FeedbackDirector: FeedbackSink {
             sendBuzz(mixer.targets, force: true)
             haptics.quiet(now: now)
             refreshIdle(now: now)
+            // QA-1 #14: nothing else will re-check, so idle the engines once the quiet delay has passed.
+            scheduleIdleCheck()
         } else {
             scheduleWatchdog()
         }

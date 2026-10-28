@@ -2,8 +2,18 @@ import CoreGraphics
 import SpriteKit
 import UIKit
 
-/// One bug on screen: its sprites (body, wings, wing blur, sip ring, protected halo, glow) under a root that carries
-/// position, heading and lift; its shadow and "cross" mark live in the layer (they never rotate).
+/// Sets a sprite's size with its own scale reset to 1 first. **R2 (the streak artefact):** SpriteKit's `size` is the
+/// *scaled* size, so setting it while `yScale` is 0.001 (folded wings) stored a 1000 × taller sprite, and a pooled bug
+/// reused later drew its wings as a 600–1100 pt pale streak. Every pooled sprite is resized through this.
+@MainActor
+func bogResize(_ s: SKSpriteNode, _ size: CGSize) {
+    s.xScale = 1
+    s.yScale = 1
+    s.size = size
+}
+
+/// One bug on screen: its sprites (body, wings, wing blur, sip ring, protected ring, glow, white flash) under a root
+/// that carries position, heading and lift; its shadow and "cross" mark live in the layer (they never rotate).
 @MainActor
 final class BogBugNode {
     let root: SKNode
@@ -13,6 +23,7 @@ final class BogBugNode {
     let halo: SKSpriteNode
     let ring: SKSpriteNode
     let glow: SKSpriteNode
+    let flash: SKSpriteNode
     let shadow: SKSpriteNode
     let mark: SKSpriteNode
 
@@ -20,22 +31,34 @@ final class BogBugNode {
     private(set) var radius: CGFloat = 14
     private(set) var style: TrapBugStyle = TrapArt.bugStyle(.housefly)
     var id: Int = -1
+    /// A fixed per-bug offset for bobs, pulses and blinks (QA-1 #19: never the flap accumulator).
     var phase: CGFloat = 0
+    /// The wing-flap accumulator (advances only while flying).
+    var flapPhase: CGFloat = 0
     var catchPoint: CGPoint?
+    /// The height it was drawn at when it was caught (QA-1 #21: eased to 0 over the gulp, never dropped at once).
+    var catchHeight: CGFloat = 0
+    var lastHeight: CGFloat = 0
     var sipLevel: CGFloat = 0
     var markLevel: CGFloat = 0
+    /// Frames of white flash left (2 when caught).
+    var flashFrames = 0
     var seen: Int = 0
     /// The point drawn this frame (scene space).
     var drawnPoint: CGPoint = .zero
+
+    /// Every sprite under `root` (the streak test checks each one's frame).
+    var parts: [SKSpriteNode] { [halo, ring, body, wings, blur, glow, flash] }
 
     init() {
         let r = SKNode()
         let b = SKSpriteNode(texture: nil, size: CGSize(width: 10, height: 10))
         let w = SKSpriteNode(texture: nil, size: CGSize(width: 10, height: 10))
         let bl = SKSpriteNode(texture: BogTextures.soft, size: CGSize(width: 10, height: 10))
-        let h = SKSpriteNode(texture: BogTextures.halo, size: CGSize(width: 10, height: 10))
+        let h = SKSpriteNode(texture: nil, size: CGSize(width: 10, height: 10))
         let rg = SKSpriteNode(texture: BogTextures.ring, size: CGSize(width: 10, height: 10))
         let gl = SKSpriteNode(texture: BogTextures.glow, size: CGSize(width: 10, height: 10))
+        let fl = SKSpriteNode(texture: nil, size: CGSize(width: 10, height: 10))
         let sh = SKSpriteNode(texture: BogTextures.shadow, size: CGSize(width: 10, height: 10))
         let mk = SKSpriteNode(texture: BogTextures.anger, size: CGSize(width: 16, height: 16))
         root = r
@@ -45,6 +68,7 @@ final class BogBugNode {
         halo = h
         ring = rg
         glow = gl
+        flash = fl
         shadow = sh
         mark = mk
         h.zPosition = -0.8
@@ -53,15 +77,16 @@ final class BogBugNode {
         w.zPosition = 0.3
         bl.zPosition = 0.35
         gl.zPosition = 0.5
-        for n in [h, rg, b, w, bl, gl] { r.addChild(n) }
+        fl.zPosition = 0.6
+        for n in [h, rg, b, w, bl, gl, fl] { r.addChild(n) }
         bl.blendMode = .alpha
         bl.color = .white
         bl.colorBlendFactor = 1
-        rg.color = BogPaint.ui(TrapArt.palette.gold)
+        rg.color = BogPaint.ui(TrapArt.sipRing)
         rg.colorBlendFactor = 1
         gl.blendMode = .add
         gl.colorBlendFactor = 1
-        h.colorBlendFactor = 1
+        fl.isHidden = true
         sh.color = UIColor(red: 0.05, green: 0.0, blue: 0.02, alpha: 1)
         sh.colorBlendFactor = 1
         b.color = .white
@@ -73,51 +98,83 @@ final class BogBugNode {
         species = s
         radius = r
         style = TrapArt.bugStyle(s)
+        root.setScale(1)
+        root.zRotation = 0
         let side = BogTextures.bugSide(radius: r)
         body.texture = BogTextures.bug(s, radius: r)
-        body.size = CGSize(width: side, height: side)
+        bogResize(body, CGSize(width: side, height: side))
         wings.texture = BogTextures.wings(s, radius: r)
-        wings.size = CGSize(width: side, height: side)
-        blur.size = CGSize(width: r * 1.3, height: r * 2.5)
+        bogResize(wings, CGSize(width: side, height: side))
+        flash.texture = BogTextures.bugSilhouette(s, radius: r)
+        bogResize(flash, CGSize(width: side, height: side))
+        flash.isHidden = true
+        bogResize(blur, CGSize(width: r * 1.3, height: r * 2.5))
         blur.position = CGPoint(x: -r * 0.2, y: 0)
-        halo.size = CGSize(width: r * 3.0, height: r * 3.0)
-        halo.color = s == .wasp ? BogPaint.ui(TrapArt.palette.danger) : UIColor(white: 1, alpha: 1)
-        halo.isHidden = !s.isProtected
-        ring.size = CGSize(width: r * 2.8, height: r * 2.8)
-        shadow.size = CGSize(width: r * 2.1, height: r * 1.6)
-        mark.size = CGSize(width: max(r * 0.95, 15), height: max(r * 0.95, 15))
+        // Protected bugs: a crisp ring (bees white, wasps red) and never the sip ring (R2 #7).
+        if s.isProtected {
+            halo.texture = BogTextures.protectedRing(s, radius: r)
+            let ps = BogTextures.protectedRingSide(radius: r)
+            bogResize(halo, CGSize(width: ps, height: ps))
+            halo.isHidden = false
+        } else {
+            halo.texture = nil
+            bogResize(halo, CGSize(width: 1, height: 1))
+            halo.isHidden = true
+        }
+        bogResize(ring, CGSize(width: r * 2.5, height: r * 2.5))
+        ring.isHidden = true
+        bogResize(shadow, CGSize(width: r * 2.1, height: r * 1.6))
+        let m = max(r * 0.7, 15)
+        bogResize(mark, CGSize(width: m, height: m))
         switch s {
         case .firefly:
             glow.isHidden = false
             glow.color = BogPaint.ui(RGBA(hex: 0xD8FF5A))
-            glow.size = CGSize(width: r * 5, height: r * 5)
+            bogResize(glow, CGSize(width: r * 4, height: r * 4))
             glow.position = CGPoint(x: -0.66 * r, y: 0)
         case .goldenScarab:
             glow.isHidden = false
             glow.color = BogPaint.ui(TrapArt.palette.gold)
-            glow.size = CGSize(width: r * 3.6, height: r * 3.6)
+            bogResize(glow, CGSize(width: r * 3, height: r * 3))
             glow.position = .zero
         case .housefly, .gnat, .fruitFly, .bluebottle, .ant, .ladybird, .grasshopper, .moth, .mosquito, .dragonfly,
              .cricket, .bee, .bumblebee, .wasp:
             glow.isHidden = true
+            bogResize(glow, CGSize(width: r, height: r))
             glow.position = .zero
         }
         phase = BogRNG.hash(id, 0xB06) * 2 * .pi
+        flapPhase = phase
         catchPoint = nil
+        catchHeight = 0
+        lastHeight = 0
         sipLevel = 0
         markLevel = 0
+        flashFrames = 0
         root.isHidden = false
         shadow.isHidden = false
         mark.isHidden = true
         root.alpha = 1
-        root.setScale(1)
     }
 
     func hide() {
         root.isHidden = true
         shadow.isHidden = true
         mark.isHidden = true
+        flash.isHidden = true
         id = -1
+    }
+
+    /// The largest child sprite's frame (in the root's space), over the art radius (tests: ≤ 6).
+    var extentRatio: CGFloat {
+        var m: CGFloat = 0
+        for p in parts where !p.isHidden {
+            let f = p.frame
+            m = max(m, max(f.width, f.height))
+        }
+        let sf = shadow.isHidden ? 0 : max(shadow.frame.width, shadow.frame.height)
+        let mf = mark.isHidden ? 0 : max(mark.frame.width, mark.frame.height)
+        return max(m, sf, mf) / max(radius, 1)
     }
 }
 
@@ -144,11 +201,26 @@ final class BogBugLayer {
 
     var liveCount: Int { live.count }
 
-    /// The art radius: Core's `BugInfo.radius` (the art's fallback when it is missing).
+    /// The largest child frame over its bug's radius, across every live bug (the streak test).
+    var maxExtentRatio: CGFloat {
+        var m: CGFloat = 0
+        for n in live.values { m = max(m, n.extentRatio) }
+        return m
+    }
+
+    /// Bugs drawn with the white catch flash this frame (tests).
+    var flashing: Int { live.values.filter { !$0.flash.isHidden }.count }
+
+    /// Whether bug `id` shows the protected ring / the sip ring now (tests).
+    func showsProtectedRing(_ id: Int) -> Bool { live[id].map { !$0.halo.isHidden } ?? false }
+    func showsSipRing(_ id: Int) -> Bool { live[id].map { !$0.ring.isHidden } ?? false }
+
+    /// The art radius: R1's radius × 1.8, or Core's `BugInfo.radius` when that is bigger (Core scales its radius by
+    /// the same 1.8 in R2, so the two agree and nothing is scaled twice).
     func radius(_ s: BugSpecies) -> CGFloat {
         if let r = radii[s] { return r }
         let info = BugCatalog.info(s).radius
-        let r = info > 2 ? info : TrapArt.defaultRadius(s)
+        let r = max(info, TrapArt.defaultRadius(s))
         radii[s] = r
         return r
     }
@@ -156,9 +228,14 @@ final class BogBugLayer {
     /// Where a bug is drawn (nil when it is not on screen).
     func drawnPoint(_ id: Int) -> CGPoint? { live[id]?.drawnPoint }
 
-    /// A bug in the bite: it squishes into the midrib from here.
+    /// A bug in the bite: it flashes white for 2 frames and squishes into the midrib from here.
     func markCaught(_ id: Int, at p: CGPoint) {
-        if let n = live[id], n.catchPoint == nil { n.catchPoint = p }
+        guard let n = live[id] else { return }
+        if n.catchPoint == nil {
+            n.catchPoint = p
+            n.catchHeight = n.lastHeight
+        }
+        n.flashFrames = 2
     }
 
     func clear() {
@@ -189,17 +266,22 @@ final class BogBugLayer {
         return n
     }
 
-    /// One frame. `time`/`dt` are wall clock (flaps, bobs); `light` dims bugs at night.
+    /// One frame. `time`/`dt` are wall clock (flaps, bobs). `squeeze` is the lobes' x scale (caught bugs ride with
+    /// the bite). `hold` is the bite's hit-stop: nothing moves, only the white flash runs.
     func update(_ bugs: [BugState], time: Double, dt: Double, geometry g: TrapGeometry, night: CGFloat,
-                tint: UIColor, tintAmount: CGFloat, reduceMotion: Bool) {
+                tint: UIColor, tintAmount: CGFloat, reduceMotion: Bool, squeeze: CGFloat = 1, hold: Bool = false) {
         frame &+= 1
+        if hold {
+            for n in live.values { applyFlash(n, tint: tint, tintAmount: tintAmount) }
+            return
+        }
         let t = CGFloat(time)
         let fdt = CGFloat(max(dt, 0))
         for b in bugs {
             let n = node(for: b)
             n.seen = frame
-            draw(n, b, t: t, dt: fdt, geometry: g, night: night, tint: tint, tintAmount: tintAmount,
-                 reduceMotion: reduceMotion)
+            draw(n, b, t: t, dt: fdt, geometry: g, night: night, reduceMotion: reduceMotion, squeeze: squeeze)
+            applyFlash(n, tint: tint, tintAmount: tintAmount)
         }
         // Bugs gone from the snapshot leave the screen.
         if live.count > bugs.count || live.values.contains(where: { $0.seen != frame }) {
@@ -214,13 +296,29 @@ final class BogBugLayer {
         }
     }
 
+    /// The catch flash (2 frames of white) or the light's tint (a colour blend, never a replacement).
+    private func applyFlash(_ n: BogBugNode, tint: UIColor, tintAmount: CGFloat) {
+        if n.flashFrames > 0 {
+            n.flashFrames -= 1
+            n.flash.isHidden = false
+            n.flash.alpha = 1
+        } else {
+            n.flash.isHidden = true
+        }
+        let amount = max(tintAmount, 0)
+        n.body.color = tint
+        n.body.colorBlendFactor = min(amount, 0.6)
+        n.wings.color = tint
+        n.wings.colorBlendFactor = amount
+    }
+
     private func draw(_ n: BogBugNode, _ b: BugState, t: CGFloat, dt: CGFloat, geometry g: TrapGeometry,
-                      night: CGFloat, tint: UIColor, tintAmount: CGFloat, reduceMotion: Bool) {
+                      night: CGFloat, reduceMotion: Bool, squeeze: CGFloat) {
         let r = n.radius
         let st = n.style
         let ph = n.phase
         var pos = b.position
-        let h = CGFloat(min(max(b.height, 0), 1))
+        var h = CGFloat(min(max(b.height, 0), 1))
         var rot = CGFloat(b.heading)
         var sx: CGFloat = 1, sy: CGFloat = 1
         var alpha: CGFloat = 1
@@ -255,7 +353,9 @@ final class BogBugLayer {
             rot += 0.05 * sin(t * 16 + ph) * motion
         }
         if sipping {
+            // Dipping its head into the drop (busy: "now's the time").
             rot += 0.06 * sin(t * 5 + ph) * motion
+            sx *= 1 - 0.04 * max(0, sin(t * 6 + ph)) * motion
             sy *= 1 + 0.025 * sin(t * 10 + ph) * motion
         }
         if restless > 0.05 && !flying && caughtT < 0 {
@@ -269,43 +369,44 @@ final class BogBugLayer {
         // The squish into the midrib.
         if caughtT >= 0 {
             let start = n.catchPoint ?? b.position
-            if n.catchPoint == nil { n.catchPoint = start }
+            if n.catchPoint == nil {
+                n.catchPoint = start
+                n.catchHeight = n.lastHeight
+            }
             let target = CGPoint(x: g.center.x, y: start.y + (g.center.y - start.y) * 0.3)
             // A cheeky gulp, never gore (4+): the bug shrinks and spins into the midrib, whole, and is gone.
             let pull = BogMath.smoothstep(0.08, 0.85, caughtT)
             pos = BogMath.lerp(start, target, pull)
+            // It rides with the squeezed lobe during the bite's hold.
+            pos.x = g.center.x + (pos.x - g.center.x) * min(max(squeeze, 0.3), 1.2)
             let shrink = 1 - 0.85 * BogMath.smoothstep(0.05, 0.95, caughtT)
             let boing = 1 + 0.12 * sin(.pi * min(caughtT * 3, 1))
             sx *= shrink * boing
             sy *= shrink * boing
             rot += 2.6 * .pi * pull * pull
             alpha = 1 - BogMath.smoothstep(0.6, 1, caughtT)
+            h = n.catchHeight * (1 - BogMath.smoothstep(0, 0.6, caughtT))
         }
+        n.lastHeight = h
 
         // Lift: drawn higher and larger the higher it flies.
         let lift = 1 + 0.32 * h
-        let drawn = CGPoint(x: pos.x, y: pos.y + 18 * h)
+        let drawn = CGPoint(x: pos.x, y: pos.y + (10 + 0.35 * r) * h)
         n.drawnPoint = drawn
         n.root.position = drawn
         n.root.zRotation = rot
-        n.root.xScale = sx * lift * stretch
-        n.root.yScale = sy * lift
+        n.root.xScale = max(sx * lift * stretch, 0.01)
+        n.root.yScale = max(sy * lift, 0.01)
         n.root.alpha = alpha
         n.root.zPosition = 6 * h
-
-        // Night dimming (a light colour blend; never a full replacement).
-        let amount = max(tintAmount, 0)
-        n.body.color = tint
-        n.body.colorBlendFactor = min(amount, 0.6)
-        n.wings.color = tint
-        n.wings.colorBlendFactor = amount
 
         // Wings.
         var spread: CGFloat = st.restSpread
         var blurA: CGFloat = 0
         if flying && st.flapHz > 0 {
-            n.phase += dt * CGFloat(st.flapHz) * 2 * .pi * (reduceMotion ? 0.5 : 1)
-            spread = 0.35 + 0.65 * (0.5 + 0.5 * sin(n.phase))
+            n.flapPhase += dt * CGFloat(st.flapHz) * 2 * .pi * (reduceMotion ? 0.5 : 1)
+            if n.flapPhase > 1000 { n.flapPhase -= 2 * .pi * 150 }
+            spread = 0.35 + 0.65 * (0.5 + 0.5 * sin(n.flapPhase))
             if st.flapHz >= 20 { blurA = 0.26 }
         } else if caughtT < 0 && restless > 0.3 && st.restSpread > 0 {
             let flick = max(0, sin(t * 23 + ph))
@@ -313,22 +414,25 @@ final class BogBugLayer {
             spread += 0.3 * restless * f2 * f2 * f2 * f2
         }
         if caughtT >= 0 { spread = st.restSpread * (1 - caughtT) }
-        n.wings.yScale = max(spread, 0.001)
-        n.wings.isHidden = spread < 0.02 || st.wing.a < 0.01
+        spread = min(max(spread.isFinite ? spread : 0, 0), 1.2)
+        n.wings.isHidden = spread < 0.03 || st.wing.a < 0.01
+        n.wings.yScale = max(spread, 0.03)
+        n.wings.xScale = 1
         n.blur.alpha = blurA
         n.blur.isHidden = blurA <= 0.001
 
-        // The sip ring (gold, under the bug).
-        n.sipLevel = BogMath.approach(n.sipLevel, sipping ? 1 : 0, rate: 5, dt: dt)
-        n.ring.alpha = 0.85 * n.sipLevel
+        // The sip ring: lime-white under a catchable sipper (never on a bee or a wasp; gold is for nectar and score).
+        let ringOn = sipping && !b.species.isProtected
+        n.sipLevel = BogMath.approach(n.sipLevel, ringOn ? 1 : 0, rate: 5, dt: dt)
+        n.ring.alpha = 0.9 * n.sipLevel
         n.ring.isHidden = n.sipLevel < 0.01
-        if !n.ring.isHidden { n.ring.setScale(1 + 0.06 * sin(t * 4 + ph)) }
+        if !n.ring.isHidden { n.ring.setScale(1 + 0.05 * sin(t * 4 + ph)) }
 
-        // The protected halo (bees white, wasps red).
+        // The protected ring: a steady crisp ring, a slow gentle pulse (QA-1 #19: the phase is fixed per bug).
         if b.species.isProtected && caughtT < 0 {
             n.halo.isHidden = false
-            n.halo.alpha = 0.5 + 0.2 * sin(t * 3 + ph)
-            n.halo.setScale(1 + 0.04 * sin(t * 3 + ph))
+            n.halo.alpha = 0.85 + 0.15 * sin(t * 3 + ph)
+            n.halo.setScale(1 + 0.03 * sin(t * 3 + ph))
         } else {
             n.halo.isHidden = true
         }
@@ -348,7 +452,7 @@ final class BogBugLayer {
         // Shadow: on the ground below, offset down-right as it rises, softer and smaller.
         n.shadow.position = CGPoint(x: pos.x + 2 + 8 * h, y: pos.y - 2 - 5 * h)
         n.shadow.zRotation = CGFloat(b.heading)
-        n.shadow.setScale((1 - 0.35 * h) * (caughtT >= 0 ? 1 - caughtT : 1))
+        n.shadow.setScale(max((1 - 0.35 * h) * (caughtT >= 0 ? 1 - caughtT : 1), 0.01))
         n.shadow.alpha = 0.4 * (1 - 0.6 * h) * alpha
 
         // The cross mark over a released bee.

@@ -1,0 +1,319 @@
+name: App Store Connect tool
+
+# tools/appstore (README there). Ported from the sister book-pose game's asc.yml, which set up and filed that game's
+# 1.0 listing on the same Apple account. Every push to the tool or the metadata: typecheck asc.swift and badges.swift,
+# collect the 12 Game Center badges the app renders (from a green CI run's `screenshots` artifact, badges/, written by
+# the `badges` scenario: until the app has `screen=badges`, achievements.md's ask, this is a warning and the badges
+# are a gap), and validate docs/appstore/asc-metadata.json with the badges and the store screenshots in place.
+# App Store Connect is only contacted on a manual run with `asc` ticked. That run FAILS with a plain message (what to
+# do, where) when the secrets are missing or when App Store Connect has no app record for com.pravegm.snapjaw yet:
+# the API can't create apps, so the founder makes the record once by hand (docs/LAUNCH-RUNBOOK.md). `mode` decides how
+# far it goes: check (read-only; reads the whole 1.0 page back), plan (check + dry run, read-only), push (check + plan
+# + write). The key is written to a temp file for that job and deleted afterwards; it is never echoed. Inherited
+# personal fields are masked. Nothing here submits for review or releases the version.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/appstore/**"
+      - "docs/appstore/asc-metadata.json"
+      - ".github/workflows/asc.yml"
+  workflow_dispatch:
+    inputs:
+      asc:
+        description: "Contact App Store Connect (needs secrets ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY)"
+        type: boolean
+        default: false
+      mode:
+        description: "check = read-only status; plan = check + dry run (read-only); push = check + plan + write"
+        type: choice
+        options: [plan, check, push]
+        default: plan
+      only:
+        description: "Optional step list, e.g. nomination or gamecenter,attach (empty = every step)"
+        type: string
+        default: ""
+      store_run:
+        description: "ID of a green 'App Store screenshots' run (empty = DEFAULT_STORE_RUN below)"
+        type: string
+        default: ""
+      ci_run:
+        description: "ID of a green CI run whose screenshots/badges/ are the Game Center images (empty = latest green on main)"
+        type: string
+        default: ""
+      placements_run:
+        description: "ID of a store.yml run with a store-placements artifact (header + search art; make one with placements_from). Empty = none"
+        type: string
+        default: ""
+      inherit_from:
+        description: "Bundle ID to read the App Review contact (and a null copyright) from at run time (empty = off)"
+        type: string
+        default: "com.pravegm.squish"
+      build:
+        description: "Release build number to attach to the version (step 'build', e.g. 12; empty = leave it)"
+        type: string
+        default: ""
+
+env:
+  # Snapjaw's green store.yml run to upload from. Empty until the first clean store run (all three MANIFESTs
+  # "flagged 0 missing 0"): then put its ID here, and again after the final store run at code freeze. Empty = the
+  # screenshots are a gap (validate and plan say so), never an error.
+  DEFAULT_STORE_RUN: ""
+
+concurrency:
+  group: asc-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tool:
+    runs-on: xcode-27
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 27.1
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.1.app
+          xcrun swift --version
+
+      - name: Typecheck asc.swift and badges.swift
+        run: |
+          xcrun swiftc -typecheck tools/appstore/asc.swift
+          xcrun swiftc -typecheck tools/appstore/badges.swift
+
+      - name: Find the CI run with the app-rendered badges
+        id: ci
+        env:
+          CI_RUN: ${{ inputs.ci_run }}
+        run: |
+          run="$CI_RUN"
+          if [ -z "$run" ]; then
+            run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --event push --status success -L 1 --json databaseId -q '.[0].databaseId')
+          fi
+          [ -n "$run" ] || { echo "::error::no green CI run found"; exit 1; }
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "Badges from CI run $run"
+
+      - name: Download its screenshots artifact (badges/ and logs/)
+        run: gh run download "${{ steps.ci.outputs.run }}" -R "$GITHUB_REPOSITORY" -n screenshots -D "$RUNNER_TEMP/ci-shots"
+
+      - name: Collect the badges (IDs checked against the app, flattened to opaque RGB)
+        run: |
+          if [ -d "$RUNNER_TEMP/ci-shots/badges" ]; then
+            grep -h "SNAP-T badges" "$RUNNER_TEMP/ci-shots/logs/badges.txt" || echo "::warning::no SNAP-T badges line in logs/badges.txt"
+            xcrun swift tools/appstore/badges.swift --from "$RUNNER_TEMP/ci-shots/badges" --out tools/appstore/badges
+          else
+            # The app doesn't render its badges yet (docs/appstore/achievements.md "Images": screen=badges, one
+            # snap.ach.<key>.png each in the screenshots artifact's badges/). Check the IDs alone; the images are a gap.
+            echo "::warning::CI run ${{ steps.ci.outputs.run }} has no screenshots/badges/: the app's screen=badges (achievements.md ask) isn't in yet, so the 12 Game Center images are a gap"
+            xcrun swift tools/appstore/badges.swift
+          fi
+
+      - name: Self-test the validator on the fixture
+        run: |
+          xcrun swift tools/appstore/asc.swift help
+          xcrun swift tools/appstore/asc.swift validate --metadata tools/appstore/fixtures/asc-metadata.sample.json --inherit-from com.pravegm.squish
+
+      - name: Upload badges
+        uses: actions/upload-artifact@v4
+        with:
+          name: badges
+          path: tools/appstore/badges/*.png
+          if-no-files-found: warn
+
+  validate:
+    # Separate job so a problem in the listing data shows up red without hiding the badges.
+    needs: tool
+    runs-on: xcode-27
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 27.1
+        run: sudo xcode-select -s /Applications/Xcode_27.1.app
+      - name: Badges from this run
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: badges
+          path: tools/appstore/badges
+      - name: Store screenshots
+        env:
+          STORE_RUN: ${{ inputs.store_run }}
+        run: |
+          run="${STORE_RUN:-$DEFAULT_STORE_RUN}"
+          if [ -z "$run" ]; then
+            echo "::notice::No store.yml run yet (DEFAULT_STORE_RUN is empty, no store_run given): the screenshots are a gap, not an error. Run store.yml, then put its ID in DEFAULT_STORE_RUN."
+            exit 0
+          fi
+          # store.yml uploads raw-*/store/ itself, so each artifact's PNGs land at <dir>/<artifact>/P01-….png.
+          for name in store-69 store-63 store-duo; do
+            gh run download "$run" -R "$GITHUB_REPOSITORY" -n "$name" -D "$RUNNER_TEMP/store/$name" || echo "::warning::artifact $name not found in run $run"
+            grep -h "^summary:" "$RUNNER_TEMP/store/$name/MANIFEST.txt" 2>/dev/null | sed "s/^/$name /" || true
+          done
+          echo "ASC_SCREENSHOTS_DIR=$RUNNER_TEMP/store" >> "$GITHUB_ENV"
+      - name: Header and search results art (only when placements_run is given)
+        if: inputs.placements_run != ''
+        env:
+          PLACEMENTS_RUN: ${{ inputs.placements_run }}
+        run: |
+          if gh run download "$PLACEMENTS_RUN" -R "$GITHUB_REPOSITORY" -n store-placements -D "$RUNNER_TEMP/placements"; then
+            echo "ASC_PLACEMENTS_DIR=$RUNNER_TEMP/placements" >> "$GITHUB_ENV"
+          else
+            echo "::warning::artifact store-placements not found in run $PLACEMENTS_RUN"
+          fi
+      - name: Validate docs/appstore/asc-metadata.json
+        run: xcrun swift tools/appstore/asc.swift validate --inherit-from com.pravegm.squish
+
+  asc:
+    needs: [tool, validate]
+    if: github.event_name == 'workflow_dispatch' && inputs.asc
+    runs-on: xcode-27
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: read
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+      # Not used by asc.swift; checked only so the founder's one-time setup (the same 4 secrets testflight.yml needs)
+      # is reported in one place.
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      BUNDLE_ID: com.pravegm.snapjaw
+      ASC_INHERIT_FROM: ${{ inputs.inherit_from }}
+      ASC_BUILD: ${{ inputs.build }}
+      MODE: ${{ inputs.mode }}
+      ONLY: ${{ inputs.only }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # A ticked `asc` run with nothing to talk to fails loudly and says what to do, instead of a cryptic API error.
+      - name: Check the secrets exist
+        id: secrets
+        run: |
+          missing=""
+          for s in ASC_KEY_ID ASC_ISSUER_ID ASC_PRIVATE_KEY APPLE_TEAM_ID; do
+            [ -n "${!s}" ] || missing="$missing $s"
+          done
+          if [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ] && [ -n "$ASC_PRIVATE_KEY" ]; then
+            [ -z "$missing" ] || echo "::warning::Secret$missing not set: asc.swift doesn't need it, but testflight.yml does (ci/README.md, TestFlight secrets)"
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ok=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "### App Store Connect: not set up yet"
+            echo "Missing repository secret(s):$missing. Nothing was contacted. Two one-time steps for the founder:"
+            echo "1. **Create the app record** in App Store Connect: Apps → + → New App → iOS, name **Snapjaw**, primary language English (U.K.), bundle ID **$BUNDLE_ID** (registered first under Certificates, Identifiers & Profiles, with Game Center), SKU **snapjaw-2026** (docs/LAUNCH-RUNBOOK.md §1b–§1c). Apple's API can't create apps."
+            echo "2. **Add the 4 secrets** (the same Admin key the other apps use): github.com/$GITHUB_REPOSITORY → Settings → Secrets and variables → Actions → New repository secret: ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY (the whole .p8 text), APPLE_TEAM_ID. Or \`gh secret set <NAME> -R $GITHUB_REPOSITORY\` (ci/README.md, TestFlight secrets)."
+            echo "Then run this workflow again with asc ticked and mode = check."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error title=App Store Connect is not set up::Missing secret(s):$missing. Create the App Store Connect app record for bundle ID $BUNDLE_ID (Apps > + > New App; the API can't create apps), then add the 4 repository secrets ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY and APPLE_TEAM_ID (Settings > Secrets and variables > Actions). See this run's summary, tools/appstore/README.md and docs/LAUNCH-RUNBOOK.md."
+          exit 1
+
+      - uses: actions/checkout@v4
+        if: steps.secrets.outputs.ok == 'true'
+
+      - name: Select Xcode 27.1
+        if: steps.secrets.outputs.ok == 'true'
+        run: sudo xcode-select -s /Applications/Xcode_27.1.app
+
+      - name: Badges from this run
+        continue-on-error: true
+        if: steps.secrets.outputs.ok == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: badges
+          path: tools/appstore/badges
+
+      - name: Store screenshots
+        if: steps.secrets.outputs.ok == 'true'
+        env:
+          STORE_RUN: ${{ inputs.store_run }}
+        run: |
+          run="${STORE_RUN:-$DEFAULT_STORE_RUN}"
+          if [ -z "$run" ]; then
+            echo "::notice::No store.yml run yet (DEFAULT_STORE_RUN is empty, no store_run given): the screenshots are a gap, not an error. Run store.yml, then put its ID in DEFAULT_STORE_RUN."
+            exit 0
+          fi
+          echo "Screenshots from store run $run"
+          for name in store-69 store-63 store-duo; do
+            gh run download "$run" -R "$GITHUB_REPOSITORY" -n "$name" -D "$RUNNER_TEMP/store/$name" || echo "::warning::artifact $name not found in run $run"
+            grep -h "^summary:" "$RUNNER_TEMP/store/$name/MANIFEST.txt" 2>/dev/null | sed "s/^/$name /" || true
+          done
+          echo "ASC_SCREENSHOTS_DIR=$RUNNER_TEMP/store" >> "$GITHUB_ENV"
+
+      - name: Header and search results art (only when placements_run is given)
+        if: steps.secrets.outputs.ok == 'true' && inputs.placements_run != ''
+        env:
+          PLACEMENTS_RUN: ${{ inputs.placements_run }}
+        run: |
+          echo "Header and search art from run $PLACEMENTS_RUN"
+          gh run download "$PLACEMENTS_RUN" -R "$GITHUB_REPOSITORY" -n store-placements -D "$RUNNER_TEMP/placements"
+          echo "ASC_PLACEMENTS_DIR=$RUNNER_TEMP/placements" >> "$GITHUB_ENV"
+
+      - name: Write the API key to a temp file
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          umask 077
+          # Accept the .p8 pasted as-is, or with literal \n sequences.
+          printf '%s\n' "$ASC_PRIVATE_KEY" | sed 's/\\n/\n/g' > "$RUNNER_TEMP/AuthKey.p8"
+          echo "ASC_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/out"
+
+      # check reads the whole 1.0 page back (the AUDIT block). If the key works but App Store Connect has no app with
+      # Snapjaw's bundle ID, it prints "app: NOT FOUND": turn that into the founder's instruction, not a bare exit 1.
+      - name: check (read-only)
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          set +e
+          ASC_OUTPUT_FILE="$RUNNER_TEMP/out/check.txt" xcrun swift tools/appstore/asc.swift check
+          status=$?
+          set -e
+          if grep -q "^app: NOT FOUND" "$RUNNER_TEMP/out/check.txt" 2>/dev/null; then
+            {
+              echo "### App Store Connect: no app record for $BUNDLE_ID"
+              echo "The key works, but App Store Connect has no app with bundle ID **$BUNDLE_ID**. Apple's API can't create apps, so the founder makes it once: Apps → + → New App → iOS, name **Snapjaw**, primary language English (U.K.), bundle ID **$BUNDLE_ID**, SKU **snapjaw-2026** (docs/LAUNCH-RUNBOOK.md). If the record exists, give the key access to it (Users and Access → the key: Admin role)."
+              echo "The 4 repository secrets (ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY, APPLE_TEAM_ID) must be set too (ci/README.md)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=No App Store Connect app record::App Store Connect has no app with bundle ID $BUNDLE_ID. The founder creates it once (Apps > + > New App, bundle ID $BUNDLE_ID; the API can't), with the 4 repository secrets ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY and APPLE_TEAM_ID set. Then run this workflow again."
+            exit 1
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo "::error title=App Store Connect check failed::asc.swift check exited $status (see the log above). An HTTP 401 means a wrong ASC_KEY_ID, ASC_ISSUER_ID or ASC_PRIVATE_KEY; a 403 means the key lacks the Admin role."
+          fi
+          exit "$status"
+
+      - name: plan (dry run, read-only)
+        if: steps.secrets.outputs.ok == 'true' && (inputs.mode == 'plan' || inputs.mode == 'push')
+        run: |
+          if [ -n "$ONLY" ]; then set -- --only "$ONLY"; fi
+          ASC_OUTPUT_FILE="$RUNNER_TEMP/out/plan.txt" xcrun swift tools/appstore/asc.swift plan "$@"
+
+      - name: push (writes to App Store Connect)
+        if: steps.secrets.outputs.ok == 'true' && inputs.mode == 'push'
+        run: |
+          if [ -n "$ONLY" ]; then set -- --only "$ONLY"; fi
+          ASC_OUTPUT_FILE="$RUNNER_TEMP/out/push.txt" xcrun swift tools/appstore/asc.swift push "$@"
+
+      - name: Delete the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"
+
+      # ASC_OUTPUT_FILE receives the tool's masked lines only (never the ::add-mask:: commands): no personal data.
+      - name: Upload the check/plan/push output
+        if: always() && steps.secrets.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: asc-output
+          path: ${{ runner.temp }}/out/*.txt
+          if-no-files-found: ignore

@@ -14,9 +14,10 @@ enum BogArt {
     static let toothTexSize = CGSize(width: 26, height: 53)
     static let toothRootY: CGFloat = 6
 
-    /// The radius fraction the slam jaw's dark band reaches out to (it sweeps in from beyond the edge).
+    /// The radius fraction the slam jaw reaches out to (it sweeps in from beyond the edge) and the far lobe's lip
+    /// (R2: 0.6, so the jaw covers the outer 40 % of each lobe and meets our squeezed lobe's teeth there).
     static let jawOuter: CGFloat = 1.16
-    static let jawInner: CGFloat = 0.93
+    static let jawInner: CGFloat = 0.6
 
     /// A lobe layer's frame in scene space (the half ellipse at `reach` × the zone, padded).
     static func lobeFrame(side: Int, geometry g: TrapGeometry, reach: CGFloat = 1, pad: CGFloat = 6) -> CGRect {
@@ -161,7 +162,9 @@ enum BogArt {
     private static func drawWater(_ ctx: CGContext, size: CGSize, rng: inout BogRNG) {
         let w = size.width
         let water = CGMutablePath()
-        water.move(to: CGPoint(x: -4, y: -4))
+        // (From well below and beyond the edges: the backdrop has a bleed, so the bite's shake never shows a seam.)
+        water.move(to: CGPoint(x: -30, y: -30))
+        water.addLine(to: CGPoint(x: -30, y: 66))
         water.addLine(to: CGPoint(x: -4, y: 66))
         var x: CGFloat = -4
         var y: CGFloat = 66
@@ -172,7 +175,8 @@ enum BogArt {
             x = nx
             y = ny
         }
-        water.addLine(to: CGPoint(x: w + 4, y: -4))
+        water.addLine(to: CGPoint(x: w + 30, y: y))
+        water.addLine(to: CGPoint(x: w + 30, y: -30))
         water.closeSubpath()
         BogPainter.stroke(ctx, water, RGBA(hex: 0x7CC49A), width: 7, 0.35)
         BogPainter.gradient(ctx, water, [RGBA(hex: 0x0A2628), RGBA(hex: 0x123F42), RGBA(hex: 0x1C5652)],
@@ -322,43 +326,60 @@ enum BogArt {
 
     // MARK: The lobes (scene space; the caller translates to the texture frame)
 
-    /// One lobe's static face, open: the dark outline, the lime margin, the crimson face with veins, glands,
-    /// pores, the midrib's shade and a broad sheen.
+    /// One lobe's static face, open (R2: a flytrap, not a watermelon). From the outside in:
+    /// - the green back: a 26 pt leaf band beyond the zone's edge, shaded darker at its outer edge, with a dark outline;
+    /// - a thin dark-green lip (no lime rind);
+    /// - the deep crimson face (#7A0C26 at the midrib → #D23048 at the rim), cupped (darker at the very edge and at
+    ///   the curled ends), with faint veins, glands, pores, the midrib's shade and a broad wet sheen.
     static func drawLobe(_ ctx: CGContext, side: Int, geometry g: TrapGeometry) {
         let pal = TrapArt.palette
         let s: CGFloat = side < 0 ? -1 : 1
         let outer = TrapArt.lobePath(side: side, geometry: g, closure01: 0)
         let face = TrapArt.lobeFacePath(side: side, geometry: g)
+        let back = TrapArt.exteriorPath(side: side, geometry: g)
         let outerX = g.center.x + s * g.a
         let top = CGPoint(x: g.center.x, y: g.center.y + g.b), bottom = CGPoint(x: g.center.x, y: g.center.y - g.b)
+        let e = TrapArt.exteriorWidth
 
-        // The outline and the lime margin (the outer skin showing at the edge).
-        BogPainter.stroke(ctx, outer, TrapArt.lobeOutline, width: 6, 0.92)
-        BogPainter.gradient(ctx, outer, [BogPaint.lighter(pal.rim, 0.3), pal.rim, BogPaint.darker(pal.rim, 0.32)],
-                            [0, 0.5, 1], from: top, to: bottom)
-        // A wet highlight along the top of the margin.
+        // The green back (the lobe's outer skin, seen beyond the lip because the lobe is cupped).
+        BogPainter.stroke(ctx, back, TrapArt.lobeOutline, width: 4, 0.9)
         ctx.saveGState()
-        ctx.addPath(outer)
-        ctx.addPath(face)
-        ctx.clip(using: .evenOdd)
-        BogPainter.ellipticalRadial(ctx, [RGBA(1, 1, 0.9, 0), RGBA(1, 1, 0.9, 0), RGBA(1, 1, 0.9, 0.5),
-                                          RGBA(1, 1, 0.9, 0)], [0, 0.955, 0.975, 1],
-                                    center: CGPoint(x: g.center.x - s * 6, y: g.center.y - 8), rx: g.a, ry: g.b)
+        ctx.addPath(back)
+        ctx.clip()
+        BogPainter.ellipticalRadial(ctx, [BogPaint.lighter(TrapArt.leaf, 0.12), TrapArt.leaf, TrapArt.leafDark],
+                                    [0, 0.93, 1], center: g.center, rx: g.a + e, ry: g.b + e, extend: true)
+        // Sunlit from the top-left: a soft light on the upper back, shade on the lower.
+        BogPainter.linear(ctx, [RGBA(0, 0.08, 0.02, 0.35), RGBA(0, 0.08, 0.02, 0), RGBA(1, 1, 0.85, 0),
+                                RGBA(1, 1, 0.85, 0.16)], [0, 0.4, 0.6, 1], from: bottom, to: top)
+        // A few short ribs on the back.
+        let ribs = CGMutablePath()
+        for i in 0..<15 {
+            let t = CGFloat.pi / 2 - (CGFloat(i) + 0.5) / 15 * .pi
+            ribs.move(to: CGPoint(x: g.center.x + s * (g.a + 3) * cos(t), y: g.center.y + (g.b + 3) * sin(t)))
+            ribs.addLine(to: CGPoint(x: g.center.x + s * (g.a + e - 5) * cos(t),
+                                     y: g.center.y + (g.b + e - 5) * sin(t)))
+        }
+        BogPainter.stroke(ctx, ribs, TrapArt.leafDark, width: 1.6, 0.35)
         ctx.restoreGState()
 
+        // The thin dark lip, with a faint wet line along it.
+        BogPainter.fill(ctx, outer, TrapArt.lip)
+        BogPainter.stroke(ctx, TrapArt.halfEllipse(side: side, geometry: g, radius: 0.994, squash: 1),
+                          BogPaint.lighter(TrapArt.leaf, 0.25), width: 1.1, 0.45)
+
         // The crimson face: deep by the midrib, bright towards the rim.
-        BogPainter.gradient(ctx, face, [pal.lobeInner, pal.lobeInner.mixed(with: pal.lobeOuter, 0.55), pal.lobeOuter,
-                                        BogPaint.lighter(pal.lobeOuter, 0.12)], [0, 0.3, 0.78, 1],
+        BogPainter.gradient(ctx, face, [pal.lobeInner, pal.lobeInner.mixed(with: pal.lobeOuter, 0.5), pal.lobeOuter,
+                                        BogPaint.lighter(pal.lobeOuter, 0.06)], [0, 0.32, 0.82, 1],
                             from: CGPoint(x: g.center.x, y: g.center.y), to: CGPoint(x: outerX, y: g.center.y))
         ctx.saveGState()
         ctx.addPath(face)
         ctx.clip()
         // Darker towards the top and bottom ends (the lobe curls there).
-        BogPainter.linear(ctx, [RGBA(0.2, 0, 0.05, 0.35), RGBA(0.2, 0, 0.05, 0), RGBA(0.2, 0, 0.05, 0),
-                                RGBA(0.2, 0, 0.05, 0.4)], [0, 0.22, 0.78, 1], from: bottom, to: top)
-        // The fleshy coral glow at the margin.
-        BogPainter.ellipticalRadial(ctx, [RGBA(1, 0.5, 0.45, 0), RGBA(1, 0.5, 0.45, 0), RGBA(1, 0.55, 0.5, 0.32),
-                                          RGBA(1, 0.6, 0.5, 0.55)], [0, 0.8, 0.93, 1],
+        BogPainter.linear(ctx, [RGBA(0.16, 0, 0.04, 0.45), RGBA(0.16, 0, 0.04, 0), RGBA(0.16, 0, 0.04, 0),
+                                RGBA(0.16, 0, 0.04, 0.5)], [0, 0.24, 0.76, 1], from: bottom, to: top)
+        // A soft warm glow inside the rim, then the cupped edge falling into shadow under the lip (depth).
+        BogPainter.ellipticalRadial(ctx, [RGBA(1, 0.45, 0.45, 0), RGBA(1, 0.45, 0.45, 0), RGBA(1, 0.5, 0.5, 0.2),
+                                          RGBA(0.25, 0, 0.06, 0.55)], [0, 0.78, 0.92, 1],
                                     center: g.center, rx: g.a - TrapArt.rimBand, ry: g.b - TrapArt.rimBand,
                                     extend: true)
         // The rim zone (normalised radius ≥ rimStart): a touch lighter, so the "half in" band reads.
@@ -376,14 +397,14 @@ enum BogArt {
             let q = CGPoint(x: rng.range(frame.minX, frame.maxX), y: rng.range(frame.minY, frame.maxY))
             let pr = rng.range(0.7, 2.0)
             BogPainter.fill(ctx, BogPainter.circle(q, pr), i % 2 == 0 ? RGBA(0.3, 0, 0.08) : RGBA(1, 0.75, 0.82),
-                            i % 2 == 0 ? 0.12 : 0.1)
+                            i % 2 == 0 ? 0.12 : 0.05)
         }
-        // Veins: a dark groove with a light ridge beside it.
+        // Veins: faint grooves (R2: soft, so the face never reads as a sliced fruit).
         let veins = TrapArt.veinsPath(side: side, geometry: g)
-        BogPainter.stroke(ctx, veins, BogPaint.darker(pal.lobeInner, 0.25), width: 3.6, 0.42)
+        BogPainter.stroke(ctx, veins, BogPaint.darker(pal.lobeInner, 0.3), width: 2.6, 0.2)
         ctx.saveGState()
         ctx.translateBy(x: 1, y: 1.2)
-        BogPainter.stroke(ctx, veins, BogPaint.lighter(pal.lobeOuter, 0.45), width: 1.2, 0.3)
+        BogPainter.stroke(ctx, veins, BogPaint.lighter(pal.lobeOuter, 0.35), width: 0.9, 0.12)
         ctx.restoreGState()
         // Glands along the rim's start.
         for q in TrapArt.rimGlands(side: side, geometry: g) {
@@ -400,13 +421,19 @@ enum BogArt {
                                     rx: 170, ry: 110)
         ctx.restoreGState()
 
-        // The margin's inner crease.
-        BogPainter.stroke(ctx, face, BogPaint.darker(pal.rim, 0.55), width: 2.2, 0.55)
+        // The lip's inner crease.
+        BogPainter.stroke(ctx, face, RGBA(0.12, 0, 0.03), width: 1.6, 0.5)
     }
 
-    /// The closure shade: dark from normalised radius `start` out to the edge (and over the margin).
+    /// A lobe's silhouette, green back included (white: the night tint and the hunger wilt are tinted copies).
+    static func drawLobeSilhouette(_ ctx: CGContext, side: Int, geometry g: TrapGeometry) {
+        BogPainter.fill(ctx, TrapArt.exteriorPath(side: side, geometry: g), RGBA(1, 1, 1))
+    }
+
+    /// The closure shade: dark from normalised radius `start` out to the edge (and over the green back).
     static func drawLobeShade(_ ctx: CGContext, side: Int, geometry g: TrapGeometry, start: CGFloat) {
-        let outer = TrapArt.halfEllipse(side: side, geometry: g, radius: 1.012, squash: 1)
+        let outer = TrapArt.halfEllipse(side: side, geometry: g, rx: g.a + TrapArt.exteriorWidth + 2,
+                                        ry: g.b + TrapArt.exteriorWidth + 2)
         ctx.saveGState()
         ctx.addPath(outer)
         ctx.clip()
@@ -462,25 +489,43 @@ enum BogArt {
         ctx.restoreGState()
     }
 
-    /// The slam: the far lobe's dark jaw closing over the outer edge, its teeth (dark silhouettes) interlocking
-    /// between ours, and the far lobe's lime edge pressing in.
+    /// The slam (R2: a bite that reads): the far lobe's green back sweeps in over the outer 40 % of this lobe, its lip
+    /// at `jawInner`, its cilia (shaded, seen from behind) interlocking between ours, a deep shadow cast inwards.
     static func drawJaw(_ ctx: CGContext, side: Int, geometry g: TrapGeometry) {
         let pal = TrapArt.palette
         ctx.saveGState()
         // Only this side, inside the jaw's reach (never a rectangle over the bog).
-        ctx.addPath(TrapArt.halfEllipse(side: side, geometry: g, radius: jawOuter, squash: 1))
+        let outerPath = TrapArt.halfEllipse(side: side, geometry: g, radius: jawOuter, squash: 1)
+        ctx.addPath(outerPath)
         ctx.clip()
-        // The inner shadow the closing jaw casts; the gradient runs over radius × jawOuter, so the stops are divided.
+        // The shadow the closing jaw casts inwards; the gradient runs over radius × jawOuter, so the stops are divided.
         let dark = RGBA(hex: 0x1A020A)
         let o = jawOuter
-        BogPainter.ellipticalRadial(ctx, [BogPaint.alpha(dark, 0), BogPaint.alpha(dark, 0), BogPaint.alpha(dark, 0.55),
-                                          BogPaint.alpha(dark, 0.97), BogPaint.alpha(dark, 1), BogPaint.alpha(dark, 0)],
-                                    [0, 0.72 / o, (jawInner - 0.005) / o, (jawInner + 0.01) / o, 1.08 / o, 1],
+        BogPainter.ellipticalRadial(ctx, [BogPaint.alpha(dark, 0), BogPaint.alpha(dark, 0), BogPaint.alpha(dark, 0.6),
+                                          BogPaint.alpha(dark, 0.6)],
+                                    [0, 0.4 / o, jawInner / o, 1],
                                     center: g.center, rx: g.a * o, ry: g.b * o)
-        // The far lobe's margin pressing in.
+        // The far lobe's green back, from its lip out past our edge.
+        let innerPath = TrapArt.halfEllipse(side: side, geometry: g, radius: jawInner, squash: 1)
+        ctx.saveGState()
+        ctx.addPath(outerPath)
+        ctx.addPath(innerPath)
+        ctx.clip(using: .evenOdd)
+        BogPainter.ellipticalRadial(ctx, [TrapArt.leafDark, TrapArt.leafDark, BogPaint.lighter(TrapArt.leaf, 0.08),
+                                          TrapArt.leaf, TrapArt.leafDark],
+                                    [0, jawInner / o, (jawInner + 0.1) / o, 0.86, 1],
+                                    center: g.center, rx: g.a * o, ry: g.b * o, extend: true)
+        BogPainter.linear(ctx, [RGBA(0, 0.06, 0.02, 0.3), RGBA(0, 0.06, 0.02, 0), RGBA(1, 1, 0.85, 0.14)], [0, 0.5, 1],
+                          from: CGPoint(x: g.center.x, y: g.center.y - g.b * o),
+                          to: CGPoint(x: g.center.x, y: g.center.y + g.b * o))
+        ctx.restoreGState()
+        BogPainter.stroke(ctx, TrapArt.halfEllipse(side: side, geometry: g, radius: jawOuter - 0.006, squash: 1),
+                          TrapArt.lobeOutline, width: 4, 0.85)
+        // The far lobe's lip pressing in.
         let edge = TrapArt.halfEllipse(side: side, geometry: g, radius: jawInner + 0.004, squash: 1)
-        BogPainter.stroke(ctx, edge, BogPaint.darker(pal.rim, 0.5), width: 3.2, 0.75)
-        // The far lobe's teeth: dark silhouettes between ours, pointing in.
+        BogPainter.stroke(ctx, edge, TrapArt.lip, width: 5, 0.95)
+        BogPainter.stroke(ctx, edge, BogPaint.lighter(TrapArt.leaf, 0.3), width: 1.2, 0.5)
+        // The far lobe's cilia between ours, pointing in.
         let ours = TrapArt.teeth(side: side, geometry: g)
         for i in 1..<max(ours.count, 1) {
             let a = ours[i], b = ours[i - 1]
@@ -495,8 +540,8 @@ enum BogArt {
             let t = CGAffineTransform(translationX: root.x, y: root.y).rotated(by: angle + .pi / 2)
             let p = CGMutablePath()
             p.addPath(shape, transform: t)
-            BogPainter.fill(ctx, p, BogPaint.darker(pal.lobeInner, 0.62))
-            BogPainter.stroke(ctx, p, BogPaint.darker(pal.lobeOuter, 0.35), width: 1.2, 0.8)
+            BogPainter.stroke(ctx, p, TrapArt.lobeOutline, width: 2, 0.85)
+            BogPainter.fill(ctx, p, BogPaint.darker(pal.teeth, 0.3))
         }
         ctx.restoreGState()
     }
@@ -550,7 +595,7 @@ enum BogArt {
         ctx.saveGState()
         ctx.translateBy(x: size.width / 2, y: toothRootY)
         BogPainter.stroke(ctx, shape, TrapArt.lobeOutline, width: 2.6, 0.9)
-        BogPainter.gradient(ctx, shape, [pal.rim, pal.teeth, BogPaint.lighter(pal.teeth, 0.5)], [0.05, 0.4, 1],
+        BogPainter.gradient(ctx, shape, [TrapArt.leaf, pal.teeth, BogPaint.lighter(pal.teeth, 0.5)], [0.05, 0.45, 1],
                             from: CGPoint(x: 0, y: 0), to: CGPoint(x: curl * 5, y: toothTexLength))
         let shine = CGMutablePath()
         shine.move(to: CGPoint(x: -toothTexWidth * 0.18, y: 4))
@@ -560,39 +605,44 @@ enum BogArt {
         ctx.restoreGState()
     }
 
-    /// A glistening gold nectar dome of radius `r` centred in `size`.
+    /// A glistening drop of translucent amber nectar, radius `r`, centred in `size` (R2: the face shows through it,
+    /// so it reads as a liquid bead, not a gold coin).
     static func drawNectar(_ ctx: CGContext, size: CGSize, radius r: CGFloat) {
         let pal = TrapArt.palette
         let c = CGPoint(x: size.width / 2, y: size.height / 2 + r * 0.08)
-        BogPainter.ellipticalRadial(ctx, [RGBA(0.2, 0, 0.05, 0.45), RGBA(0.2, 0, 0.05, 0)], [0, 1],
+        BogPainter.ellipticalRadial(ctx, [RGBA(0.2, 0, 0.05, 0.4), RGBA(0.2, 0, 0.05, 0)], [0, 1],
                                     center: CGPoint(x: c.x + 1.5, y: c.y - r * 0.4), rx: r * 1.25, ry: r * 0.75)
-        BogPainter.stroke(ctx, BogPainter.circle(c, r * 1.2), pal.nectar, width: r * 0.32, 0.16)
         let dome = BogPainter.circle(c, r)
-        BogPainter.radialFill(ctx, dome, [RGBA(hex: 0xFFF6C8), pal.nectar, BogPaint.darker(pal.nectar, 0.38)],
-                              [0, 0.45, 1], center: CGPoint(x: c.x - r * 0.3, y: c.y + r * 0.35), radius: r * 1.5)
-        BogPainter.stroke(ctx, dome, BogPaint.darker(pal.nectar, 0.58), width: max(r * 0.12, 1), 0.75)
+        BogPainter.radialFill(ctx, dome, [RGBA(1, 0.95, 0.75, 0.8), BogPaint.alpha(pal.nectar, 0.55),
+                                          BogPaint.alpha(BogPaint.darker(pal.nectar, 0.3), 0.8)],
+                              [0, 0.5, 1], center: CGPoint(x: c.x - r * 0.3, y: c.y + r * 0.35), radius: r * 1.5)
+        // Light caught inside the bead (lower right), as in a real drop.
+        BogPainter.ellipticalRadial(ctx, [RGBA(1, 0.85, 0.4, 0.55), RGBA(1, 0.85, 0.4, 0)], [0, 1],
+                                    center: CGPoint(x: c.x + r * 0.3, y: c.y - r * 0.35), rx: r * 0.55, ry: r * 0.4)
+        BogPainter.stroke(ctx, dome, BogPaint.darker(pal.nectar, 0.55), width: max(r * 0.1, 0.8), 0.55)
         BogPainter.fill(ctx, BogPainter.ellipse(CGPoint(x: c.x + r * 0.28, y: c.y - r * 0.38), r * 0.36, r * 0.17,
-                                                rotation: 0.35), RGBA(1, 0.98, 0.8), 0.45)
+                                                rotation: 0.35), RGBA(1, 0.98, 0.8), 0.35)
         BogPainter.fill(ctx, BogPainter.ellipse(CGPoint(x: c.x - r * 0.32, y: c.y + r * 0.36), r * 0.34, r * 0.2,
                                                 rotation: 0.6), RGBA(1, 1, 1), 0.95)
         BogPainter.fill(ctx, BogPainter.circle(CGPoint(x: c.x + r * 0.08, y: c.y + r * 0.58), r * 0.08), RGBA(1, 1, 1),
                         0.85)
     }
 
-    /// A trigger hair seen from above: a pale bristle from a pink bulb (size ≈ 14 × 24).
+    /// A trigger hair seen from above: a fine crimson bristle from a small bulb, pale only at the very tip (R2: thin and
+    /// in the face's colour, so the hairs never read as seeds). Size ≈ 14 × 24.
     static func drawHair(_ ctx: CGContext, size: CGSize) {
         let pal = TrapArt.palette
         let base = CGPoint(x: size.width / 2, y: 5)
         let tip = CGPoint(x: size.width / 2 + 1.5, y: size.height - 2)
         let p = CGMutablePath()
-        p.move(to: CGPoint(x: base.x - 2, y: base.y))
-        p.addQuadCurve(to: tip, control: CGPoint(x: base.x - 0.6, y: size.height * 0.6))
-        p.addQuadCurve(to: CGPoint(x: base.x + 2, y: base.y), control: CGPoint(x: base.x + 1.6, y: size.height * 0.6))
+        p.move(to: CGPoint(x: base.x - 1.3, y: base.y))
+        p.addQuadCurve(to: tip, control: CGPoint(x: base.x - 0.4, y: size.height * 0.6))
+        p.addQuadCurve(to: CGPoint(x: base.x + 1.3, y: base.y), control: CGPoint(x: base.x + 1.1, y: size.height * 0.6))
         p.closeSubpath()
-        BogPainter.stroke(ctx, p, BogPaint.darker(pal.lobeInner, 0.4), width: 1.6, 0.7)
-        BogPainter.gradient(ctx, p, [BogPaint.lighter(pal.lobeOuter, 0.3), RGBA(1, 0.95, 0.9)], [0, 1], from: base,
-                            to: tip)
-        let bulb = BogPainter.circle(base, 3.4)
+        BogPainter.stroke(ctx, p, BogPaint.darker(pal.lobeInner, 0.45), width: 1.2, 0.6)
+        BogPainter.gradient(ctx, p, [BogPaint.lighter(pal.lobeOuter, 0.1), BogPaint.lighter(pal.lobeOuter, 0.3),
+                                     RGBA(1, 0.9, 0.9)], [0, 0.75, 1], from: base, to: tip)
+        let bulb = BogPainter.circle(base, 2.6)
         BogPainter.stroke(ctx, bulb, BogPaint.darker(pal.lobeInner, 0.4), width: 1.2, 0.7)
         BogPainter.radialFill(ctx, bulb, [RGBA(1, 0.85, 0.9), BogPaint.lighter(pal.lobeOuter, 0.2)], [0, 1],
                               center: CGPoint(x: base.x - 1, y: base.y + 1), radius: 4)
@@ -695,5 +745,88 @@ enum BogArt {
         BogPainter.radial(ctx, [RGBA(1, 1, 1, 0), RGBA(1, 1, 1, 0), RGBA(1, 1, 1, 0.35), RGBA(1, 1, 1, 1),
                                 RGBA(1, 1, 1, 0.3), RGBA(1, 1, 1, 0)], [0, 0.66, 0.8, 0.86, 0.91, 1], center: c,
                           radius: size.width / 2)
+    }
+
+    /// R2: a protected bug's ring: a crisp 3 pt circle of radius `r` in `color` (centred in `size`), a thin dark
+    /// keyline inside and a faint glow outside, so it reads on the crimson face and on the bog alike.
+    static func drawProtectedRing(_ ctx: CGContext, size: CGSize, radius r: CGFloat, color: RGBA) {
+        let c = CGPoint(x: size.width / 2, y: size.height / 2)
+        BogPainter.stroke(ctx, BogPainter.circle(c, r), color, width: 8, 0.16)
+        BogPainter.stroke(ctx, BogPainter.circle(c, r - 2.1), RGBA(0.1, 0.03, 0.05), width: 1.2, 0.4)
+        BogPainter.stroke(ctx, BogPainter.circle(c, r), color, width: 3)
+    }
+
+    /// R2: the economy's snap glyph, a closed little flytrap (crimson lips, a green back, tiny cilia) filling `size`
+    /// (≈ 30 × 22). The scene flies these to the HUD's snaps row on a Feast and cracks one on a sting.
+    static func drawSnapGlyph(_ ctx: CGContext, size: CGSize) {
+        let pal = TrapArt.palette
+        let w = size.width, h = size.height
+        let c = CGPoint(x: w / 2, y: h / 2)
+        let rx = w * 0.42, ry = h * 0.3
+        // Cilia along both edges.
+        let cilia = CGMutablePath()
+        for i in 0..<7 {
+            let u = (CGFloat(i) + 0.5) / 7
+            let x = c.x - rx * 0.8 + u * rx * 1.6
+            let d = (x - c.x) / rx
+            let edge = ry * max(1 - d * d, 0).squareRoot()
+            cilia.move(to: CGPoint(x: x, y: c.y + edge))
+            cilia.addLine(to: CGPoint(x: x + 0.8, y: c.y + edge + h * 0.16))
+            cilia.move(to: CGPoint(x: x, y: c.y - edge))
+            cilia.addLine(to: CGPoint(x: x - 0.8, y: c.y - edge - h * 0.16))
+        }
+        BogPainter.stroke(ctx, cilia, TrapArt.lobeOutline, width: 2.4, 0.9)
+        BogPainter.stroke(ctx, cilia, pal.teeth, width: 1.1)
+        let back = BogPainter.ellipse(c, rx, ry)
+        BogPainter.stroke(ctx, back, TrapArt.lobeOutline, width: 2.4, 0.95)
+        BogPainter.fill(ctx, back, TrapArt.leaf)
+        let lips = BogPainter.ellipse(c, rx * 0.84, ry * 0.68)
+        BogPainter.radialFill(ctx, lips, [BogPaint.lighter(pal.lobeOuter, 0.3), pal.lobeOuter, pal.lobeInner],
+                              [0, 0.5, 1], center: CGPoint(x: c.x - rx * 0.3, y: c.y + ry * 0.3), radius: rx)
+        let mouth = CGMutablePath()
+        mouth.move(to: CGPoint(x: c.x - rx * 0.78, y: c.y))
+        mouth.addQuadCurve(to: CGPoint(x: c.x + rx * 0.78, y: c.y), control: CGPoint(x: c.x, y: c.y - ry * 0.25))
+        BogPainter.stroke(ctx, mouth, RGBA(0.14, 0, 0.04), width: 1.4, 0.9)
+        BogPainter.fill(ctx, BogPainter.ellipse(CGPoint(x: c.x - rx * 0.35, y: c.y + ry * 0.34), rx * 0.22, ry * 0.14,
+                                                rotation: 0.2), RGBA(1, 1, 1), 0.8)
+    }
+}
+
+extension TrapArt {
+    /// R2 (#12, one art language): the play trap, open (green backs, lips, crimson faces, the midrib and the cilia),
+    /// as a `CGImage` `width` points wide for SwiftUI (Home, the cover, Results, the icon). It is drawn by the same
+    /// code as the scene's lobes. Height follows the trap's aspect (≈ 0.66 × width).
+    static func trapImage(width: CGFloat, scale: CGFloat = 2) -> CGImage? {
+        let g = TrapGeometry(sceneSize: CGSize(width: ScreenLayout.canvasWidth, height: ScreenLayout.canvasHeight))
+        let e = exteriorWidth + 4
+        var box = CGRect(x: g.center.x - g.a - e, y: g.center.y - g.b - e, width: 2 * (g.a + e), height: 2 * (g.b + e))
+        var all: [TrapTooth] = []
+        for side in [-1, 1] { all += teeth(side: side, geometry: g) }
+        for t in all {
+            let tip = CGPoint(x: t.root.x + cos(t.angle) * (t.length + 3), y: t.root.y + sin(t.angle) * (t.length + 3))
+            box = box.union(CGRect(x: tip.x - 4, y: tip.y - 4, width: 8, height: 8))
+        }
+        let frame = box
+        let k = max(width, 1) / max(frame.width, 1)
+        let pal = palette
+        return BogPainter.image(width: frame.width * k, height: frame.height * k, scale: scale) { ctx, _ in
+            ctx.scaleBy(x: k, y: k)
+            ctx.translateBy(x: -frame.minX, y: -frame.minY)
+            for side in [-1, 1] { BogArt.drawLobe(ctx, side: side, geometry: g) }
+            ctx.saveGState()
+            ctx.setAlpha(0.7)
+            for side in [-1, 1] { BogArt.drawGloss(ctx, side: side, geometry: g) }
+            ctx.restoreGState()
+            BogArt.drawMidrib(ctx, geometry: g)
+            for t in all {
+                let shape = toothShape(length: t.length, width: t.width, curl: t.curl)
+                let p = CGMutablePath()
+                p.addPath(shape, transform: toothTransform(t, geometry: g, lean: 0, squash: 1))
+                BogPainter.stroke(ctx, p, lobeOutline, width: 2, 0.9)
+                let tip = CGPoint(x: t.root.x + cos(t.angle) * t.length, y: t.root.y + sin(t.angle) * t.length)
+                BogPainter.gradient(ctx, p, [leaf, pal.teeth, BogPaint.lighter(pal.teeth, 0.5)], [0.05, 0.45, 1],
+                                    from: t.root, to: tip)
+            }
+        }
     }
 }

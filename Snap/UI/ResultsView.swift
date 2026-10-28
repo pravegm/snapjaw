@@ -13,7 +13,8 @@ struct ResultsView: View {
         let other = info.otherPage
         let page = info.hudPage
         ZStack {
-            SnapBackdrop(glow: summary.outcome.showsNewBest ? SnapTheme.gold : SnapTheme.goldLight)
+            BogBackdrop(controller: controller,
+                        glow: summary.outcome.showsNewBest ? SnapTheme.gold : SnapTheme.goldLight)
             hero(c)
                 .frame(width: min(other.width, 440))
                 .position(x: other.midX, y: info.size.height / 2)
@@ -30,12 +31,23 @@ struct ResultsView: View {
         .frame(width: info.size.width, height: info.size.height)
     }
 
+    /// How many new-species tiles fit in `width` (the last slot goes to "+n" when they don't all fit). Pure; tested.
+    static func tilesShown(count: Int, width: CGFloat, tile: CGFloat, gap: CGFloat) -> Int {
+        guard count > 0, tile > 0 else { return 0 }
+        let fit = max(Int(((width + gap) / (tile + gap)).rounded(.down)), 1)
+        return count <= fit ? count : max(fit - 1, 1)
+    }
+
     // MARK: The other page
 
     private func hero(_ c: Bool) -> some View {
         let r = summary.result
         let o = summary.outcome
         return VStack(spacing: c ? 6 : 12) {
+            // The trap that ate it all, as the scene paints it (REVIEW-1 #12).
+            TrapArtImage()
+                .frame(width: c ? 120 : 190, height: c ? 80 : 126)
+                .shadow(color: Color.black.opacity(0.5), radius: 12, y: 4)
             SnapOverline(text: summary.title, compact: c, color: SnapTheme.limeLight)
             CountingNumber(value: r.score, font: SnapType.hero(c), instant: controller.reduceMotion || AppTrace.enabled)
                 .foregroundStyle(LinearGradient(colors: [SnapTheme.goldLight, SnapTheme.gold], startPoint: .top,
@@ -47,8 +59,10 @@ struct ResultsView: View {
                 .foregroundStyle(SnapTheme.mist)
             if o.showsNewBest {
                 SnapPill(text: "New best!")
+            } else if o.firstRun {
+                SnapPill(text: "First run!", color: SnapTheme.lime)
             } else if o.isFirstScore {
-                SnapPill(text: "First feast!", color: SnapTheme.lime)
+                SnapPill(text: "First score!", color: SnapTheme.lime)
             } else if let near = summary.nearMiss {
                 Text(near)
                     .font(SnapType.body(c))
@@ -77,31 +91,38 @@ struct ResultsView: View {
             VStack(spacing: c ? 6 : 10) {
                 statRow(icon: "ladybug.fill", title: "Bugs caught", value: "\(r.bugsCaught)", c)
                 statRow(icon: "flame.fill", title: "Best bite",
-                        value: r.biggestBite > 0 ? "\(r.biggestBite) · \(AppRules.formatted(r.bestBitePoints))" : "–", c)
-                statRow(icon: "link", title: "Longest chain", value: "\(r.longestChain)", c)
+                        value: AppRules.bestBiteText(bugs: r.biggestBite, points: r.bestBitePoints), c)
+                statRow(icon: "link", title: "Longest chain", value: AppRules.chainText(longest: r.longestChain), c)
                 statRow(icon: "heart.fill", title: "Bees spared", value: "\(r.beesSpared)", c)
             }
             .snapCard(padding: c ? 10 : 14, radius: 20)
             if !o.newSpecies.isEmpty {
+                // As many tiles as fit, then "+n" (REVIEW-1 #23: the row never runs off the card).
+                let tileW: CGFloat = c ? 52 : 62
+                let cardW = min(info.hudPage.width, 400)
+                let shown = ResultsView.tilesShown(count: o.newSpecies.count, width: cardW - (c ? 20 : 24),
+                                                   tile: tileW, gap: 8)
                 VStack(alignment: .leading, spacing: 6) {
                     SnapOverline(text: "New in the Bug Book", compact: c, color: SnapTheme.gold)
                     HStack(spacing: 8) {
-                        ForEach(Array(o.newSpecies.prefix(5).enumerated()), id: \.offset) { item in
+                        ForEach(Array(o.newSpecies.prefix(shown).enumerated()), id: \.offset) { item in
                             VStack(spacing: 2) {
                                 BugPortrait(species: item.element)
                                     .frame(width: c ? 36 : 46, height: c ? 36 : 46)
-                                Text(BugCatalog.info(item.element).name)
+                                Text(AppRules.shortName(item.element))
                                     .font(.system(size: 10, weight: .bold, design: .rounded))
                                     .foregroundStyle(SnapTheme.mist)
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.7)
                             }
-                            .frame(width: c ? 52 : 62)
+                            .frame(width: tileW)
                         }
-                        if o.newSpecies.count > 5 {
-                            Text("+\(o.newSpecies.count - 5)")
-                                .font(SnapType.body(c))
-                                .foregroundStyle(SnapTheme.mist)
+                        if o.newSpecies.count > shown {
+                            Text("+\(o.newSpecies.count - shown)")
+                                .font(SnapType.headline(c))
+                                .foregroundStyle(SnapTheme.gold)
+                                .fixedSize()
+                                .frame(width: tileW)
                         }
                         Spacer(minLength: 0)
                     }
@@ -144,6 +165,11 @@ struct ResultsView: View {
             }
             RankBar(from: summary.rankProgressBefore, to: summary.rankProgressAfter,
                     instant: controller.reduceMotion || AppTrace.enabled)
+            Text(AppRules.rankHint(lifetimeBugs: o.lifetimeAfter))
+                .font(SnapType.caption(c))
+                .foregroundStyle(SnapTheme.mist)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .snapCard(padding: c ? 10 : 14, radius: 20)
         .accessibilityElement(children: .combine)

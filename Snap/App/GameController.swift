@@ -64,6 +64,9 @@ final class GameController: ObservableObject, SceneDriver {
     @Published private(set) var reduceMotion = false
     /// Demo event freezes: the scene is paused too, so the moment stays on screen.
     @Published private(set) var sceneHeld = false
+    /// A still of the bog as the scene last drew it (REVIEW-1 #12, juror 7: the menus sit on the blurred bog, so the
+    /// app is one place). Nil until the scene has been on a view.
+    @Published private(set) var bogStill: UIImage?
 
     let hud = HUDState()
     let homeTrap = HomeTrapState()
@@ -79,9 +82,20 @@ final class GameController: ObservableObject, SceneDriver {
     let demo: DemoMode?
 
     private var session: TrapSession?
+    /// Home's live bog: an attract session drawn behind the menu (never recorded, never on a leaderboard).
+    private var homeSession: TrapSession?
+    /// Snaps wilted and stings taken this run (the HUD keys its moments on them).
+    private var wilts = 0
+    private var stings = 0
+    /// Where the HUD's snaps row sits, in scene space (Scene's economy glyph flights fly there).
+    private var snapsAnchor: CGPoint?
     private var pilot: TrapPilot?
     private var lessonScript: LessonScript?
     private var lessonReplay = false
+    /// The lesson's bugs still in play → the nectar drop each was sent to (so two never share one).
+    private var lessonClaims: [Int: Int] = [:]
+    /// The lesson started on the pose step (its numbering keeps counting it).
+    private var lessonHasPose = false
     private var layout: ScreenLayout?
     private var lastCanvasSize: CGSize = .zero
     private var lastCanvasFold = false
@@ -156,9 +170,11 @@ final class GameController: ObservableObject, SceneDriver {
     func advance(dt: TimeInterval, now: TimeInterval) -> (TrapSnapshot, [TrapEvent]) {
         frames += 1
         if frames == 120 { AppTrace.t("SNAP-T frame 120") }
-        guard let session else { return (TrapSnapshot(), []) }
+        if route == .home { return advanceHome(dt: dt, now: now) }
+        guard let session else { return (homeSession?.snapshot ?? TrapSnapshot(), []) }
         guard route.isPlay, !session.isFinished else { return (session.snapshot, []) }
         checkClosing(now: now, phase: session.snapshot.phase)
+        applyDrawnClosure(now: now)
         let width = sessionLayout.size.width
         if frozen {
             feedback.handle([], telemetry: AppRules.telemetry(session.snapshot, sceneWidth: width, playing: false))
@@ -183,11 +199,21 @@ final class GameController: ObservableObject, SceneDriver {
         if var script = lessonScript {
             let actions = script.update(lessonInput(session.snapshot, events: events))
             lessonScript = script
-            for action in actions {
-                switch action {
-                case let .spawn(species, slot, linger):
-                    let spot = AppRules.lessonSpot(slot: slot, geometry: sessionLayout.geometry)
-                    session.spawnScripted(species, entry: spot.entry, target: spot.target, linger: linger)
+            // Each scripted bug lands ON a real nectar drop, so it sips (QA-1 #3): one drop per bug still in play.
+            if !actions.isEmpty {
+                lessonClaims = AppRules.liveClaims(lessonClaims, snapshot: session.snapshot)
+                var taken = Set(lessonClaims.values)
+                for action in actions {
+                    switch action {
+                    case let .spawn(species, slot, linger):
+                        let spot = AppRules.lessonSpot(slot: slot, geometry: sessionLayout.geometry,
+                                                       nectar: session.snapshot.nectar, taken: taken)
+                        let id = session.spawnScripted(species, entry: spot.entry, target: spot.target, linger: linger)
+                        if let drop = spot.drop {
+                            taken.insert(drop)
+                            if id >= 0 { lessonClaims[id] = drop }
+                        }
+                    }
                 }
             }
             publishLesson(script)
@@ -203,6 +229,11 @@ final class GameController: ObservableObject, SceneDriver {
             case .snapped: snapped = true
             case .tired: watchTheEnd()
             case .newBest: passedBest = true
+            case .wilted:
+                wilts += 1
+                snapped = true
+            case .stung:
+                stings += 1
             default: break
             }
             AppTrace.t("SNAP-T event " + AppTrace.describe(event))
@@ -265,6 +296,8 @@ final class GameController: ObservableObject, SceneDriver {
         let kind = chooseInput()
         guard kind != input else { return }
         setInput(kind)
+        // QA-1 #8: a run that moved onto the hinge times its snaps from now on.
+        if kind == .hinge { tally.hingeTiming = true }
         refreshIdleTimer()
     }
 
@@ -306,10 +339,15 @@ final class GameController: ObservableObject, SceneDriver {
         if hingeSeen && !feedback.deviceHasFold { feedback.deviceHasFold = true }
         if session == nil { sessionLayout = newLayout }
         if let scene {
+            // QA-1 (Scene P2): a canvas width change mid-run waits for the next session, so the drawn trap always
+            // matches the session's geometry. Fold and HUD-side changes apply at once.
+            if isLiveRun && newLayout.size != sessionLayout.size { return }
             scene.layout = newLayout
         } else {
             makeScene(newLayout)
         }
+        // Home's bog follows the canvas (its trap geometry must match the scene's).
+        if session == nil, let home = homeSession, home.geometry != newLayout.geometry { makeHomeSession() }
     }
 
     /// Settings › HUD on the left changed.
@@ -326,6 +364,8 @@ final class GameController: ObservableObject, SceneDriver {
         scene = newScene
         sceneGeneration += 1
         newScene.reset()
+        if let p = snapsAnchor { SceneHooks.setSnapsAnchor(newScene, p) }
+        homeTicker?.stop()
     }
 
     /// Only `.background` opens the pause menu (folding shut may pass through `.inactive` on hardware, and then every
@@ -362,6 +402,8 @@ final class GameController: ObservableObject, SceneDriver {
     /// The display's pose changed (portrait card, the cover display). Logs `SNAP-T pose <pose>`.
     func setPose(_ newPose: AppPose) {
         guard newPose != pose else { return }
+        // Keep the bog as it was last drawn for the menus.
+        if pose == .play && (route.isPlay || route == .home) { captureStill() }
         pose = newPose
         AppTrace.t("SNAP-T pose \(newPose.rawValue)")
         setPause(.pose, newPose != .play)
@@ -395,6 +437,9 @@ final class GameController: ObservableObject, SceneDriver {
             isShut = true
         }
         refreshInput()
+        // QA-1 #1 (P0): the closing pause pauses the scene, so `advance()` (and its `checkClosing`) stops. Hinge
+        // reports keep arriving while the Duo is opened again, so the pause is lifted from here.
+        if isClosingPaused, let s = session { checkClosing(now: time, phase: s.snapshot.phase) }
     }
 
     /// After a hinge has been seen, a nil is a display handover, never "no hinge" (Brim research).
@@ -429,15 +474,107 @@ final class GameController: ObservableObject, SceneDriver {
         setPause(.closing, on)
     }
 
-    // MARK: - Home's title trap
+    // MARK: - Values the scene draws from (Scene R2: closure tracking, the economy glyph flights)
 
-    /// Home on an iPhone without a hinge: a tap on the title trap chomps it.
+    /// The closure the scene draws the teeth from (REVIEW-1 #20): degrees closed from the detector's rest reference,
+    /// at display rate from `HingeTrapSource.predictedAngle(at:)` (drawing only, never the snap rule). Nil without a
+    /// hinge driving the trap (the scene then uses the snapshot's closure).
+    func drawnClosureDegrees(now: TimeInterval) -> Double? {
+        guard input == .hinge, hinge.hasHinge, let ref = hinge.reference,
+              let predicted = hinge.predictedAngle(at: now) else { return nil }
+        return AppRules.drawnClosure(reference: ref, predicted: predicted)
+    }
+
+    private func applyDrawnClosure(now: TimeInterval) {
+        SceneHooks.setDrawnClosure(scene, drawnClosureDegrees(now: now))
+    }
+
+    /// The HUD's snaps row centre in scene space (PlayLayer reports it on layout).
+    func setSnapsAnchor(_ p: CGPoint) {
+        guard p.x.isFinite, p.y.isFinite, p != snapsAnchor else { return }
+        snapsAnchor = p
+        SceneHooks.setSnapsAnchor(scene, p)
+    }
+
+    // MARK: - Home's live bog
+
+    /// Home on an iPhone without a hinge: a tap on the bog chomps the trap.
     func homeTrapTapped() {
         guard route == .home, !hinge.hasHinge else { return }
         homeTouch.tap(at: CACurrentMediaTime())
     }
 
+    /// Home's bog: an attract session (waves of bugs, snaps never run out) drawn by the real scene behind the menu
+    /// (REVIEW-1 #12). The hinge (or a tap on phones) drives the trap, so a snap on Home chomps whatever has landed.
+    /// Never recorded; its events reach the scene's FX, not the run's feedback (Home plays only the chomp).
+    private func advanceHome(dt: TimeInterval, now: TimeInterval) -> (TrapSnapshot, [TrapEvent]) {
+        guard let home = homeSession else { return (TrapSnapshot(), []) }
+        guard appActive, pose == .play, !frozen else {
+            if hinge.hasHinge { _ = hinge.input(at: now) }
+            return (home.snapshot, [])
+        }
+        let step = AppRules.clampStep(dt)
+        guard step > 0 else { return (home.snapshot, []) }
+        let trap: TrapInput
+        if let held = demo?.closure {
+            trap = TrapInput(closure: held, armed: true)
+        } else if hinge.hasHinge {
+            trap = hinge.input(at: now)
+        } else {
+            trap = homeTouch.input(at: now)
+        }
+        let events = home.step(dt: step, input: trap)
+        let chomped = trap.snap != nil
+        feedback.homeTrap(closure: trap.closure, snapped: chomped)
+        let c01 = trap.closure.isFinite ? trap.closure / max(Tuning.snapDepth, 1) : 0
+        homeTrap.update(closure01: min(max(c01, 0), 1), chomped: chomped)
+        applyDrawnClosure(now: now)
+        return (home.snapshot, events)
+    }
+
+    /// A fresh attract bog for Home (its own seed; demo runs keep theirs so frames are stable).
+    private func makeHomeSession() {
+        let l = layout ?? ScreenLayout(hasFold: false, hudOnLeft: hudOnLeft)
+        sessionLayout = l
+        if let scene, scene.layout != l { scene.layout = l }
+        let seed: UInt64 = isDemo ? (demo?.seed ?? DemoMode.defaultSeed) : UInt64.random(in: 1...UInt64.max)
+        homeSession = TrapSession(mode: .attract, seed: seed, best: 0, geometry: l.geometry,
+                                  options: SessionOptions.`for`(.attract))
+        homeTouch.reset()
+        scene?.reset()
+    }
+
+    /// Captures the scene as last drawn (the menus' backdrop). Cheap enough to do on each screen change: one
+    /// offscreen render. Never from inside the scene's own update.
+    func captureStill() {
+        guard let scene, let view = scene.view, scene.size.width > 1, scene.size.height > 1 else { return }
+        guard let texture = view.texture(from: scene) else { return }
+        let cg = texture.cgImage()
+        guard cg.width > 1, cg.height > 1 else { return }
+        bogStill = UIImage(cgImage: cg)
+    }
+
+    /// The menus ask for a still when they appear (the first launch straight onto a menu: the scene may not be on a
+    /// view yet, so it tries again for a moment).
+    func ensureStill() {
+        guard bogStill == nil else { return }
+        captureStill()
+        guard bogStill == nil else { return }
+        Task { [weak self] in
+            for _ in 0..<6 {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard let self, self.bogStill == nil else { return }
+                self.captureStill()
+            }
+        }
+    }
+
     private func startHomeTicker() {
+        // The live scene drives Home; the ticker is only a fallback before the scene exists.
+        guard scene == nil else {
+            homeTicker?.stop()
+            return
+        }
         if homeTicker == nil {
             homeTicker = AppFrameTicker { [weak self] now in self?.tickHome(now) }
         }
@@ -445,7 +582,7 @@ final class GameController: ObservableObject, SceneDriver {
     }
 
     private func tickHome(_ now: TimeInterval) {
-        guard route == .home, appActive else {
+        guard route == .home, appActive, scene == nil else {
             homeTicker?.stop()
             return
         }
@@ -527,16 +664,22 @@ final class GameController: ObservableObject, SceneDriver {
         abandonLiveRun()
         resultsTask?.cancel()
         endWatchTask?.cancel()
+        // Back from a run (or the first time): a fresh bog behind Home. Back from the Bug Book or Settings: the same.
+        let freshBog = homeSession == nil || session != nil
         session = nil
         pilot = nil
         lessonScript = nil
         lessonDisplay = nil
+        lessonClaims = [:]
         clearRunPauses()
         frozen = false
         sceneHeld = false
         scene?.isPaused = false
         feedback.silence()
         hud.update(HUDValues())
+        if freshBog { makeHomeSession() }
+        // A snap made on a menu is never delivered on Home's first frame either.
+        if hinge.hasHinge { hinge.reset(at: CACurrentMediaTime()) }
         setRoute(.home)
         refreshIdleTimer()
     }
@@ -560,6 +703,8 @@ final class GameController: ObservableObject, SceneDriver {
 
     private func setRoute(_ newRoute: AppRoute) {
         if newRoute != route {
+            // Leaving the bog for a menu: keep a still of it for the menu's backdrop.
+            if (route == .home || route.isPlay) && !newRoute.isPlay && newRoute != .home { captureStill() }
             route = newRoute
             AppTrace.t("SNAP-T screen \(newRoute.rawValue)")
         }
@@ -572,6 +717,8 @@ final class GameController: ObservableObject, SceneDriver {
     func startLesson(replay: Bool, at step: LessonScript.Step = .pose) {
         lessonReplay = replay
         start(.lesson)
+        lessonClaims = [:]
+        lessonHasPose = lessonHingeLike()
         let script = LessonScript(start: step, replay: replay)
         lessonScript = script
         publishLesson(script)
@@ -582,7 +729,14 @@ final class GameController: ObservableObject, SceneDriver {
         startLesson(replay: true)
     }
 
-    /// Skip (offered after step 2): the lesson counts as done.
+    /// A Duo's first hinge report can lag the first frame: a fold layout keeps the pose step (real runs). Demo
+    /// `lessonStep=1` on a phone sim keeps it on screen too (a frame of it).
+    private func lessonHingeLike() -> Bool {
+        let foldLayout = (layout?.hasFold ?? false) && !isDemo
+        return input == .hinge || foldLayout || demo?.lessonStep == 1
+    }
+
+    /// Skip (offered on every step): the lesson counts as done.
     func skipLesson() {
         store.markLessonDone()
         goHome()
@@ -603,24 +757,22 @@ final class GameController: ObservableObject, SceneDriver {
     private func lessonInput(_ s: TrapSnapshot, events: [TrapEvent]) -> LessonScript.Input {
         var flies = 0
         var bees = 0
-        for b in s.bugs {
-            switch b.activity {
-            case .leaving, .caught, .escaped, .released:
-                continue
-            case .arriving, .walking, .sipping, .hopping:
-                if b.species.isProtected { bees += 1 } else { flies += 1 }
+        var inTrap = 0
+        for b in s.bugs where AppRules.inPlay(b.activity) {
+            if b.species.isProtected {
+                bees += 1
+            } else {
+                flies += 1
+                if b.inTrap && b.activity != .arriving { inTrap += 1 }
             }
         }
-        // A Duo's first hinge report can lag the first frame: a fold layout keeps the pose step (real runs). Demo
-        // `lessonStep=1` on a phone sim keeps it on screen too (a frame of it).
-        let foldLayout = (layout?.hasFold ?? false) && !isDemo
-        let hingeLike = input == .hinge || foldLayout || demo?.lessonStep == 1
-        return LessonScript.Input(time: s.time, angle: input == .hinge ? hinge.angle : nil, hasHinge: hingeLike,
-                                  armed: s.armed, events: events, liveFlies: flies, liveBees: bees)
+        return LessonScript.Input(time: s.time, angle: input == .hinge ? hinge.angle : nil,
+                                  hasHinge: lessonHingeLike(), armed: s.armed, events: events, liveFlies: flies,
+                                  liveBees: bees, fliesInTrap: inTrap, touch: touchWording)
     }
 
     private func publishLesson(_ script: LessonScript) {
-        let display = script.display(touch: touchWording)
+        let display = script.display(touch: touchWording, hasPose: lessonHasPose)
         guard display != lessonDisplay else { return }
         if display.step != lessonDisplay?.step || display.praise != lessonDisplay?.praise
             || display.warning != lessonDisplay?.warning {
@@ -664,9 +816,15 @@ final class GameController: ObservableObject, SceneDriver {
             : SessionOptions.`for`(m)
         // Demo `wave=`: Core starts the run at that wave (its nectar block and day follow).
         if m != .lesson, let wave = demo?.wave, wave > 1 { options.firstWave = wave }
+        // First runs (GAME-DESIGN §5): 12 snaps while the plant rank is Sprout.
+        options.startSnaps = AppRules.startSnaps(mode: m, lifetimeBugs: store.data.lifetimeBugs)
         let newSession = TrapSession(mode: m, seed: runSeed, best: store.best(for: m), geometry: sessionLayout.geometry,
                                      options: options)
         session = newSession
+        if let scene, scene.layout != sessionLayout { scene.layout = sessionLayout }
+        homeSession = nil
+        wilts = 0
+        stings = 0
         touch = TouchTrapSource()
         fixedSource.closure = demo?.closure ?? 0
         pilot = demo?.pilot.map { TrapPilot(skill: $0, seed: runSeed &+ 101) }
@@ -675,6 +833,8 @@ final class GameController: ObservableObject, SceneDriver {
             lessonDisplay = nil
         }
         setInput(chooseInput(), force: true)
+        // QA-1 #2: a snap made on Results, a menu or the pause menu must never fire at t = 0 of this run.
+        if input == .hinge && hinge.hasHinge { hinge.reset(at: CACurrentMediaTime()) }
         tally = RunTally(hingeTiming: input == .hinge || input == .pilot)
         recorded = false
         playTime = 0
@@ -707,6 +867,11 @@ final class GameController: ObservableObject, SceneDriver {
     /// into the rank, and a scored Daily's score as the day's score (plus the Game Center boards).
     private func abandonLiveRun() {
         guard let session, !recorded, !session.isFinished else { return }
+        if AppRules.isTired(session.snapshot.phase) {
+            // QA-1 #9: left during the tired moment, the run is over: file it as the finished run it is (no Results).
+            finishHeadless(session)
+            if session.isFinished && recordFinished() != nil { return }
+        }
         recorded = true
         checkpointSaved = false
         let partial = tally.result(mode: session.mode, seed: session.seed, snapshot: session.snapshot)
@@ -733,6 +898,12 @@ final class GameController: ObservableObject, SceneDriver {
     private func finishIfStuck() {
         guard let session, !recorded, !session.isFinished, route.isPlay, !frozen, freezePendingAt == nil else { return }
         guard AppRules.isTired(session.snapshot.phase) else { return }
+        finishHeadless(session)
+        if session.isFinished { handleFinished(immediate: true) }
+    }
+
+    /// Steps the tired moment to its end with the trap open (no frames needed).
+    private func finishHeadless(_ session: TrapSession) {
         var steps = 0
         let open = TrapInput()
         while !session.isFinished && steps < 600 {
@@ -740,11 +911,12 @@ final class GameController: ObservableObject, SceneDriver {
             steps += 1
         }
         AppTrace.t("SNAP-T ending finished headless steps=\(steps)")
-        if session.isFinished { handleFinished(immediate: true) }
     }
 
-    private func handleFinished(immediate: Bool) {
-        guard !recorded, let session, let result = session.result else { return }
+    /// Files the finished run once (the store, Game Center, the `SNAP-T run` line) and builds its summary.
+    @discardableResult
+    private func recordFinished() -> ResultSummary? {
+        guard !recorded, let session, let result = session.result else { return nil }
         recorded = true
         checkpointSaved = false
         endWatchTask?.cancel()
@@ -752,7 +924,13 @@ final class GameController: ObservableObject, SceneDriver {
         GameCenterManager.shared.report(result: result, outcome: outcome, progress: store.data)
         AppTrace.t("SNAP-T run score=\(result.score) bugs=\(result.bugsCaught) snaps=\(result.snaps) "
                    + "seconds=\(Int(result.seconds.isFinite ? result.seconds : 0))")
-        summary = makeSummary(result, outcome: outcome)
+        let made = makeSummary(result, outcome: outcome)
+        summary = made
+        return made
+    }
+
+    private func handleFinished(immediate: Bool) {
+        guard recordFinished() != nil else { return }
         refreshIdleTimer()
         resultsTask?.cancel()
         if immediate {
@@ -809,7 +987,9 @@ final class GameController: ObservableObject, SceneDriver {
 
     private func publishHUD(_ s: TrapSnapshot, now: TimeInterval, force: Bool) {
         var hint = s.hint
-        if route == .lesson || isPaused || frozen { hint = nil }
+        // The lesson shows only the hints it teaches with ("Bee! Wait…", "Now!" once all three sip).
+        if route == .lesson, let h = hint, !AppRules.lessonShowsHint(h) { hint = nil }
+        if isPaused || frozen { hint = nil }
         if let h = hint, AppRules.hintText(h, touch: touchWording) == nil { hint = nil }
         if !AppRules.isLive(s.phase) { hint = nil }
         var values = HUDValues()
@@ -825,6 +1005,10 @@ final class GameController: ObservableObject, SceneDriver {
         values.passedBest = passedBest
         values.dayPhase = s.dayPhase
         values.lesson = route == .lesson
+        values.hunger = AppRules.hudHunger(s.hunger, live: AppRules.isLive(s.phase))
+        values.wilts = wilts
+        values.stings = stings
+        if route == .lesson && !isPaused { values.lessonTargets = AppRules.lessonTargets(s) }
         let urgent = force || hint != lastHint || values.tired != hud.values.tired
         guard urgent || now - lastHUD >= Self.hudInterval else { return }
         lastHUD = now
@@ -844,6 +1028,8 @@ final class GameController: ObservableObject, SceneDriver {
         }
         if isPaused && !was {
             feedback.silence()
+            // QA-1 #7: a tap made just before the pause never bites on the first frame after it.
+            touch.reset()
         } else if !isPaused && was && route.isPlay {
             // Every resume: a fresh detector, so the reopening stroke never reads as a snap or a creep.
             if input == .hinge && hinge.hasHinge { hinge.reset(at: CACurrentMediaTime()) }
@@ -964,6 +1150,16 @@ final class GameController: ObservableObject, SceneDriver {
             return s.dayPhase >= .night
         case .lastSnap:
             return events.contains(.lastSnap)
+        case .hungry:
+            return events.contains { e in
+                if case .hungry = e { return true }
+                return false
+            }
+        case .wilted:
+            return events.contains { e in
+                if case .wilted = e { return true }
+                return false
+            }
         case .tired:
             return AppRules.isTired(s.phase)
         case .results:

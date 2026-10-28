@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Home: the title over a live trap that follows the hinge (snap the Duo a little shut and it chomps, with
-/// `FeedbackDirector.homeTrap`; a tap on other iPhones), a bee bumbling across, and the four buttons on the HUD page
-/// (the right, sharp half by default): Feed, Daily Bog, Bug Book, Settings. Shows the plant rank, the best and the
-/// Daily's status.
+/// Home: the live bog behind the menu (an attract session drawn by the real scene, REVIEW-1 #12: snap the Duo a
+/// little shut and it chomps whatever has landed, with `FeedbackDirector.homeTrap`; a tap on other iPhones), the title
+/// on the other page, and the four buttons on the HUD page (the right, sharp half by default): Feed, Daily Bog, Bug
+/// Book, Settings. Shows the plant rank (and what grows it), the best and the Daily's status.
 struct HomeView: View {
     @ObservedObject var controller: GameController
     @ObservedObject var store: ProgressStore
@@ -14,21 +14,30 @@ struct HomeView: View {
         let page = info.hudPage
         let other = info.otherPage
         let buttonsW = min(page.width, c ? 300 : 340)
+        // The shade under the buttons runs from the fold to the screen's own edge (no seam at the safe area).
+        let shadeX0 = info.hudOnLeft ? 0 : info.foldMaxX
+        let shadeX1 = info.hudOnLeft ? info.foldMinX : info.size.width
+        let otherX0 = info.hudOnLeft ? info.foldMaxX : 0
+        let otherX1 = info.hudOnLeft ? info.size.width : info.foldMinX
         ZStack {
-            SnapBackdrop()
+            if controller.scene == nil { SnapBackdrop() }
             HomeTrapLayer(trap: controller.homeTrap, info: info, reduceMotion: controller.reduceMotion,
                           onTap: { controller.homeTrapTapped() })
-            // A soft shade under the buttons so they read over the crimson lobe.
-            LinearGradient(colors: [SnapTheme.night.opacity(0), SnapTheme.night.opacity(0.62)],
+            LinearGradient(colors: [SnapTheme.night.opacity(0.05), SnapTheme.night.opacity(0.66)],
                            startPoint: info.hudOnLeft ? .trailing : .leading,
                            endPoint: info.hudOnLeft ? .leading : .trailing)
-                .frame(width: page.width + info.edgeMargin + info.foldClear, height: info.size.height)
-                .position(x: page.midX + (info.hudOnLeft ? -info.edgeMargin / 2 : info.edgeMargin / 2),
-                          y: info.size.height / 2)
+                .frame(width: max(shadeX1 - shadeX0, 0), height: info.size.height)
+                .position(x: (shadeX0 + shadeX1) / 2, y: info.size.height / 2)
+                .allowsHitTesting(false)
+            // A soft shade behind the title so it reads over the lobe (never a slab over the trap).
+            RadialGradient(colors: [SnapTheme.night.opacity(0.62), SnapTheme.night.opacity(0)], center: .center,
+                           startRadius: 10, endRadius: max(otherX1 - otherX0, 1) * 0.62)
+                .frame(width: max(otherX1 - otherX0, 0), height: info.size.height)
+                .position(x: (otherX0 + otherX1) / 2, y: info.size.height * 0.42)
                 .allowsHitTesting(false)
             titleBlock(c)
-                .frame(width: min(other.width, 420))
-                .position(x: other.midX, y: info.size.height * (c ? 0.30 : 0.28))
+                .frame(width: min(other.width, 400))
+                .position(x: other.midX, y: info.size.height * (c ? 0.44 : 0.42))
                 .allowsHitTesting(false)
             buttons(c)
                 .frame(width: buttonsW)
@@ -42,7 +51,7 @@ struct HomeView: View {
     private func titleBlock(_ c: Bool) -> some View {
         let rank = store.rank
         let progress = ProgressRules.rankProgress(lifetime: store.data.lifetimeBugs, rank: rank)
-        return VStack(spacing: c ? 6 : 10) {
+        return VStack(spacing: c ? 4 : 8) {
             Text(AppBrand.name)
                 .font(SnapType.wordmark(c))
                 .foregroundStyle(LinearGradient(colors: [SnapTheme.cream, SnapTheme.limeLight], startPoint: .top,
@@ -54,12 +63,14 @@ struct HomeView: View {
             Text(AppBrand.tagline)
                 .font(SnapType.headline(c))
                 .foregroundStyle(SnapTheme.cream)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .snapLegible()
             Text(controller.hasHinge ? "Snap it a little shut. It bites!" : "Tap the trap. It bites!")
                 .font(SnapType.caption(c))
                 .foregroundStyle(SnapTheme.mist)
                 .snapLegible()
-            VStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Image(systemName: "leaf.fill")
                         .foregroundStyle(SnapTheme.lime)
@@ -74,6 +85,11 @@ struct HomeView: View {
                     }
                 }
                 SnapProgressBar(value: progress, height: 8)
+                Text(AppRules.rankHint(lifetimeBugs: store.data.lifetimeBugs))
+                    .font(SnapType.caption(c))
+                    .foregroundStyle(SnapTheme.mist)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .frame(maxWidth: 300)
             .snapCard(padding: c ? 10 : 14, radius: 18)
@@ -130,8 +146,8 @@ struct HomeView: View {
     }
 }
 
-/// Home's live title trap (its own observed object, so the 30 Hz closure never rebuilds Home's buttons), the bee and
-/// the CHOMP! pop.
+/// Home's tap catcher over the live bog (phones: a tap chomps the trap) and the CHOMP! pop (its own observed object,
+/// so the closure updates never rebuild Home's buttons). The pop sits on the other page, never across the crease.
 struct HomeTrapLayer: View {
     @ObservedObject var trap: HomeTrapState
     let info: AppCanvas
@@ -141,13 +157,9 @@ struct HomeTrapLayer: View {
     @State private var chompTask: Task<Void, Never>?
 
     var body: some View {
-        let trapRect = info.trapRect
+        let other = info.otherPage
         ZStack {
-            TrapPortrait(closure01: trap.closure01)
-                .frame(width: info.size.width, height: info.size.height)
-            BumblingBee(area: CGRect(x: 0, y: 0, width: info.size.width, height: info.size.height),
-                        still: reduceMotion || AppTrace.enabled)
-                .allowsHitTesting(false)
+            Color.clear
             if chompShown {
                 Text("CHOMP!")
                     .font(.system(size: info.isCompact ? 54 : 76, weight: .black, design: .rounded))
@@ -155,7 +167,7 @@ struct HomeTrapLayer: View {
                     .shadow(color: SnapTheme.crimsonDeep, radius: 0, x: 0, y: 5)
                     .snapLegible()
                     .rotationEffect(.degrees(-6))
-                    .position(x: trapRect.midX, y: trapRect.midY)
+                    .position(x: other.midX, y: info.size.height * 0.16)
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
                     .allowsHitTesting(false)
             }
@@ -175,28 +187,5 @@ struct HomeTrapLayer: View {
         .accessibilityElement()
         .accessibilityLabel("The title trap")
         .accessibilityAddTraits(.isButton)
-    }
-}
-
-/// A bee bumbling across Home in a lazy figure of eight (it never lands: bees are friends).
-struct BumblingBee: View {
-    let area: CGRect
-    var still = false
-
-    static let period: Double = 14
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: still)) { context in
-            let t = still ? 3.2 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1_000)
-            let phase = t * 2 * Double.pi / Self.period
-            let x = area.midX + area.width * 0.34 * CGFloat(sin(phase))
-            let y = area.minY + area.height * 0.22 + area.height * 0.07 * CGFloat(sin(phase * 2 + 0.6))
-            let heading = cos(phase)
-            BugPortrait(species: .bee, flying: true)
-                .frame(width: 58, height: 58)
-                .scaleEffect(x: heading >= 0 ? 1 : -1, y: 1)
-                .offset(y: CGFloat(sin(t * 9)) * 2)
-                .position(x: x, y: y)
-        }
     }
 }

@@ -244,6 +244,145 @@ struct FeelClosingGate {
     }
 }
 
+/// The creep guard (QA-1 #5, ROUND-2 Feel). Core's `SnapDetector` restarts its 3 s creep reference at θ on a re-arm,
+/// while the hand is still opening, so a reopen that overshoots the settled rest by more than 6° (open to 172°, settle
+/// at 165°), or obeying "Bend it a little" from 178° to 168°, reads as a creep with nobody closing the trap.
+///
+/// This keeps its own creep reference (the same rule: the highest θ over `Tuning.creepWindow`, falling at most
+/// `Tuning.creepRefFallRate`) but **re-seeds it to θ on every sample** during a quiet spell. A quiet spell lasts
+/// `quiet` (0.6 s) after:
+/// - the first sample, and every re-arm;
+/// - any sample where θ is rising (above the previous sample and at least `riseStep` above the lowest θ of the last
+///   `riseWindow`), so the reference follows an overshoot back down to where the hand settles;
+/// - any sample at or above `Tuning.tooFlatAngle` (the "bend it a little" case).
+/// Creeping = armed, not quiet, and reference − θ > `Tuning.creepDepth` for more than `Tuning.creepDwell`.
+/// `HingeTrapSource` reports a creep only when both the detector and this guard agree, so it works whether or not Core
+/// adds the same re-seed to `SnapDetector` (design/NEEDS.md). Pure, with explicit times.
+struct FeelCreepGuard {
+    static let quiet = 0.6
+    static let riseStep = 1.0
+    static let riseWindow = 0.25
+
+    /// The guard's creep reference θ (0 before any sample).
+    private(set) var reference: Double = 0
+    /// The latest θ.
+    private(set) var angle: Double = 0
+    /// No creep before this time.
+    private(set) var quietUntil: Double = -Double.infinity
+    private(set) var hasSample = false
+    private var armed = true
+    private var since: Double?
+    private var lastTime: Double = 0
+    /// The reference window's samples (times, angles), oldest first.
+    private var times: [Double] = []
+    private var angles: [Double] = []
+    /// The last `riseWindow` s of samples, for the rise test.
+    private var recentTimes: [Double] = []
+    private var recentAngles: [Double] = []
+
+    init() {}
+
+    mutating func reset() {
+        self = FeelCreepGuard()
+    }
+
+    /// reference − θ (≥ 0).
+    var depth: Double {
+        hasSample ? max(0, reference - angle) : 0
+    }
+
+    /// Creeping at `time` (as of the latest `sample` / `update`).
+    func isCreeping(at time: Double) -> Bool {
+        guard let since, time.isFinite else { return false }
+        return time - since > Tuning.creepDwell
+    }
+
+    /// One sample the detector heard (filtered θ, its time) and the detector's arm state after it.
+    mutating func sample(_ a: Double, at time: Double, armed nowArmed: Bool) {
+        guard a.isFinite, time.isFinite else { return }
+        guard hasSample else {
+            hasSample = true
+            armed = nowArmed
+            angle = a
+            quietUntil = time + Self.quiet
+            reseed(a, at: time)
+            remember(a, at: time)
+            updateCreep(at: time)
+            return
+        }
+        let t = max(time, lastTime)
+        if nowArmed && !armed { quietUntil = max(quietUntil, t + Self.quiet) }
+        armed = nowArmed
+        remember(a, at: t)
+        var low = a
+        for value in recentAngles where value < low { low = value }
+        // Rising: still going up (above the previous sample) and at least `riseStep` above the recent low.
+        if a > angle && a - low >= Self.riseStep { quietUntil = max(quietUntil, t + Self.quiet) }
+        if a >= Tuning.tooFlatAngle { quietUntil = max(quietUntil, t + Self.quiet) }
+        angle = a
+        if t < quietUntil {
+            reseed(a, at: t)
+        } else {
+            times.append(t)
+            angles.append(a)
+            advance(to: t)
+        }
+        updateCreep(at: t)
+    }
+
+    /// A frame with no new sample: the reference window and the creep timer move on to `time`.
+    mutating func update(at time: Double) {
+        guard hasSample, time.isFinite, time >= lastTime else { return }
+        if time < quietUntil {
+            reseed(angle, at: time)
+        } else {
+            advance(to: time)
+        }
+        updateCreep(at: time)
+    }
+
+    private mutating func reseed(_ a: Double, at t: Double) {
+        times = [t]
+        angles = [a]
+        reference = a
+        lastTime = t
+    }
+
+    private mutating func remember(_ a: Double, at t: Double) {
+        recentTimes.append(t)
+        recentAngles.append(a)
+        while recentTimes.count > 1 && recentTimes[0] < t - Self.riseWindow {
+            recentTimes.removeFirst()
+            recentAngles.removeFirst()
+        }
+    }
+
+    /// The rolling maximum at `t`, falling at most `Tuning.creepRefFallRate` once the peak leaves the window.
+    private mutating func advance(to t: Double) {
+        while times.count > 1 && times[0] < t - Tuning.creepWindow {
+            times.removeFirst()
+            angles.removeFirst()
+        }
+        var top = -Double.infinity
+        for value in angles where value > top { top = value }
+        let dt = max(0, t - lastTime)
+        lastTime = max(lastTime, t)
+        if top >= reference {
+            reference = top
+        } else {
+            reference = max(top, reference - Tuning.creepRefFallRate * dt)
+        }
+    }
+
+    private mutating func updateCreep(at t: Double) {
+        if armed && t >= quietUntil && depth > Tuning.creepDepth {
+            if since == nil { since = t }
+        } else {
+            since = nil
+        }
+    }
+}
+
 /// `SNAP-T …` demo/timing lines for CI, only in DEBUG builds launched with the `-snapDemo` argument (Release carries
 /// neither the check nor the string). Flushed at once.
 enum FeelDemoLog {

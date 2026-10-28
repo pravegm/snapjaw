@@ -6,7 +6,8 @@ import Foundation
 /// - `lobeOuter`: the lobe's inner face towards its outer edge (bright crimson-pink).
 /// - `lobeInner`: the face by the midrib (deep crimson).
 /// - `lobeGloss`: the wet highlight. `rim`: the lime margin and outer skin. `teeth`: the pale cilia.
-/// - `nectar`: the drops. `gold`: score pops, sip rings. `danger`: wasps, stings. `text` / `ink`: light / dark type.
+/// - `nectar`: the drops (translucent amber). `gold`: score pops only (R2: sip rings are lime-white).
+/// - `danger`: wasps, stings. `text` / `ink`: light / dark type.
 struct SnapPalette: Equatable, Sendable {
     let bog: RGBA
     let bogDeep: RGBA
@@ -44,19 +45,19 @@ struct TrapTooth: Equatable, Sendable {
 /// **Closure** (`closure01` 0 open … 1 at the snap depth). The scene's still frame agrees with the hands:
 /// - each tooth swings over the rim about its root (a 3-D lean seen from above): its projected length is
 ///   `cos(lean)` with `lean = closure01 × toothMaxLean` — at about 0.75 it points at you, past that it points in;
-/// - the lobe foreshortens towards the midrib by up to `lobeSquash` (3 %), as if tilting towards you;
+/// - the lobe foreshortens towards the midrib by up to `lobeSquash` (15 %), as if tilting towards you;
 /// - (scene only) a shadow grows in from the outer edges and the gloss slides.
 enum TrapArt {
     static let palette = SnapPalette(
         bog: RGBA(hex: 0x1F5E3A),
         bogDeep: RGBA(hex: 0x0C2E1E),
         moss: RGBA(hex: 0x5FA83A),
-        lobeOuter: RGBA(hex: 0xF0436A),
-        lobeInner: RGBA(hex: 0x8A0F33),
+        lobeOuter: RGBA(hex: 0xD23048),
+        lobeInner: RGBA(hex: 0x7A0C26),
         lobeGloss: RGBA(hex: 0xFFD0DC),
         rim: RGBA(hex: 0xB7E34A),
         teeth: RGBA(hex: 0xEAF7B8),
-        nectar: RGBA(hex: 0xFFC233),
+        nectar: RGBA(hex: 0xF5A623),
         gold: RGBA(hex: 0xFFD54A),
         danger: RGBA(hex: 0xFF3B30),
         text: RGBA(hex: 0xFFF8E7),
@@ -66,19 +67,37 @@ enum TrapArt {
     static let outline = RGBA(hex: 0x1E0A10)
     /// The lobe's dark green outline against the bog.
     static let lobeOutline = RGBA(hex: 0x123A1C)
+    /// R2: the lobe's green back (the exterior band seen beyond the lip) and its shaded edge.
+    static let leaf = RGBA(hex: 0x4C9A3C)
+    static let leafDark = RGBA(hex: 0x1F5526)
+    /// R2: the thin dark-green lip between the crimson face and the green back (no lime rind).
+    static let lip = RGBA(hex: 0x1A4720)
+    /// R2: how far the green back shows beyond the trap zone's edge (points; the brief's 24–32).
+    static let exteriorWidth: CGFloat = 26
+    /// R2: the sip ring on a catchable bug (lime-white: gold is kept for nectar and score).
+    static let sipRing = RGBA(hex: 0xEEFFC4)
+    /// R2: every bug is drawn this much bigger than R1 (Core's `BugInfo.radius` grows by the same factor).
+    static let artScale: CGFloat = 1.8
+    /// R2: nectar drops are drawn at this fraction of Core's `NectarDrop.radius` (−30 %: the bugs are the subject).
+    static let nectarDrawScale: CGFloat = 0.7
+    /// R2: a protected bug's ring radius, as a multiple of its art radius.
+    static let protectedRingScale: CGFloat = 1.6
 
     // MARK: Closure
 
     /// Cilia per lobe.
-    static let teethPerSide = 21
+    static let teethPerSide = 24
     /// The lean (degrees) the teeth reach at `closure01` = 1 (the snap depth).
     static let toothMaxLean: Double = 120
     /// The lean during the jaw slam (the teeth flip right over and interlock).
     static let slamLean: Double = 165
-    /// How much the lobe foreshortens towards the midrib at `closure01` = 1.
-    static let lobeSquash: CGFloat = 0.03
-    /// The lime margin's width (points).
-    static let rimBand: CGFloat = 17
+    /// How much the lobe foreshortens towards the midrib at `closure01` = 1 (R2: 3 % → 15 %, so the screen agrees with
+    /// the hands).
+    static let lobeSquash: CGFloat = 0.15
+    /// The slam squeezes each lobe to this x scale towards the midrib for the bite's hold.
+    static let slamSqueeze: CGFloat = 0.6
+    /// The thin lip's width (points; R1's lime margin was 17).
+    static let rimBand: CGFloat = 5
     /// The midrib's half width at its widest (it covers the fold band).
     static let midribHalfWidth: CGFloat = 22
 
@@ -143,6 +162,26 @@ enum TrapArt {
         }
         p.closeSubpath()
         return p
+    }
+
+    /// The half ellipse on `side` with semi-axes `rx`, `ry` about the trap centre (closed along the midrib line): the
+    /// green back is a constant-width band, so it can't be a radius fraction.
+    static func halfEllipse(side: Int, geometry g: TrapGeometry, rx: CGFloat, ry: CGFloat) -> CGPath {
+        let p = CGMutablePath()
+        let s: CGFloat = side < 0 ? -1 : 1
+        let n = 120
+        p.move(to: CGPoint(x: g.center.x, y: g.center.y + ry))
+        for i in 1...n {
+            let t = CGFloat.pi / 2 - CGFloat(i) / CGFloat(n) * .pi
+            p.addLine(to: CGPoint(x: g.center.x + s * rx * cos(t), y: g.center.y + ry * sin(t)))
+        }
+        p.closeSubpath()
+        return p
+    }
+
+    /// The lobe's green back: the half ellipse `exteriorWidth` beyond the zone's edge.
+    static func exteriorPath(side: Int, geometry g: TrapGeometry) -> CGPath {
+        halfEllipse(side: side, geometry: g, rx: g.a + exteriorWidth, ry: g.b + exteriorWidth)
     }
 
     /// The midrib (the trap's hinge, on the fold band): a lens from the top of the zone to the bottom.
@@ -251,7 +290,16 @@ enum TrapArt {
             let root = CGPoint(x: g.center.x + s * g.a * rootR * cos(tt), y: g.center.y + g.b * rootR * sin(tt))
             let angle = atan2(ny, s * nx)
             let bulge = sin(CGFloat.pi * u)
-            out.append(TrapTooth(root: root, angle: angle, length: 20 + 22 * bulge, width: 8.5 + 3 * bulge,
+            // R2: cilia, not spikes: 1.5 × longer and 40 % thinner than R1, the tip kept 4 pt inside the canvas.
+            var length: CGFloat = 30 + 33 * bulge
+            let dx = cos(angle), dy = sin(angle)
+            let margin: CGFloat = 4
+            if dx < -0.0001 { length = min(length, (root.x - margin) / -dx) }
+            if dx > 0.0001 { length = min(length, (g.sceneSize.width - margin - root.x) / dx) }
+            if dy < -0.0001 { length = min(length, (root.y - margin) / -dy) }
+            if dy > 0.0001 { length = min(length, (g.sceneSize.height - margin - root.y) / dy) }
+            length = max(length, 18)
+            out.append(TrapTooth(root: root, angle: angle, length: length, width: (8.5 + 3 * bulge) * 0.6,
                                  curl: i % 2 == 0 ? 1 : -1))
         }
         return out

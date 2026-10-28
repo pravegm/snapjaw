@@ -199,8 +199,15 @@ extension TrapArt {
     /// Half the side of the square every bug's art fits in.
     static func bugExtent(radius: CGFloat) -> CGFloat { radius * 1.45 + 2 }
 
-    /// The art radius per species (the same as Core's `BugInfo.radius`; used when there is no catalog to ask).
+    /// The art radius per species: R1's radius × `artScale` (R2: the bugs are the subject, so they are drawn 1.8 ×
+    /// bigger; Core's `BugInfo.radius` grows by the same factor, so the art and the rules agree). The scene draws
+    /// `max(BugInfo.radius, defaultRadius)`, so a Core that already scaled is never scaled twice.
     static func defaultRadius(_ s: BugSpecies) -> CGFloat {
+        (baseRadius(s) * artScale * 10).rounded() / 10
+    }
+
+    /// R1's art radius per species (Core's R1 `BugInfo.radius`).
+    static func baseRadius(_ s: BugSpecies) -> CGFloat {
         switch s {
         case .housefly: return 14
         case .gnat: return 7

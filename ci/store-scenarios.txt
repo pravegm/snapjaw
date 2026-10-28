@@ -1,0 +1,44 @@
+# Snapjaw App Store frames, iPhone sets (docs/appstore/screenshots.md, section A, 27 Oct). This file is the source of
+# truth for the captions once it exists (screenshots.md says so): change a caption here, not only there.
+# Run by .github/workflows/store.yml: ci/store-capture.sh phone → ci/screenshots.sh (SCENARIOS=this file,
+# SCENARIO_FILTER='^P[0-9]', WAIT_FREEZE=1) on the iPhone 18 Pro Max (6.9", 2868 x 1320) and the iPhone 18 Pro (6.3",
+# 2622 x 1206), then ci/store-set.sh captions them (ci/store-frame.swift) into <set>/store/ with a MANIFEST. The Duo
+# set lives in ci/duo-store-scenarios.txt. Names are zero-padded (P01–P10) so the upload folder sorts in frame order,
+# and they are exactly the file names docs/appstore/asc-metadata.json lists (P01-book-hero … P10-first-bite).
+#
+# name|demo args (Snap/App/DemoMode.swift; keys in design/ROUND-1.md "Demo mode")|seconds to wait|caption: headline / sub-line|expect (extra log regex)|frame
+#  - wait: a freezeOn=<tag> scenario waits for the app's "SNAP-T freeze <tag>" line instead (at least this long, at
+#    least 60 s), then 2 s. freezeAfter=<s> next to freezeOn means the moment only counts after s seconds of play (the
+#    light and the bugs have settled; screenshots.md's "freeze delay" ask).
+#  - caption: `*word*` is the ONE gold-swash word; " / " starts the sub-line. Headline ≤ 30 characters (without the
+#    asterisks) and ≤ 7 words. No "|". store-frame.swift REJECTS smash, squish, squash, splat, kill, slam, "Fold to"
+#    and the competitor's name; store-set.sh flags flat, "shut" on its own (not "a little shut"), quick, fast, prices
+#    and "#1".
+#  - frame: flat (default) or book:<Duo scenario> = the book-pose composite of that Duo capture (store-frame --book);
+#    P01's own capture here is only the fallback if the Duo capture is missing (then P01 is FLAGGED: never upload a
+#    flat P01 without telling the founder).
+#  - No fold here: every iPhone frame must log an unfolded canvas with the HUD on the right
+#    ("SNAP-T canvas WxH fold=0 hudLeft=0", required by the workflow), and the hints say "Tap to snap". A pilot plays
+#    every play frame (the phone sim has no hinge).
+#  - Seeds, waves and pilots are the ones proven in ci/scenarios.txt and on the Duo (duo run 40603497021: crowd at
+#    wave 6, feast count=5 at wave 8, bee at wave 15, all with the perfect pilot), not screenshots.md's first guesses
+#    (mode=attract, seed 11): feed mode shows the real snaps row, so the economy on screen is the real one.
+# Truthfulness (docs/appstore/screenshots.md checklist): a Feast is ≥ 3 bugs and wins a snap back; bees cost an extra
+# snap; the day runs morning → noon → dusk (wave 15) → night (wave 23); 16 Bug Book species; the Daily Bog is one
+# scored try a day; First Bite runs on the first go. If any of these change, change the caption.
+
+# ---- iPhone 6.9" (2868 x 1320) and 6.3" (2622 x 1206): ten frames ---------------------------------------------------
+P01-book-hero|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd|60|Your Duo is a *flytrap* / Best on iPhone Duo. Plays on other iPhones too.|SNAP-T freeze crowd|book:D01-book-hero
+P02-feast|screen=play;seed=7;wave=8;pilot=perfect;freezeOn=feast|90|Wait for a crowd. *CHOMP!* / One bite catches every bug inside.|SNAP-T event feast count=[3-9]
+P03-bee|screen=play;seed=7;wave=15;pilot=perfect;freezeOn=bee|60|Never eat a *bee* / Bees cost snaps. Wait them out.|SNAP-T freeze bee
+P04-last-snap|screen=play;seed=7;pilot=novice;freezeOn=lastSnap|150|Every snap *counts* / Big bites win snaps back.|SNAP-T event lastSnap
+P05-dusk|screen=play;seed=7;wave=17;pilot=expert;freezeOn=crowd;freezeAfter=3|60|From morning to *night* / New bugs as the day goes on.|SNAP-T start wave 17
+P06-night|screen=play;seed=7;wave=24;pilot=expert;freezeOn=crowd;freezeAfter=3|60|Fireflies light the *night* / Crickets, moths and a rare Golden Scarab.|SNAP-T start wave 24
+P07-bug-book|screen=book;progress=mid|6|Fill the *Bug Book* / 16 species, each with a joke.|SNAP-T screen book
+P08-results|screen=results;seed=7;progress=mid;pilot=expert|8|One more *go*? / Best bite, longest chain, bees spared.|SNAP-T run score=
+P09-daily|screen=home;progress=mid|6|One *Daily Bog* for everyone / Same bugs, one try that counts.|
+P10-first-bite|screen=lesson;lessonStep=6|8|Learn it in one *First Bite* / A short lesson on your first go.|SNAP-T lesson step 6
+
+# reserves (phone): not captured by default; run them with a filter like '^(P[0-9]|R[0-9])'.
+# R2: the expect insists on a wasp, because the sub-line names one (a bumblebee sting is cost 1, not 2).
+R2-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=sting|90|A wasp? *Bzzt!* / Wasps sting: two extra snaps.|SNAP-T event stung .*species=wasp

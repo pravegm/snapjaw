@@ -17,6 +17,18 @@ enum FeelAudioRules {
     /// `heal()` treats an interruption with no `.ended` as over after this long (s), if the app is active and no
     /// other audio is playing.
     static let staleInterruption: Double = 3
+    /// `AVAudioSession.ErrorCode.cannotStartPlaying` ('!pla') and `.insufficientPriority` ('!pri'), by value: the
+    /// session is not allowed to play right now (a phone call, another app's priority).
+    static let cannotStartPlayingCode = 0x2170_6C61
+    static let insufficientPriorityCode = 0x2170_7269
+    /// After such a refusal, `heal()` waits this long (s) before trying again.
+    static let blockedBackoff: Double = 3
+
+    /// QA-1 #17: a start refused because the session may not play right now (a call) is not an engine failure. It
+    /// never counts toward the reconnect / rebuild ladder (which would churn a rebuild every 5 s on the main thread).
+    static func isBlocked(code: Int) -> Bool {
+        code == cannotStartPlayingCode || code == insufficientPriorityCode
+    }
 
     /// True for a `.began` that really starts an interruption. A late "app was suspended" notice is stale: it must
     /// never switch self-repair off for the session.
@@ -104,6 +116,8 @@ final class FeelAudioEngine {
     /// The app is in the background. The engine is paused on purpose and nothing restarts it there; `resume()` does.
     private(set) var inBackground = false
     private var lastSoundRetry: CFTimeInterval = -Double.infinity
+    /// A start was refused as "not allowed to play now" (QA-1 #17): `heal()` waits until then.
+    private var blockedUntil: CFTimeInterval = -Double.infinity
 
     init() {}
 
@@ -187,6 +201,7 @@ final class FeelAudioEngine {
     /// Cheap check from the frame loop (the director calls it about once a second).
     func heal() {
         guard isStarted, enabled, !isNapping, !inBackground, synth != nil, !engine.isRunning else { return }
+        guard CACurrentMediaTime() >= blockedUntil else { return }
         guard UIApplication.shared.applicationState != .background else { return }
         if interrupted {
             // A `.began` that no `.ended` follows must never switch self-repair off for the session.
@@ -345,6 +360,11 @@ final class FeelAudioEngine {
             startFailures = 0
             applyState()
         } catch {
+            if FeelAudioRules.isBlocked(code: (error as NSError).code) {
+                blockedUntil = CACurrentMediaTime() + FeelAudioRules.blockedBackoff
+                record("The audio session may not play now (\(reason))", error)
+                return
+            }
             startFailures += 1
             record("Couldn't start the audio engine (\(reason), try \(startFailures))", error)
             if startFailures == 2 {

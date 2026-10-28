@@ -133,12 +133,18 @@ enum BogTextures {
 
     // MARK: The trap
 
-    /// The bog for a scene of `size` (one per width; the old one is dropped when the width changes).
+    /// How far the backdrop runs past every edge of the scene (QA-1 #20: the bite's shake never shows a dark sliver).
+    static let backdropBleed: CGFloat = 24
+
+    /// The bog for a scene of `size`, with `backdropBleed` on every side (one per width; the old one is dropped when
+    /// the width changes). Place it at (−bleed, −bleed), sized `size` + 2 × bleed.
     static func backdrop(size: CGSize) -> SKTexture {
-        let key = "bog-\(Int(size.width.rounded()))x\(Int(size.height.rounded()))"
+        let key = backdropKey(size: size)
         let g = TrapGeometry(sceneSize: size)
-        return make(key, width: size.width, height: size.height, scale: 2) { ctx, s in
-            BogArt.drawBackdrop(ctx, size: s, geometry: g)
+        let b = backdropBleed
+        return make(key, width: size.width + 2 * b, height: size.height + 2 * b, scale: 2) { ctx, _ in
+            ctx.translateBy(x: b, y: b)
+            BogArt.drawBackdrop(ctx, size: size, geometry: g)
         }
     }
 
@@ -165,12 +171,20 @@ enum BogTextures {
         return BogArt.lobeFrame(side: 1, geometry: g, reach: reach, pad: pad).size
     }
 
-    static let lobePad: CGFloat = 6
+    /// The lobe layers' margin past the zone's edge (R2: room for the green back).
+    static let lobePad: CGFloat = TrapArt.exteriorWidth + 6
     static let jawPad: CGFloat = 4
 
     static func lobe(side: Int) -> SKTexture {
         lobeLayer("lobe", side: side, reach: 1, pad: lobePad, scale: 2) { ctx, sd, g in
             BogArt.drawLobe(ctx, side: sd, geometry: g)
+        }
+    }
+
+    /// The lobe's silhouette in white (the night tint and the hunger wilt are tinted copies of it).
+    static func lobeSilhouette(side: Int) -> SKTexture {
+        lobeLayer("lsil", side: side, reach: 1, pad: lobePad, scale: 0.5) { ctx, sd, g in
+            BogArt.drawLobeSilhouette(ctx, side: sd, geometry: g)
         }
     }
 
@@ -235,7 +249,7 @@ enum BogTextures {
         make("hair", width: 14, height: 24, scale: 3) { ctx, s in BogArt.drawHair(ctx, size: s) }
     }
 
-    /// A nectar drop of radius `r` (rounded to whole points). The texture is 3r square.
+    /// A nectar drop of drawn radius `r` (rounded to whole points). The texture is 3r square.
     static func nectar(radius r: CGFloat) -> SKTexture {
         let rr = max(r.rounded(), 3)
         return make("nectar-\(Int(rr))", width: rr * 3, height: rr * 3, scale: 3) { ctx, s in
@@ -243,9 +257,51 @@ enum BogTextures {
         }
     }
 
+    /// The drawn radius for Core's nectar radius `r` (−30 %).
+    nonisolated static func nectarDrawnRadius(_ r: CGFloat) -> CGFloat {
+        max((max(r, 3) * TrapArt.nectarDrawScale).rounded(), 3)
+    }
+
+    /// The economy's snap glyph (≈ 30 × 22 pt) and its two halves (a sting cracks one).
+    static let glyphSize = CGSize(width: 30, height: 22)
+
+    static var snapGlyph: SKTexture {
+        make("glyph", width: glyphSize.width, height: glyphSize.height, scale: 3) { ctx, s in
+            BogArt.drawSnapGlyph(ctx, size: s)
+        }
+    }
+
     // MARK: Bugs
 
     static func bugSide(radius: CGFloat) -> CGFloat { 2 * TrapArt.bugExtent(radius: radius) }
+
+    /// A bug's white silhouette (body, head and outline), for the 2-frame white flash when it is caught.
+    static func bugSilhouette(_ s: BugSpecies, radius: CGFloat) -> SKTexture {
+        let r = max(radius.rounded(), 3)
+        let side = bugSide(radius: r)
+        return make("bugsil-\(s.rawValue)-\(Int(r))", width: side, height: side, scale: 1.5) { ctx, sz in
+            ctx.translateBy(x: sz.width / 2, y: sz.height / 2)
+            let body = TrapArt.bugBody(s, radius: r)
+            BogPainter.stroke(ctx, body, RGBA(1, 1, 1), width: max(r * 0.17, 2.4))
+            BogPainter.fill(ctx, body, RGBA(1, 1, 1))
+        }
+    }
+
+    /// The side of a protected bug's ring texture.
+    static func protectedRingSide(radius: CGFloat) -> CGFloat {
+        2 * (max(radius.rounded(), 3) * TrapArt.protectedRingScale + 6)
+    }
+
+    /// A protected bug's crisp ring (bees white, wasps red), radius `protectedRingScale` × the art radius.
+    static func protectedRing(_ s: BugSpecies, radius: CGFloat) -> SKTexture {
+        let r = max(radius.rounded(), 3)
+        let side = protectedRingSide(radius: r)
+        let wasp = s == .wasp
+        let color = wasp ? RGBA(hex: 0xFF5A3C) : RGBA(1, 1, 1)
+        return make("pring-\(wasp ? "w" : "b")-\(Int(r))", width: side, height: side, scale: 3) { ctx, sz in
+            BogArt.drawProtectedRing(ctx, size: sz, radius: r * TrapArt.protectedRingScale, color: color)
+        }
+    }
 
     static func bug(_ s: BugSpecies, radius: CGFloat) -> SKTexture {
         let r = max(radius.rounded(), 3)
@@ -288,6 +344,7 @@ enum BogTextures {
             _ = lobeShadeWide(side: side)
             _ = gloss(side: side)
             _ = lobeGlow(side: side)
+            _ = lobeSilhouette(side: side)
             _ = jaw(side: side)
         }
         _ = midrib
@@ -295,9 +352,17 @@ enum BogTextures {
         _ = tooth(curl: 1)
         _ = tooth(curl: -1)
         _ = hair
+        _ = snapGlyph
+        // Every nectar size Core can seed (QA-1 #24: none is drawn mid-run), with a margin either side.
+        let lo = Int(nectarDrawnRadius(CGFloat(Tuning.nectarRadiusMin)))
+        let hi = Int(nectarDrawnRadius(CGFloat(Tuning.nectarRadiusMax)))
+        for r in max(lo - 1, 3)...max(hi + 1, 3) { _ = nectar(radius: CGFloat(r)) }
         for s in BugSpecies.allCases {
-            _ = bug(s, radius: radius(s))
-            _ = wings(s, radius: radius(s))
+            let r = radius(s)
+            _ = bug(s, radius: r)
+            _ = wings(s, radius: r)
+            _ = bugSilhouette(s, radius: r)
+            if s.isProtected { _ = protectedRing(s, radius: r) }
         }
     }
 }

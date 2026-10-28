@@ -32,16 +32,24 @@ enum FeelTouchJaw {
 /// - The lobes reopen over 0.35 s, and the trap re-arms by itself `Tuning.touchRearmDelay` (0.45 s) after the tap.
 ///   Taps before then are ignored (one bite per arm, like the hinge).
 /// - Never creeping, never too flat, no angle.
+/// - A stale bite (QA-1 #7): if no frame asks until more than `staleSnap` after the jaws met (a tap just before a pause,
+///   Control Centre or the menu), the bite is dropped and the trap is open and armed again. It never lands later on bugs
+///   that have moved.
 ///
 /// Everything is computed from the tap's time, so the answer never depends on how often frames ask.
 @MainActor
 final class TouchTrapSource: TrapSource {
+    /// A bite whose contact is older than this (s) when a frame finally asks is dropped.
+    static let staleSnap = 0.25
+
     /// When the current bite's tap happened (nil: none yet).
     private var tapTime: TimeInterval?
     /// The current bite's snap has been handed to a frame.
     private var delivered = true
     /// Taps that started a bite (diagnostics and tests).
     private(set) var bites = 0
+    /// Bites dropped as stale (diagnostics and tests).
+    private(set) var staleBites = 0
 
     init() {}
 
@@ -63,6 +71,12 @@ final class TouchTrapSource: TrapSource {
     func input(at time: TimeInterval) -> TrapInput {
         guard time.isFinite, let tap = tapTime else { return TrapInput() }
         let contact = tap + Tuning.touchSnapTime
+        if !delivered && time - contact > Self.staleSnap {
+            // Nobody was playing when the jaws met: forget the bite.
+            staleBites += 1
+            reset()
+            return TrapInput()
+        }
         var snap: SnapTrigger?
         if !delivered && time >= contact {
             delivered = true

@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// The trap drawn by SwiftUI from the Scene's own paths (`TrapArt.lobePath`/`teethPath`, `TrapArt.palette`), so
-/// Home's title trap, the pose and cover cards and the in-game trap are one art source. `closure01` 0 open … 1 snapped.
-/// Drawn in scene space (952 × 670, y up) and fitted into the view.
+/// The trap drawn by SwiftUI from the Scene's own paths (`TrapArt.lobePath`/`teethPath`), in the R2 look: a deep
+/// crimson face (#7A0C26 at the midrib → #D23048 at the rim), a thin dark-green lip and the green leaf outside it, no
+/// rind and no smudge. Only a fallback now: Home shows the live scene, and the cover card and Results the scene's own
+/// `TrapArt.trapImage` (`TrapArtImage`). `closure01` 0 open … 1 snapped. Drawn in scene space (952 × 670, y up).
 struct TrapPortrait: View {
     var closure01: Double
     /// Draw the bog corners round it (Home); false: just the trap (cards).
@@ -16,10 +17,10 @@ struct TrapPortrait: View {
         let teeth = [Path(TrapArt.teethPath(side: -1, geometry: g, closure01: c)),
                      Path(TrapArt.teethPath(side: 1, geometry: g, closure01: c))]
         let p = TrapArt.palette
-        let inner = Color(snapRGBA: p.lobeInner)
-        let skin = Color(snapRGBA: p.lobeOuter)
-        let gloss = Color(snapRGBA: p.lobeGloss)
-        let rim = Color(snapRGBA: p.rim)
+        let leaf = Color(snapHex: 0x2F6A2C)
+        let lip = Color(snapHex: 0x173D17)
+        let faceDeep = Color(snapHex: 0x7A0C26)
+        let faceRim = Color(snapHex: 0xD23048)
         let tooth = Color(snapRGBA: p.teeth)
         let ink = Color(snapRGBA: p.ink)
         let center = g.center
@@ -33,20 +34,21 @@ struct TrapPortrait: View {
             let oy = (size.height - sh * s) / 2
             let t = CGAffineTransform(a: s, b: 0, c: 0, d: -s, tx: ox, ty: oy + sh * s)
             // A soft shadow under the whole trap.
-            let shadowRect = CGRect(x: center.x - a * 1.02, y: center.y - b * 1.06, width: a * 2.04, height: b * 2.04)
-            context.fill(Path(ellipseIn: shadowRect).applying(t), with: .color(Color.black.opacity(0.28)))
+            let shadowRect = CGRect(x: center.x - a * 1.04, y: center.y - b * 1.08, width: a * 2.08, height: b * 2.08)
+            context.fill(Path(ellipseIn: shadowRect).applying(t), with: .color(Color.black.opacity(0.3)))
+            // The green leaf outside the lip (both lobes first, so neither paints over the other's face).
+            for lobe in lobes {
+                context.stroke(lobe.applying(t), with: .color(leaf), style: StrokeStyle(lineWidth: 52 * s,
+                                                                                      lineJoin: .round))
+            }
             for (i, lobe) in lobes.enumerated() {
                 let l = lobe.applying(t)
                 let side: CGFloat = i == 0 ? -1 : 1
-                // The outer skin peeks round the rim, then the crimson face, darker toward the midrib.
-                context.stroke(l, with: .color(skin), style: StrokeStyle(lineWidth: 26 * s, lineJoin: .round))
-                context.fill(l, with: .color(inner))
+                // The deep crimson face, darkest at the midrib.
                 let mid = CGPoint(x: center.x, y: center.y).applying(t)
                 let edge = CGPoint(x: center.x + side * a, y: center.y).applying(t)
-                context.fill(l, with: .linearGradient(Gradient(colors: [Color.black.opacity(0.32),
-                                                                        Color.black.opacity(0)]),
-                                                      startPoint: mid, endPoint: CGPoint(x: (mid.x + edge.x) / 2,
-                                                                                         y: mid.y)))
+                context.fill(l, with: .linearGradient(Gradient(colors: [faceDeep, faceRim]), startPoint: mid,
+                                                      endPoint: edge))
                 // Closing darkens the outer edges (the screen agrees with your hands).
                 if c > 0.01 {
                     context.fill(l, with: .linearGradient(Gradient(colors: [Color.black.opacity(0),
@@ -54,21 +56,22 @@ struct TrapPortrait: View {
                                                           startPoint: CGPoint(x: (mid.x + edge.x) / 2, y: mid.y),
                                                           endPoint: edge))
                 }
-                // The wet sheen: one soft streak per lobe.
-                let streak = CGRect(x: center.x + side * a * 0.48 - a * 0.16, y: center.y + b * 0.30,
-                                    width: a * 0.32, height: b * 0.20)
+                // The wet sheen: one soft white streak per lobe.
+                let streak = CGRect(x: center.x + side * a * 0.48 - a * 0.16, y: center.y + b * 0.34,
+                                    width: a * 0.32, height: b * 0.12)
                 var glossCtx = context
                 glossCtx.clip(to: l)
-                glossCtx.fill(Path(ellipseIn: streak).applying(t), with: .color(gloss.opacity(0.55)))
-                context.stroke(l, with: .color(rim), style: StrokeStyle(lineWidth: 9 * s, lineJoin: .round))
+                glossCtx.fill(Path(ellipseIn: streak).applying(t), with: .color(Color.white.opacity(0.16)))
+                context.stroke(l, with: .color(lip), style: StrokeStyle(lineWidth: 6 * s, lineJoin: .round))
             }
             // The midrib.
-            let ribTop = CGPoint(x: center.x, y: center.y + b * 0.92).applying(t)
-            let ribBottom = CGPoint(x: center.x, y: center.y - b * 0.92).applying(t)
+            let ribTop = CGPoint(x: center.x, y: center.y + b * 0.94).applying(t)
+            let ribBottom = CGPoint(x: center.x, y: center.y - b * 0.94).applying(t)
             var rib = Path()
             rib.move(to: ribTop)
             rib.addLine(to: ribBottom)
-            context.stroke(rib, with: .color(rim.opacity(0.85)), style: StrokeStyle(lineWidth: 10 * s, lineCap: .round))
+            context.stroke(rib, with: .color(Color(snapHex: 0x4E0716)), style: StrokeStyle(lineWidth: 12 * s,
+                                                                                             lineCap: .round))
             for row in teeth {
                 let path = row.applying(t)
                 context.fill(path, with: .color(tooth))
@@ -79,64 +82,79 @@ struct TrapPortrait: View {
     }
 }
 
-/// A bug drawn from the Scene's own paths (`TrapArt.bugBody`/`bugWings`/`bugColors`), facing right, fitted into the
-/// view. `found` false draws its silhouette (the Bug Book's unfound pages).
+/// The play trap exactly as the scene paints it (`TrapArt.trapImage`, Scene R2: the same drawing code as the lobes),
+/// fitted into the view. Falls back to `TrapPortrait` if the image can't be made.
+struct TrapArtImage: View {
+    var body: some View {
+        if let image = TrapImageCache.image() {
+            Image(decorative: image, scale: TrapImageCache.scale)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .accessibilityHidden(true)
+        } else {
+            TrapPortrait(closure01: 0)
+        }
+    }
+}
+
+/// One render of `TrapArt.trapImage`, kept for the app's life.
+@MainActor
+enum TrapImageCache {
+    static let width: CGFloat = 420
+    static let scale: CGFloat = 2
+    private static var cached: CGImage?
+    private static var tried = false
+
+    static func image() -> CGImage? {
+        if let hit = cached { return hit }
+        guard !tried else { return nil }
+        tried = true
+        cached = TrapArt.trapImage(width: width, scale: scale)
+        return cached
+    }
+}
+
+/// A bug exactly as the game paints it (`TrapArt.bugImage`, the Scene's own drawing: stripes, fuzz, faces), facing
+/// up-right a little, fitted into the view (REVIEW-1 #12: one art language). `found` false draws its silhouette (the
+/// Bug Book's unfound pages). Images are drawn once per look and cached.
 struct BugPortrait: View {
     let species: BugSpecies
     var found = true
-    /// Wings a little open (flying) or folded.
+    /// Wings spread (flying) or half folded.
     var flying = false
 
     var body: some View {
-        let r = max(BugCatalog.info(species).radius, 4)
-        let bodyPath = Path(TrapArt.bugBody(species, radius: r))
-        let wingPath = Path(TrapArt.bugWings(species, radius: r))
-        let colors = TrapArt.bugColors(species)
-        let bodyColor = Color(snapRGBA: colors.body)
-        let accent = Color(snapRGBA: colors.accent)
-        let wing = Color(snapRGBA: colors.wing)
-        let eye = Color(snapRGBA: colors.eye)
-        let ink = Color(snapRGBA: TrapArt.palette.ink)
-        let box = bodyPath.boundingRect.union(wingPath.boundingRect)
-        let bodyBox = bodyPath.boundingRect
-        let isFound = found
-        let lifted = flying
-        Canvas { context, size in
-            guard box.width > 0, box.height > 0 else { return }
-            let s = min(size.width / box.width, size.height / box.height) * 0.86
-            // y flipped (the Scene's paths are y up), centred.
-            let t = CGAffineTransform(a: s, b: 0, c: 0, d: -s, tx: size.width / 2 - box.midX * s,
-                                      ty: size.height / 2 + box.midY * s)
-            let w = wingPath.applying(t)
-            let bp = bodyPath.applying(t)
-            if !isFound {
-                context.fill(w, with: .color(Color.black.opacity(0.35)))
-                context.fill(bp, with: .color(Color.black.opacity(0.55)))
-                context.stroke(bp, with: .color(SnapTheme.mossLight), lineWidth: 2)
-                return
-            }
-            var wings = context
-            wings.opacity = lifted ? 0.75 : 0.9
-            wings.fill(w, with: .color(wing))
-            wings.stroke(w, with: .color(ink.opacity(0.35)), lineWidth: max(1, 1.2 * s))
-            context.fill(bp, with: .linearGradient(Gradient(colors: [bodyColor, accent]),
-                                                   startPoint: CGPoint(x: bp.boundingRect.midX, y: bp.boundingRect.minY),
-                                                   endPoint: CGPoint(x: bp.boundingRect.midX, y: bp.boundingRect.maxY)))
-            context.stroke(bp, with: .color(ink.opacity(0.8)), lineWidth: max(1.2, 1.6 * s))
-            // Big cartoon eyes at the front (+x).
-            let h = bodyBox.height
-            let eyeR = max(h * 0.15, 1)
-            for dy in [h * 0.17, -h * 0.17] {
-                let c = CGPoint(x: bodyBox.maxX - h * 0.24, y: bodyBox.midY + dy).applying(t)
-                let rr = eyeR * s
-                context.fill(Path(ellipseIn: CGRect(x: c.x - rr, y: c.y - rr, width: rr * 2, height: rr * 2)),
-                             with: .color(.white))
-                let pr = rr * 0.55
-                context.fill(Path(ellipseIn: CGRect(x: c.x - pr + rr * 0.25, y: c.y - pr, width: pr * 2, height: pr * 2)),
-                             with: .color(eye))
-            }
+        if let image = BugArtCache.image(species, found: found, flying: flying) {
+            Image(decorative: image, scale: BugArtCache.scale)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .rotationEffect(.degrees(-24))
+                .opacity(found ? 1 : 0.85)
+                .accessibilityHidden(true)
+        } else {
+            Circle().fill(Color.black.opacity(0.3)).padding(8)
+                .accessibilityHidden(true)
         }
-        .accessibilityHidden(true)
+    }
+}
+
+/// `TrapArt.bugImage` renders, kept per species and look (they are small: ~75 pt at 3×).
+@MainActor
+enum BugArtCache {
+    /// One radius for every portrait, so the drawing (not the species' size) fills the frame.
+    static let radius: CGFloat = 24
+    static let scale: CGFloat = 3
+    private static var cache: [String: CGImage] = [:]
+
+    static func image(_ s: BugSpecies, found: Bool, flying: Bool) -> CGImage? {
+        let key = "\(s.rawValue).\(found ? 1 : 0).\(flying ? 1 : 0)"
+        if let hit = cache[key] { return hit }
+        guard let made = TrapArt.bugImage(s, radius: radius, scale: scale, wingSpread: flying ? 1 : 0.7,
+                                          silhouette: !found) else { return nil }
+        cache[key] = made
+        return made
     }
 }
 

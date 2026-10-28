@@ -3,8 +3,9 @@ import SpriteKit
 import UIKit
 
 /// The day's light (GAME-DESIGN §10): warm gold morning, white noon, peach dusk, blue night, from `dayClock` 0…4.
-/// A multiply tint over the bog and the trap, a haze from the sky, a vignette; at night the bog's own fireflies come
-/// out and the dew stops twinkling. Bugs get a lighter tint of their own (they must stay readable).
+/// A multiply tint over the bog (never the trap: it gets a ≤ 25 % normal-alpha overlay so it stays crimson), a haze
+/// from the sky, a vignette; at night the bog's own fireflies come out and the dew stops twinkling. Bugs get a
+/// lighter tint of their own (they must stay readable).
 @MainActor
 final class BogLight {
     /// One key of the day (at dayClock 0, 1, 2, 3, 4).
@@ -39,6 +40,14 @@ final class BogLight {
                    bugAmount: a.bugAmount + (b.bugAmount - a.bugAmount) * f)
     }
 
+    /// The trap's overlay for a light key: the haze colour (gold morning, peach dusk, blue night) at up to 25 %
+    /// alpha, by how far the day's light is from white.
+    static func lobeLight(_ k: Key) -> (RGBA, CGFloat) {
+        let minC = min(k.env.r, k.env.g, k.env.b)
+        let a = CGFloat(min(max((1 - minC) / 0.58, 0), 1)) * 0.25
+        return (k.haze, a)
+    }
+
     /// 0 by day … 1 at night.
     static func nightness(_ clock: Double) -> CGFloat {
         BogMath.smoothstep(2.35, 3.0, CGFloat(clock.isFinite ? clock : 0))
@@ -50,7 +59,7 @@ final class BogLight {
         return BogMath.smoothstep(1.35, 2.0, c) * (1 - BogMath.smoothstep(2.3, 3.0, c))
     }
 
-    /// Scene z 20 (multiply).
+    /// Scene z 5 (multiply, over the bog only: R2 #21, so the trap keeps its crimson at dusk and night).
     let tint: SKSpriteNode
     /// Scene z 21 (additive sky haze).
     let haze: SKSpriteNode
@@ -64,6 +73,10 @@ final class BogLight {
     private(set) var bugTint: UIColor = .white
     private(set) var bugTintAmount: CGFloat = 0
     private(set) var envTint = RGBA(1, 1, 1)
+    /// The trap's own light (R2 #21): a normal-alpha overlay of the day's colour, at most 25 %, instead of the
+    /// multiply that turned the crimson magenta.
+    private(set) var lobeTint: UIColor = .white
+    private(set) var lobeTintAlpha: CGFloat = 0
     private var pulseLevel: CGFloat = 0
     private var twinkles: [(SKSpriteNode, CGFloat)] = []
     private var flies: [(core: SKSpriteNode, glow: SKSpriteNode, home: CGPoint, phase: CGFloat)] = []
@@ -79,7 +92,7 @@ final class BogLight {
         sparkleRoot = s
         vignette = v
         t.blendMode = .multiply
-        t.zPosition = 20
+        t.zPosition = 5
         h.blendMode = .add
         h.colorBlendFactor = 1
         h.zPosition = 21
@@ -162,6 +175,9 @@ final class BogLight {
             haze.alpha = CGFloat(k.hazeAlpha)
             bugTint = BogPaint.ui(RGBA(k.bug.r, k.bug.g, k.bug.b, 1))
             bugTintAmount = CGFloat(k.bugAmount)
+            let (c, a) = BogLight.lobeLight(k)
+            lobeTint = BogPaint.ui(RGBA(c.r, c.g, c.b, 1))
+            lobeTintAlpha = a
         }
         pulseLevel = BogMath.approach(pulseLevel, 0, rate: 2.6, dt: CGFloat(max(fxDt, 0)))
         vignette.alpha = 0.2 + 0.28 * night + 0.5 * pulseLevel

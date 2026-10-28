@@ -45,8 +45,10 @@ private let tolerance: CGFloat = 0.75
 
 private func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) <= tolerance }
 
-private func report(caught: [BugSpecies], stingers: [BugSpecies] = [], duration: Double = 0.1) -> BiteReport {
-    BiteReport(caught: caught, escaped: 0, stingers: stingers, points: 10 * caught.count, countMultiplier: caught.count,
+private func report(caught: [BugSpecies], stingers: [BugSpecies] = [], duration: Double = 0.1,
+                    escaped: Int = 0) -> BiteReport {
+    BiteReport(caught: caught, escaped: escaped, stingers: stingers, points: 10 * caught.count,
+               countMultiplier: caught.count,
                chainMultiplier: 1, snapsBack: 0, snapsLost: 0, duration: duration, time: 3)
 }
 
@@ -339,7 +341,68 @@ struct LessonTests {
         let actions = s.update(LessonScript.Input(time: 0, hasHinge: false))
         #expect(s.step == .firstSnap)
         #expect(actions.count == 1)
-        #expect(s.display(touch: true).line.contains("tap"))
+        #expect(s.display(touch: true, hasPose: false).line.contains("tap"))
+        // Phone numbering: no pose step, no re-arm step (REVIEW-1 #22).
+        #expect(s.display(touch: true, hasPose: false).stepOf == "Step 1 of 4")
+    }
+
+    @Test func stepNumbersCountOnlyVisibleSteps() {
+        #expect(LessonScript.stepLabel(.firstSnap, touch: false, hasPose: true) == "Step 2 of 6")
+        #expect(LessonScript.stepLabel(.tooSlow, touch: true, hasPose: false) == "Step 2 of 4")
+        #expect(LessonScript.stepLabel(.triple, touch: true, hasPose: false) == "Step 4 of 4")
+        #expect(LessonScript.stepLabel(.bee, touch: true, hasPose: true) == "Step 4 of 5")
+        #expect(LessonScript.next(.firstSnap, touch: true) == .tooSlow)
+        #expect(LessonScript.next(.firstSnap, touch: false) == .openAgain)
+    }
+
+    @Test func skipIsOfferedFromStepOne() {
+        let s = LessonScript(start: .pose)
+        #expect(s.allowsSkip)
+        #expect(s.display(touch: false, hasPose: true).allowsSkip)
+        #expect(!LessonScript(start: .done).allowsSkip)
+    }
+
+    @Test func noHingeReadingMovesOnAfterThreeSeconds() {
+        var s = LessonScript(start: .pose)
+        _ = s.update(LessonScript.Input(time: 0, hasHinge: true))
+        _ = s.update(LessonScript.Input(time: 2.5, hasHinge: true))
+        #expect(s.step == .pose)
+        let actions = s.update(LessonScript.Input(time: 3.1, hasHinge: true))
+        #expect(s.step == .firstSnap)
+        #expect(actions == [.spawn(.housefly, slot: 0, linger: .infinity)])
+    }
+
+    @Test func anySnapWithAFlyPassesStepTwo() {
+        var s = LessonScript(start: .firstSnap)
+        _ = s.update(LessonScript.Input(time: 0, hasHinge: true, liveFlies: 1))
+        // A slow snap: the fly escapes, and the step still passes (GAME-DESIGN §8: any speed).
+        let slow: [TrapEvent] = [.snapped(report(caught: [], escaped: 1)), .bugEscaped(id: 1, species: .housefly)]
+        _ = s.update(LessonScript.Input(time: 2, hasHinge: true, events: slow, liveFlies: 0))
+        #expect(s.praise == LessonScript.praiseMiss)
+        _ = s.update(LessonScript.Input(time: 3.4, hasHinge: true))
+        #expect(s.step == .openAgain)
+    }
+
+    @Test func touchMergesTheReArmIntoStepTwo() {
+        var s = LessonScript(start: .firstSnap)
+        _ = s.update(LessonScript.Input(time: 0, hasHinge: false, liveFlies: 1))
+        let caught: [TrapEvent] = [.snapped(report(caught: [.housefly])),
+                                   .bugCaught(id: 1, species: .housefly, position: .zero)]
+        _ = s.update(LessonScript.Input(time: 2, hasHinge: false, events: caught))
+        #expect(s.praise == LessonScript.praiseCatchTouch)
+        let cast = s.update(LessonScript.Input(time: 3.4, hasHinge: false))
+        #expect(s.step == .tooSlow)
+        #expect(cast.count == 2)
+        // "Two flies. Get both in one bite.": one is not enough on touch.
+        let one: [TrapEvent] = [.snapped(report(caught: [.housefly])),
+                                .bugCaught(id: 2, species: .housefly, position: .zero)]
+        _ = s.update(LessonScript.Input(time: 5, hasHinge: false, events: one, liveFlies: 1))
+        #expect(s.praise == nil)
+        #expect(s.warning != nil)
+    }
+
+    @Test func theBeeStaysLongEnoughToLearn() {
+        #expect(LessonScript.beeLinger >= 6)
     }
 
     @Test func firstSnapPassesOnACatch() {
@@ -354,13 +417,17 @@ struct LessonTests {
         #expect(s.allowsSkip)
     }
 
-    @Test func aMissBringsAnotherFly() {
+    @Test func aDrySnapWaitsAndAFlownFlyComesBack() {
         var s = LessonScript(start: .firstSnap)
         _ = s.update(LessonScript.Input(time: 0, hasHinge: true, liveFlies: 1))
-        let miss: [TrapEvent] = [.snapped(report(caught: [])), .bugEscaped(id: 1, species: .housefly)]
-        _ = s.update(LessonScript.Input(time: 2, hasHinge: true, events: miss, liveFlies: 0))
-        #expect(s.warning != nil)
+        // Snapped before the fly was in the trap: no pass, a hint to wait.
+        _ = s.update(LessonScript.Input(time: 1, hasHinge: true, events: [.snapped(report(caught: []))],
+                                        liveFlies: 1, fliesInTrap: 0))
+        #expect(s.warning == LessonScript.waitForSip)
         #expect(s.step == .firstSnap)
+        // The fly is spooked away: another comes.
+        _ = s.update(LessonScript.Input(time: 2, hasHinge: true, events: [.bugSpooked(id: 1, species: .housefly)],
+                                        liveFlies: 0))
         let again = s.update(LessonScript.Input(time: 3.3, hasHinge: true, liveFlies: 0))
         #expect(again == [.spawn(.housefly, slot: 0, linger: .infinity)])
     }
@@ -396,7 +463,7 @@ struct LessonTests {
         #expect(s.praise == "TRIPLE ×3!")
         _ = s.update(LessonScript.Input(time: 9.5, hasHinge: true))
         #expect(s.step == .done)
-        #expect(s.display(touch: false).isFinal)
+        #expect(s.display(touch: false, hasPose: true).isFinal)
     }
 
     @Test func linesAreShort() {
@@ -423,7 +490,7 @@ struct LessonTests {
 @MainActor
 struct WordsTests {
     @Test func hintsAreShort() {
-        let all: [TrapHint] = [.bendALittle, .quick, .openUp, .beeInside, .crowd, .lastSnap]
+        let all: [TrapHint] = [.bendALittle, .quick, .openUp, .beeInside, .crowd, .lastSnap, .hungry]
         for hint in all {
             for touch in [false, true] {
                 guard let text = AppRules.hintText(hint, touch: touch) else { continue }
@@ -484,12 +551,51 @@ struct WordsTests {
         #expect(AppTrace.describe(.rearmed) == "rearmed")
         #expect(AppTrace.describe(.waveStarted(index: 3, phase: .dusk)) == "waveStarted index=3 phase=dusk")
         #expect(AppTrace.describe(.beeSpared(species: .bumblebee)) == "beeSpared species=bumblebee")
+        #expect(AppTrace.describe(.hungry(secondsLeft: 3)) == "hungry secondsLeft=3.0")
+        #expect(AppTrace.describe(.wilted(snapsLeft: 7)) == "wilted snapsLeft=7")
+    }
+
+    @Test func hungerWords() {
+        #expect(AppRules.hintText(.hungry, touch: false) == "Hungry… bite!")
+        #expect(AppRules.hintText(.hungry, touch: true) == "Hungry… bite!")
+        #expect(AppRules.hintIsWarning(.hungry))
+        #expect(AppRules.lessonShowsHint(.beeInside))
+        #expect(AppRules.lessonShowsHint(.crowd))
+        #expect(!AppRules.lessonShowsHint(.hungry))
+        #expect(AppRules.hudHunger(0.51, live: true) == 0.5)
+        #expect(AppRules.hudHunger(2, live: true) == 1)
+        #expect(AppRules.hudHunger(0.7, live: false) == 0)
+        #expect(AppRules.hudHunger(.nan, live: true) == 0)
+    }
+
+    @Test func resultsWords() {
+        #expect(AppRules.bestBiteText(bugs: 4, points: 48) == "4 bugs · 48")
+        #expect(AppRules.bestBiteText(bugs: 1, points: 10) == "1 bug · 10")
+        #expect(AppRules.bestBiteText(bugs: 0, points: 0) == "–")
+        #expect(AppRules.chainText(longest: 0) == "–")
+        #expect(AppRules.chainText(longest: 1).hasSuffix("(1 bite)"))
+        #expect(AppRules.chainText(longest: 2).hasPrefix(AppRules.multiplierText(TrapRules.chainMultiplier(2))))
+        #expect(AppRules.shortName(.goldenScarab) == "Scarab")
+        #expect(AppRules.shortName(.housefly) == "Housefly")
+        #expect(AppRules.rankHint(lifetimeBugs: 0) == "Catch \(PlantRanks.threshold(1)) bugs to grow")
+        #expect(AppRules.rankHint(lifetimeBugs: PlantRanks.threshold(1) - 1).hasPrefix("1 more bug to"))
+        #expect(ResultsView.tilesShown(count: 3, width: 360, tile: 62, gap: 8) == 3)
+        #expect(ResultsView.tilesShown(count: 9, width: 360, tile: 62, gap: 8) == 4)
+        #expect(ResultsView.tilesShown(count: 0, width: 360, tile: 62, gap: 8) == 0)
+    }
+
+    @Test func sproutStartsWithTwelve() {
+        #expect(AppRules.startSnaps(mode: .feed, lifetimeBugs: 0) == 12)
+        #expect(AppRules.startSnaps(mode: .feed, lifetimeBugs: PlantRanks.threshold(1) - 1) == 12)
+        #expect(AppRules.startSnaps(mode: .feed, lifetimeBugs: PlantRanks.threshold(1)) == nil)
+        #expect(AppRules.startSnaps(mode: .daily(day: 3, scored: true), lifetimeBugs: 0) == nil)
+        #expect(AppRules.startSnaps(mode: .lesson, lifetimeBugs: 0) == nil)
     }
 
     @Test func cardCopy() {
         #expect(PoseCard.title(isDuo: true) == "Hold it open like a book")
-        #expect(CoverCard.title(midRun: true) == "Open to carry on")
-        #expect(ClosingCard.title == "Open it a little to carry on")
+        #expect(CoverCard.title(midRun: true) == "Open it up to carry on")
+        #expect(ClosingCard.title == CoverCard.title(midRun: true))
         #expect(DailyView.status(canPlay: true, record: nil).contains("One scored try"))
         var d = ProgressData()
         d.spared = ["bee": 4]
@@ -582,6 +688,77 @@ struct LayoutTests {
     @Test func snapsRowSlots() {
         #expect(SnapsRow.slots(left: 3, max: 12) == Tuning.startSnaps)
         #expect(SnapsRow.slots(left: 12, max: 12) == 12)
+        // "12" never clips: the numeral has its own box, and 11–12 glyphs use the small size (REVIEW-1 #3).
+        #expect(HUDLayout.glyphSize(slots: 12) < HUDLayout.glyphSize(slots: 10))
+        #expect(HUDLayout.snapNumeralW >= 28)
+        #expect(HUDLayout.snapsWidth(slots: 12, rows: 2) < HUDLayout.snapsWidth(slots: 12, rows: 1))
+    }
+
+    /// REVIEW-1 #14: at 951 × 669 (both HUD sides) the score, chain chip, snaps and hint stay off the trap's face.
+    @Test func hudStaysOffTheTrapOnTheDuo() {
+        for left in [false, true] {
+            let c = duo(hudLeft: left)
+            let l = HUDLayout.make(c)
+            for rect in [l.score, l.chain, l.snaps, l.hint] {
+                #expect(c.minTrapRadius(rect) >= HUDLayout.clearRadius - 0.005)
+            }
+            #expect(l.snapRows == 1)
+            #expect(l.hint.width >= HUDLayout.hintMin)
+            // The hint sits below the thumbs' band, off it.
+            #expect(!c.inThumbZone(l.hint))
+        }
+    }
+
+    /// REVIEW-1 #11: nothing the HUD draws in play crosses the crease, on either side.
+    @Test func hudTextIsFoldClear() {
+        for left in [false, true] {
+            let c = duo(hudLeft: left)
+            let l = HUDLayout.make(c)
+            for rect in l.textRects + [l.lessonHint, l.lesson, l.pause] {
+                #expect(c.isFoldClear(rect))
+            }
+            // "Your trap is tired." is centred on the HUD page, not on the crease.
+            #expect(abs(l.tired.midX - c.hudPage.midX) < 1)
+        }
+    }
+
+    @Test func phoneHudWrapsTheSnapsOffTheRim() {
+        let size = CGSize(width: 874, height: 402)
+        let c = AppCanvas(size: size, insets: EdgeInsets(top: 0, leading: 62, bottom: 21, trailing: 62),
+                          layout: ScreenLayout.make(viewSize: size, hasFold: false))
+        let l = HUDLayout.make(c)
+        #expect(l.snapRows == 2)
+        #expect(c.minTrapRadius(l.snaps) >= HUDLayout.clearRadius)
+        #expect(c.minTrapRadius(l.score) >= HUDLayout.clearRadius)
+        #expect(c.minTrapRadius(l.chain) >= HUDLayout.clearRadius)
+        #expect(l.hint.width >= HUDLayout.hintMin)
+    }
+
+    @Test func scenePointInvertsScreenPoint() {
+        let c = duo()
+        let p = CGPoint(x: 700, y: 120)
+        let back = c.scenePoint(c.screenPoint(p))
+        #expect(near(back.x, p.x))
+        #expect(near(back.y, p.y))
+        let l = HUDLayout.make(c)
+        let g = l.firstGlyphCenter(slots: 12)
+        #expect(l.snaps.contains(g))
+    }
+
+    @Test func trapReachMatchesTheEllipse() {
+        let c = duo()
+        let t = c.trapRect
+        let mid = c.trapReach(y0: t.midY - 1, y1: t.midY + 1, right: true)
+        #expect(mid.map { near($0, t.maxX) } ?? false)
+        #expect(c.trapReach(y0: -40, y1: -10, right: true) == nil)
+        #expect(c.minTrapRadius(CGRect(x: t.midX - 5, y: t.midY - 5, width: 10, height: 10)) < 0.1)
+    }
+
+    @Test func bugBookHeaderClearsTheBackButton() {
+        let c = duo()
+        let pause = HUDLayout.make(c).pause
+        let h = BugBookView.headerHeight(compact: false, pauseMaxY: pause.maxY, top: c.top)
+        #expect(c.top - 8 + h >= pause.maxY)
     }
 }
 
@@ -637,6 +814,70 @@ struct TallyTests {
         #expect(GameController.matches(.dusk, s, events: []))
         #expect(GameController.matches(.lastSnap, s, events: [.lastSnap]))
         #expect(!GameController.matches(.results, s, events: []))
+        #expect(GameController.matches(.hungry, s, events: [.hungry(secondsLeft: 3)]))
+        #expect(!GameController.matches(.hungry, s, events: []))
+        #expect(GameController.matches(.wilted, s, events: [.wilted(snapsLeft: 4)]))
+        #expect(DemoMode.Freeze.hungry.isEvent)
+        #expect(DemoMode.Freeze.wilted.isEvent)
+        #expect(DemoMode.parse("freezeOn=hungry").freezeOn == .hungry)
+        #expect(DemoMode.parse("freezeOn=wilted").freezeOn == .wilted)
+    }
+
+    @Test func tallyIgnoresHunger() {
+        var t = RunTally()
+        t.note(.hungry(secondsLeft: 3))
+        t.note(.wilted(snapsLeft: 5))
+        #expect(t == RunTally())
+    }
+
+    @Test func lessonBugsLandOnRealDrops() {
+        let g = ScreenLayout(hasFold: true).geometry
+        let drops = [NectarDrop(id: 1, position: CGPoint(x: 300, y: 340), radius: 10),
+                     NectarDrop(id: 2, position: CGPoint(x: 280, y: 400), radius: 10, occupant: 9),
+                     NectarDrop(id: 3, position: CGPoint(x: 640, y: 260), radius: 10),
+                     NectarDrop(id: 4, position: CGPoint(x: 478, y: 330), radius: 10)]
+        let a = AppRules.lessonSpot(slot: 0, geometry: g, nectar: drops, taken: [])
+        #expect(a.drop == 1)
+        #expect(a.target == CGPoint(x: 300, y: 340))
+        // A drop already given out is skipped; an occupied one and one on the crease are never used.
+        let b = AppRules.lessonSpot(slot: 0, geometry: g, nectar: drops, taken: [1])
+        #expect(b.drop == 3)
+        let none = AppRules.lessonSpot(slot: 0, geometry: g, nectar: drops, taken: [1, 3])
+        #expect(none.drop == nil)
+        #expect(g.contains(none.target))
+        #expect(none.entry.y > g.sceneSize.height)
+    }
+
+    @Test func lessonClaimsAndTargets() {
+        let bugs = [
+            BugState(id: 1, species: .housefly, position: CGPoint(x: 301, y: 341), heading: 0, activity: .sipping,
+                     height: 0, inTrap: true, onRim: false),
+            BugState(id: 2, species: .bee, position: CGPoint(x: 600, y: 300), heading: 0, activity: .walking,
+                     height: 0, inTrap: true, onRim: false),
+            BugState(id: 3, species: .housefly, position: CGPoint(x: 0, y: 0), heading: 0, activity: .leaving,
+                     height: 0.5, inTrap: false, onRim: false),
+        ]
+        let s = TrapSnapshot(bugs: bugs)
+        #expect(AppRules.liveClaims([1: 10, 3: 11, 7: 12], snapshot: s) == [1: 10])
+        let targets = AppRules.lessonTargets(s)
+        #expect(targets.count == 2)
+        #expect(targets.first?.sipping == true)
+        #expect(targets.last?.bee == true)
+    }
+
+    @Test func drawnClosureIsClamped() {
+        #expect(AppRules.drawnClosure(reference: 160, predicted: 140) == 20)
+        #expect(AppRules.drawnClosure(reference: 150, predicted: 160) == 0)
+        #expect(AppRules.drawnClosure(reference: 170, predicted: 0) == 90)
+        #expect(AppRules.drawnClosure(reference: .nan, predicted: 120) == nil)
+    }
+
+    @Test func firstRunIsCelebrated() {
+        var d = ProgressData()
+        let first = record(makeRun(), &d)
+        #expect(first.firstRun)
+        let second = record(makeRun(), &d)
+        #expect(!second.firstRun)
     }
 }
 

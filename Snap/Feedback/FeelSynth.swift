@@ -384,6 +384,8 @@ private enum FeelVoiceKind {
 
 private struct FeelVoice {
     var active = false
+    /// The synth's start counter when this voice started (steal order: the smallest goes first).
+    var stamp: UInt64 = 0
     var kind: FeelVoiceKind = .noise
     var delay = 0
     var age = 0
@@ -483,7 +485,10 @@ private struct FeelBuzzTone {
 final class FeelSynth: @unchecked Sendable {
     let sampleRate: Float
 
-    static let voiceCount = 64
+    /// QA-1 #4: 128 voices (an 8-bug Feast with a scarab issues ~76 commands). Render cost follows the active voices.
+    static let voiceCount = 128
+    /// A ring voice ends after this many decay time constants (e^−5 ≈ 0.7 %), so long bells don't hold a slot.
+    static let ringLengthTaus: Float = 5
     static let maxPartials = 6
     static let queueCapacity = 1024
     static let buzzSlots = 8
@@ -503,6 +508,8 @@ final class FeelSynth: @unchecked Sendable {
     private let readIndex = Atomic<Int>(0)
     private let peakBits = Atomic<UInt32>(0)
     private let renderCount = Atomic<Int>(0)
+    private let stolenCount = Atomic<Int>(0)
+    private let droppedCount = Atomic<Int>(0)
 
     // Audio-thread-only state below.
     private let voices: UnsafeMutablePointer<FeelVoice>
@@ -513,6 +520,10 @@ final class FeelSynth: @unchecked Sendable {
     private var glideK: Float = 0
     private var noiseState: UInt32 = 0x2545_F491
     private var retuneCounter = 0
+    /// Monotonic voice start counter (each start takes the next stamp).
+    private var startCounter: UInt64 = 0
+    /// The first stamp of the current drain: voices from this drain (stamp ≥ floor) are never stolen.
+    private var drainFloor: UInt64 = 1
 
     // Groan.
     private var groanPhase: Float = 0
@@ -621,6 +632,12 @@ final class FeelSynth: @unchecked Sendable {
 
     /// Render callbacks so far: if it stops climbing, the engine isn't pulling audio.
     var renderCallbacks: Int { renderCount.load(ordering: .relaxed) }
+
+    /// One-shot voices that took over the oldest playing voice (all 128 busy), for tests and diagnostics.
+    var stolenVoices: Int { stolenCount.load(ordering: .relaxed) }
+
+    /// One-shot commands dropped because every voice was started in the same drain, for tests and diagnostics.
+    var droppedVoices: Int { droppedCount.load(ordering: .relaxed) }
 
     /// Equal-power pan gains, normalised so the centre is 1 on each side: (√(1 − p), √(1 + p)). Pure.
     static func panGains(_ pan: Float) -> (left: Float, right: Float) {
@@ -1092,6 +1109,7 @@ final class FeelSynth: @unchecked Sendable {
         var read = readIndex.load(ordering: .relaxed)
         let write = writeIndex.load(ordering: .acquiring)
         var handled = 0
+        drainFloor = startCounter &+ 1
         while read != write && handled < 256 {
             let command = queue[read]
             read = (read + 1) % FeelSynth.queueCapacity
@@ -1104,8 +1122,8 @@ final class FeelSynth: @unchecked Sendable {
     private func apply(_ command: FeelSynthCommand) {
         switch command {
         case .bed(let params):
-            target = params
-            let glide = params.glide.isFinite ? max(params.glide, 0.004) : 0.05
+            target = FeelSynth.sanitised(params)
+            let glide = params.glide.isFinite ? min(max(params.glide, 0.004), 10) : 0.05
             glideK = 1 - exp(-1 / (glide * sampleRate))
         case .buzz(let slot, let wanted):
             guard slot >= 0, slot < FeelSynth.buzzSlots else { return }
@@ -1126,7 +1144,40 @@ final class FeelSynth: @unchecked Sendable {
         }
     }
 
+    /// QA-1 #16: every bed field finite and in range (one NaN would otherwise latch the synth silent).
+    static func sanitised(_ bed: FeelBed) -> FeelBed {
+        func unit(_ value: Float) -> Float { value.isFinite ? min(max(value, 0), 1) : 0 }
+        var clean = bed
+        clean.master = bed.master.isFinite ? min(max(bed.master, 0), 4) : 0
+        clean.glide = bed.glide.isFinite ? min(max(bed.glide, 0.004), 10) : 0.05
+        clean.groan = unit(bed.groan)
+        clean.groanHz = bed.groanHz.isFinite ? min(max(bed.groanHz, 40), 400) : 90
+        clean.wind = unit(bed.wind)
+        clean.frogs = unit(bed.frogs)
+        clean.dripRate = bed.dripRate.isFinite ? min(max(bed.dripRate, 0), 50) : 0
+        clean.crickets = unit(bed.crickets)
+        clean.music = unit(bed.music)
+        clean.musicVoices = bed.musicVoices.isFinite ? min(max(bed.musicVoices, 1), 4) : 1
+        return clean
+    }
+
     private func resetFilters() {
+        // QA-1 #16: the glided bed restarts from silence (it glides back up to the sanitised target), and every
+        // oscillator phase restarts, so no NaN can survive a reset.
+        bed = FeelBed()
+        groanPhase = 0
+        groanSlip = 0.8
+        groanJitter = 1
+        groanVibrato = 0
+        squeakPhase = 0
+        wobbleValue = 0
+        wobbleTarget = 0
+        windLFO = 0
+        windLFO2 = 0
+        nightPhaseA = 0
+        nightPhaseB = 0
+        nightGateA = 0
+        nightGateB = 0
         groanFilter = FeelSVF()
         groanFormant = FeelSVF()
         windFilterL = FeelSVF()
@@ -1141,10 +1192,9 @@ final class FeelSynth: @unchecked Sendable {
         dcOutR = 0
         for index in 0..<FeelSynth.voiceCount { voices[index].active = false }
         for slot in 0..<FeelSynth.buzzSlots {
-            buzz[slot].filter = FeelSVF()
-            buzz[slot].filter2 = FeelSVF()
-            buzz[slot].level = 0
-            buzz[slot].timbre = .silent
+            let wanted = buzz[slot].want
+            buzz[slot] = FeelBuzzState()
+            buzz[slot].want = wanted
         }
     }
 
@@ -1159,24 +1209,36 @@ final class FeelSynth: @unchecked Sendable {
         (nextNoise() + 1) * 0.5
     }
 
+    /// QA-1 #4: a free voice, else the voice that started first (the smallest stamp), but never one started in the
+    /// current drain (a bite's own commands never cut each other off); if every voice is that new, the command is
+    /// dropped. 128 voices make stealing rare; the oldest voice has usually decayed to almost nothing.
     private func start(_ command: FeelSynthCommand) {
         var slot = -1
         var oldest = -1
-        var oldestAge = -1
+        var oldestStamp = UInt64.max
         for index in 0..<FeelSynth.voiceCount {
             if !voices[index].active {
                 slot = index
                 break
             }
-            if voices[index].age > oldestAge {
-                oldestAge = voices[index].age
+            let stamp = voices[index].stamp
+            if stamp < drainFloor && stamp < oldestStamp {
+                oldestStamp = stamp
                 oldest = index
             }
         }
-        if slot < 0 { slot = oldest }
-        guard slot >= 0 else { return }
+        if slot < 0 {
+            guard oldest >= 0 else {
+                droppedCount.store(droppedCount.load(ordering: .relaxed) &+ 1, ordering: .relaxed)
+                return
+            }
+            slot = oldest
+            stolenCount.store(stolenCount.load(ordering: .relaxed) &+ 1, ordering: .relaxed)
+        }
+        startCounter &+= 1
         var voice = FeelVoice()
         voice.active = true
+        voice.stamp = startCounter
         let gains = FeelSynth.panGains(command.pan)
         voice.gainL = gains.left
         voice.gainR = gains.right
@@ -1246,7 +1308,7 @@ final class FeelSynth: @unchecked Sendable {
             voice.delay = Int(max(spec.delay, 0) * sampleRate)
             voice.attack = max(Int(0.0005 * sampleRate), 1)
             voice.decayRate = 1
-            voice.length = min(Int(spec.decay * sampleRate * 7), Int(sampleRate * 6))
+            voice.length = max(min(Int(spec.decay * sampleRate * FeelSynth.ringLengthTaus), Int(sampleRate * 6)), 1)
             voice.gain = 1
             configureRing(spec, slot: slot, voice: &voice)
         case .bed, .buzz, .stopAll:

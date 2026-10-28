@@ -1,8 +1,10 @@
 import SwiftUI
 
-/// The App Store icon: the trap's two lobes snapping on a fat cartoon fly, teeth interlocking, glossy crimson on deep
-/// bog green. Big shapes only, so it reads at 60 px: the lime lobes, the crimson mouth, the cream teeth, the fly's two
-/// white eyes.
+/// The App Store icon (R2, juror P2 #10): the trap's two lobes open like a mouth round a fat cartoon fly, in the game's
+/// own look: a green leaf outside, a deep glossy crimson face (#7A0C26 → #D23048 at the rim), a dark throat, and long
+/// thin pale CILIA along both rims (not fangs). The fly sits in FRONT of everything, so no line runs through it. The
+/// subject fills ~88 % of the canvas, and the big shapes (green jaws, dark throat, the fly's two white eyes) read at
+/// 60 px.
 ///
 /// Pure vector in a 1024-unit design space (y down), full-bleed, opaque and square-cornered: the system applies the
 /// mask. Rendered to Documents/AppIcon-1024.png by demo `screen=icon` (IconExport).
@@ -25,41 +27,40 @@ struct AppIconArt: View {
 
 enum AppIconPainter {
     static let bogCenter = Color(snapHex: 0x2F7A45)
-    static let bogEdge = Color(snapHex: 0x0B2C17)
-    static let skinLight = Color(snapHex: 0xB6E05A)
-    static let skinDark = Color(snapHex: 0x5E9A2A)
-    static let crimsonLight = Color(snapHex: 0xFF6A88)
-    static let crimson = Color(snapHex: 0xD3204A)
-    static let crimsonDeep = Color(snapHex: 0x7E0E2B)
-    static let tooth = Color(snapHex: 0xF4FBDF)
-    static let ink = Color(snapHex: 0x13280F)
-    static let flyBody = Color(snapHex: 0x2E3140)
-    static let flyBelly = Color(snapHex: 0x4A5066)
-    static let wing = Color(snapHex: 0xD9F1FF)
-    static let eyeRed = Color(snapHex: 0xC0182E)
+    static let bogEdge = Color(snapHex: 0x0A2614)
+    static let leafLight = Color(snapHex: 0x7DBF45)
+    static let leafDark = Color(snapHex: 0x2F6A2C)
+    static let faceRim = Color(snapHex: 0xD23048)
+    static let faceDeep = Color(snapHex: 0x7A0C26)
+    static let throat = Color(snapHex: 0x33040F)
+    static let cilium = Color(snapHex: 0xF2F7DA)
+    static let ink = Color(snapHex: 0x10220D)
+    static let flyBody = Color(snapHex: 0x2E3348)
+    static let flyBelly = Color(snapHex: 0x59627E)
+    static let wing = Color(snapHex: 0xDDF2FF)
 
     /// The hinge (left) and the two jaw tips (right): the lobes open to the right like a mouth.
-    static let hinge = CGPoint(x: 150, y: 548)
-    static let upperTip = CGPoint(x: 905, y: 430)
-    static let lowerTip = CGPoint(x: 905, y: 668)
+    static let hinge = CGPoint(x: 84, y: 524)
+    static let upperTip = CGPoint(x: 972, y: 318)
+    static let lowerTip = CGPoint(x: 972, y: 730)
 
     static func paint(_ ctx: inout GraphicsContext) {
         background(&ctx)
+        throatFill(&ctx)
         lobe(&ctx, upper: false)
         lobe(&ctx, upper: true)
+        cilia(&ctx)
         fly(&ctx)
-        teeth(&ctx)
-        flyFace(&ctx)
     }
 
     static func background(_ ctx: inout GraphicsContext) {
         let all = Path(CGRect(x: 0, y: 0, width: 1024, height: 1024))
         ctx.fill(all, with: .radialGradient(Gradient(colors: [bogCenter, bogEdge]), center: CGPoint(x: 512, y: 470),
                                             startRadius: 40, endRadius: 760))
-        // Dew.
-        for (x, y, r) in [(120.0, 170.0, 16.0), (860.0, 140.0, 12.0), (90.0, 880.0, 12.0), (930.0, 900.0, 18.0)] {
+        // Dew in the corners.
+        for (x, y, r) in [(70.0, 90.0, 14.0), (950.0, 80.0, 11.0), (60.0, 960.0, 11.0), (960.0, 958.0, 15.0)] {
             let rect = CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)
-            ctx.fill(Path(ellipseIn: rect), with: .color(Color.white.opacity(0.22)))
+            ctx.fill(Path(ellipseIn: rect), with: .color(Color.white.opacity(0.2)))
             ctx.fill(Path(ellipseIn: rect.insetBy(dx: r * 0.55, dy: r * 0.55).offsetBy(dx: -r * 0.2, dy: -r * 0.25)),
                      with: .color(Color.white.opacity(0.7)))
         }
@@ -67,13 +68,14 @@ enum AppIconPainter {
 
     // MARK: Lobes
 
-    /// The outer curve of a lobe (hinge → tip) and its rim (tip → hinge).
+    /// The outer curve of a lobe (hinge → tip).
     static func outerControls(upper: Bool) -> (CGPoint, CGPoint) {
-        upper ? (CGPoint(x: 160, y: 190), CGPoint(x: 760, y: 110)) : (CGPoint(x: 160, y: 910), CGPoint(x: 760, y: 990))
+        upper ? (CGPoint(x: 92, y: 70), CGPoint(x: 780, y: 20)) : (CGPoint(x: 92, y: 980), CGPoint(x: 780, y: 1030))
     }
 
+    /// The rim (tip → hinge).
     static func rimControls(upper: Bool) -> (CGPoint, CGPoint) {
-        upper ? (CGPoint(x: 700, y: 520), CGPoint(x: 360, y: 545)) : (CGPoint(x: 700, y: 585), CGPoint(x: 360, y: 556))
+        upper ? (CGPoint(x: 720, y: 420), CGPoint(x: 330, y: 492)) : (CGPoint(x: 720, y: 630), CGPoint(x: 330, y: 556))
     }
 
     static func lobePath(upper: Bool) -> Path {
@@ -88,47 +90,65 @@ enum AppIconPainter {
         return p
     }
 
-    /// The crimson inner face: a band inside the outer skin, along the rim.
+    /// The crimson inner face: a broad band inside the leaf, along the rim.
     static func facePath(upper: Bool) -> Path {
         let tip = upper ? upperTip : lowerTip
         let r = rimControls(upper: upper)
-        let inset: CGFloat = upper ? 1 : -1
+        let k: CGFloat = upper ? 1 : -1
         var p = Path()
-        p.move(to: CGPoint(x: hinge.x + 40, y: hinge.y - inset * 8))
-        p.addCurve(to: CGPoint(x: tip.x - 30, y: tip.y - inset * 26),
-                   control1: CGPoint(x: 230, y: upper ? 300 : 800),
-                   control2: CGPoint(x: 720, y: upper ? 250 : 850))
-        p.addCurve(to: CGPoint(x: hinge.x + 40, y: hinge.y - inset * 8), control1: r.0, control2: r.1)
+        p.move(to: CGPoint(x: hinge.x + 46, y: hinge.y - k * 6))
+        p.addCurve(to: CGPoint(x: tip.x - 34, y: tip.y - k * 28),
+                   control1: CGPoint(x: 180, y: upper ? 250 : 800),
+                   control2: CGPoint(x: 720, y: upper ? 170 : 880))
+        p.addCurve(to: CGPoint(x: hinge.x + 46, y: hinge.y - k * 6), control1: r.0, control2: r.1)
         p.closeSubpath()
         return p
+    }
+
+    /// The dark throat between the two rims (the mouth reads at any size).
+    static func throatFill(_ ctx: inout GraphicsContext) {
+        let up = rimControls(upper: true)
+        let low = rimControls(upper: false)
+        var p = Path()
+        p.move(to: hinge)
+        p.addCurve(to: upperTip, control1: up.1, control2: up.0)
+        p.addLine(to: lowerTip)
+        p.addCurve(to: hinge, control1: low.0, control2: low.1)
+        p.closeSubpath()
+        ctx.fill(p, with: .radialGradient(Gradient(colors: [Color(snapHex: 0x5A0A1E), throat]),
+                                          center: CGPoint(x: 600, y: 524), startRadius: 20, endRadius: 420))
     }
 
     static func lobe(_ ctx: inout GraphicsContext, upper: Bool) {
         let outer = lobePath(upper: upper)
         let face = facePath(upper: upper)
-        ctx.stroke(outer, with: .color(ink), style: StrokeStyle(lineWidth: 30, lineJoin: .round))
-        ctx.fill(outer, with: .linearGradient(Gradient(colors: upper ? [skinLight, skinDark] : [skinDark, skinLight]),
-                                              startPoint: CGPoint(x: 512, y: upper ? 120 : 600),
-                                              endPoint: CGPoint(x: 512, y: upper ? 540 : 980)))
-        ctx.fill(face, with: .linearGradient(Gradient(colors: upper ? [crimsonDeep, crimson, crimsonLight]
-                                                                    : [crimsonLight, crimson, crimsonDeep]),
-                                             startPoint: CGPoint(x: 512, y: upper ? 260 : 560),
-                                             endPoint: CGPoint(x: 512, y: upper ? 540 : 860)))
-        // The wet sheen.
+        ctx.stroke(outer, with: .color(ink), style: StrokeStyle(lineWidth: 26, lineJoin: .round))
+        ctx.fill(outer, with: .linearGradient(Gradient(colors: upper ? [leafLight, leafDark] : [leafDark, leafLight]),
+                                              startPoint: CGPoint(x: 512, y: upper ? 40 : 560),
+                                              endPoint: CGPoint(x: 512, y: upper ? 500 : 1010)))
+        // The deep face: darkest inside, brightest at the rim.
+        ctx.fill(face, with: .linearGradient(Gradient(colors: [faceDeep, faceRim]),
+                                             startPoint: CGPoint(x: 512, y: upper ? 210 : 840),
+                                             endPoint: CGPoint(x: 512, y: upper ? 480 : 570)))
+        // The wet gloss: a long soft streak on the face and a highlight on the leaf.
         var gloss = ctx
         gloss.clip(to: face)
-        let streak = upper ? CGRect(x: 420, y: 300, width: 300, height: 70) : CGRect(x: 420, y: 760, width: 260, height: 60)
-        gloss.fill(Path(ellipseIn: streak), with: .color(Color.white.opacity(0.38)))
-        // The rim line.
+        let streak = upper ? CGRect(x: 330, y: 250, width: 420, height: 70) : CGRect(x: 360, y: 760, width: 360, height: 56)
+        gloss.fill(Path(ellipseIn: streak), with: .color(Color.white.opacity(0.34)))
+        var sheen = ctx
+        sheen.clip(to: outer)
+        let leafShine = upper ? CGRect(x: 160, y: 110, width: 380, height: 60) : CGRect(x: 200, y: 905, width: 300, height: 40)
+        sheen.fill(Path(ellipseIn: leafShine), with: .color(Color.white.opacity(upper ? 0.30 : 0.14)))
+        // A thin dark lip along the rim.
         var rim = Path()
         let tip = upper ? upperTip : lowerTip
         let r = rimControls(upper: upper)
         rim.move(to: tip)
         rim.addCurve(to: hinge, control1: r.0, control2: r.1)
-        ctx.stroke(rim, with: .color(skinLight), style: StrokeStyle(lineWidth: 16, lineCap: .round))
+        ctx.stroke(rim, with: .color(Color(snapHex: 0x173D17)), style: StrokeStyle(lineWidth: 10, lineCap: .round))
     }
 
-    // MARK: Teeth
+    // MARK: Cilia
 
     /// A point on the rim curve (tip → hinge) at `t` (0 tip … 1 hinge).
     static func rimPoint(upper: Bool, t: CGFloat) -> CGPoint {
@@ -143,70 +163,80 @@ enum AppIconPainter {
         return CGPoint(x: x, y: y)
     }
 
-    static func teeth(_ ctx: inout GraphicsContext) {
-        let count = 7
+    /// One cilium: a long, thin, slightly curved hair from `base` along `dir` (unit).
+    static func ciliumPath(base: CGPoint, dir: CGPoint, length: CGFloat, width: CGFloat) -> Path {
+        let n = CGPoint(x: -dir.y, y: dir.x)
+        let tip = CGPoint(x: base.x + dir.x * length, y: base.y + dir.y * length)
+        var p = Path()
+        p.move(to: CGPoint(x: base.x - n.x * width, y: base.y - n.y * width))
+        p.addQuadCurve(to: tip, control: CGPoint(x: base.x + dir.x * length * 0.55 - n.x * width * 0.35,
+                                                 y: base.y + dir.y * length * 0.55 - n.y * width * 0.35))
+        p.addQuadCurve(to: CGPoint(x: base.x + n.x * width, y: base.y + n.y * width),
+                       control: CGPoint(x: base.x + dir.x * length * 0.5 + n.x * width * 0.7,
+                                        y: base.y + dir.y * length * 0.5 + n.y * width * 0.7))
+        p.closeSubpath()
+        return p
+    }
+
+    /// Interlocking cilia along both rims, leaning toward the tips; drawn before the fly so none crosses it.
+    static func cilia(_ ctx: inout GraphicsContext) {
+        let count = 12
         for upper in [true, false] {
             for i in 0..<count {
-                let t = CGFloat(i) / CGFloat(count) * 0.78 + (upper ? 0.02 : 0.07)
+                let t = CGFloat(i) / CGFloat(count - 1) * 0.8 + (upper ? 0.02 : 0.06)
                 let base = rimPoint(upper: upper, t: t)
-                let length: CGFloat = 92 - CGFloat(i) * 6
-                let half: CGFloat = 17
-                let dir: CGFloat = upper ? 1 : -1
-                var tooth = Path()
-                tooth.move(to: CGPoint(x: base.x - half, y: base.y - dir * 4))
-                tooth.addQuadCurve(to: CGPoint(x: base.x + 6, y: base.y + dir * length),
-                                   control: CGPoint(x: base.x - half * 0.6, y: base.y + dir * length * 0.6))
-                tooth.addQuadCurve(to: CGPoint(x: base.x + half, y: base.y - dir * 4),
-                                   control: CGPoint(x: base.x + half * 0.8, y: base.y + dir * length * 0.4))
-                tooth.closeSubpath()
-                ctx.stroke(tooth, with: .color(ink), style: StrokeStyle(lineWidth: 9, lineJoin: .round))
-                ctx.fill(tooth, with: .color(Self.tooth))
+                let lean: CGFloat = 0.38
+                // Across the throat toward the other jaw (they interlock when it shuts), leaning to the tips.
+                let dy: CGFloat = upper ? 1 : -1
+                let len = (lean * lean + 1).squareRoot()
+                let dir = CGPoint(x: lean / len, y: dy / len)
+                let length: CGFloat = 118 - CGFloat(i) * 4
+                let hair = ciliumPath(base: base, dir: dir, length: length, width: 10)
+                ctx.stroke(hair, with: .color(ink), style: StrokeStyle(lineWidth: 7, lineJoin: .round))
+                ctx.fill(hair, with: .color(cilium))
             }
         }
     }
 
-    // MARK: The fly
+    // MARK: The fly (in front of everything)
 
-    static let flyCenter = CGPoint(x: 610, y: 552)
+    static let flyCenter = CGPoint(x: 566, y: 528)
 
     static func fly(_ ctx: inout GraphicsContext) {
-        // Wings peeking up out of the jaws.
-        for (dx, rot) in [(-70.0, -0.5), (40.0, 0.35)] {
+        // Wings peeking up behind the body.
+        for (dx, rot) in [(-78.0, -0.5), (34.0, 0.35)] {
             var wingCtx = ctx
-            wingCtx.translateBy(x: flyCenter.x + CGFloat(dx), y: flyCenter.y - 120)
+            wingCtx.translateBy(x: flyCenter.x + CGFloat(dx), y: flyCenter.y - 124)
             wingCtx.rotate(by: Angle(radians: rot))
-            let wingRect = CGRect(x: -62, y: -110, width: 124, height: 210)
+            let wingRect = CGRect(x: -66, y: -116, width: 132, height: 222)
             wingCtx.stroke(Path(ellipseIn: wingRect), with: .color(ink), lineWidth: 12)
-            wingCtx.fill(Path(ellipseIn: wingRect), with: .color(wing.opacity(0.92)))
-            wingCtx.stroke(Path { p in
-                p.move(to: CGPoint(x: 0, y: 90))
-                p.addLine(to: CGPoint(x: 0, y: -80))
-            }, with: .color(ink.opacity(0.35)), lineWidth: 6)
+            wingCtx.fill(Path(ellipseIn: wingRect), with: .color(wing.opacity(0.94)))
+            wingCtx.fill(Path(ellipseIn: CGRect(x: -40, y: -90, width: 30, height: 120)),
+                         with: .color(Color.white.opacity(0.6)))
         }
-        // The fat body.
-        let bodyRect = CGRect(x: flyCenter.x - 170, y: flyCenter.y - 120, width: 330, height: 240)
+        // The fat body with a glossy highlight.
+        let bodyRect = CGRect(x: flyCenter.x - 176, y: flyCenter.y - 124, width: 340, height: 248)
         ctx.stroke(Path(ellipseIn: bodyRect), with: .color(ink), lineWidth: 18)
         ctx.fill(Path(ellipseIn: bodyRect), with: .radialGradient(Gradient(colors: [flyBelly, flyBody]),
-                                                                   center: CGPoint(x: flyCenter.x - 30,
-                                                                                   y: flyCenter.y - 50),
-                                                                   startRadius: 10, endRadius: 200))
-    }
-
-    /// The fly's face, over the teeth so it reads: two huge eyes and a worried little mouth.
-    static func flyFace(_ ctx: inout GraphicsContext) {
-        for dx in [-20.0, 92.0] {
-            let c = CGPoint(x: flyCenter.x + CGFloat(dx), y: flyCenter.y - 34)
-            let eye = CGRect(x: c.x - 62, y: c.y - 62, width: 124, height: 124)
+                                                                   center: CGPoint(x: flyCenter.x - 40,
+                                                                                   y: flyCenter.y - 60),
+                                                                   startRadius: 10, endRadius: 210))
+        ctx.fill(Path(ellipseIn: CGRect(x: flyCenter.x - 130, y: flyCenter.y - 96, width: 120, height: 46)),
+                 with: .color(Color.white.opacity(0.28)))
+        // Two huge eyes and a worried little mouth.
+        for dx in [-24.0, 92.0] {
+            let c = CGPoint(x: flyCenter.x + CGFloat(dx), y: flyCenter.y - 30)
+            let eye = CGRect(x: c.x - 64, y: c.y - 64, width: 128, height: 128)
             ctx.stroke(Path(ellipseIn: eye), with: .color(ink), lineWidth: 14)
             ctx.fill(Path(ellipseIn: eye), with: .color(.white))
-            let pupil = CGRect(x: c.x - 22, y: c.y - 36, width: 52, height: 60)
+            let pupil = CGRect(x: c.x - 22, y: c.y - 34, width: 54, height: 62)
             ctx.fill(Path(ellipseIn: pupil), with: .color(ink))
-            ctx.fill(Path(ellipseIn: CGRect(x: c.x - 8, y: c.y - 30, width: 18, height: 18)), with: .color(.white))
+            ctx.fill(Path(ellipseIn: CGRect(x: c.x - 8, y: c.y - 28, width: 19, height: 19)), with: .color(.white))
         }
         var mouth = Path()
-        mouth.move(to: CGPoint(x: flyCenter.x + 14, y: flyCenter.y + 66))
-        mouth.addQuadCurve(to: CGPoint(x: flyCenter.x + 66, y: flyCenter.y + 66),
-                           control: CGPoint(x: flyCenter.x + 40, y: flyCenter.y + 46))
+        mouth.move(to: CGPoint(x: flyCenter.x + 12, y: flyCenter.y + 74))
+        mouth.addQuadCurve(to: CGPoint(x: flyCenter.x + 66, y: flyCenter.y + 74),
+                           control: CGPoint(x: flyCenter.x + 39, y: flyCenter.y + 52))
         ctx.stroke(mouth, with: .color(Color.white.opacity(0.85)), style: StrokeStyle(lineWidth: 10, lineCap: .round))
     }
 }

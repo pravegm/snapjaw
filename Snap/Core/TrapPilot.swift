@@ -6,11 +6,12 @@ import Foundation
 // It only sees what a player sees (the snapshot) and drives the trap's closure the way hands would: a snap is a
 // linear close at 18° per `duration` (so the 4° → 22° crossing takes exactly `duration`), an overshoot to 28°, a
 // 0.15 s hold and a 0.35 s reopen; it re-arms 16° above the peak, like the detector. Deterministic with its seed.
-// - Decisions (ROUND-1 "TrapPilot"): novice snaps on any landed bug; casual waits for 2 (or 1 worth ≥ 20, or 4 s);
+// - Decisions (ROUND-1 "TrapPilot", R2 casual): novice snaps on any landed bug; casual waits for 3 landed, or 2 with
+//   nothing else flying in (or 1 worth ≥ 20, or 7 s), and fumbles 30 % of its snaps (a slow 0.3–0.45 s close);
 //   expert waits for 3 it can catch at its speed, or value ≥ 120, or 2 with one about to leave, or 6 s; perfect waits
 //   for 5, or 3 with nothing else about to land, or value ≥ 400, or 7 s. Each decision waits a human reaction delay
 //   and is re-checked before the stroke.
-// - Bees: each protected bug in the trap is rolled once: missed (ignored) with novice 0.6, casual 0.2, expert 0.02;
+// - Bees: each protected bug in the trap is rolled once: missed (ignored) with novice 0.6, casual 0.25, expert 0.02;
 //   perfect never misses and also waits while a protected bug is flying low over the trap.
 // - The novice sometimes creeps (a slow 12° close over 1.2 s before finishing the snap). The expert shoos a bee that
 //   has sat in the trap for 5 s with a slow 11° creep (bugs with nerve ≤ the creep depth leave) and reopens.
@@ -100,6 +101,10 @@ struct TrapPilot {
     }
 
     private mutating func planDuration() -> Double {
+        // R2: a casual hand sometimes fumbles a snap (slow), which is what breaks its chains besides the bees.
+        if skill == .casual && rng.chance(Tuning.casualFumbleChance) {
+            return rng.between(Tuning.casualFumbleMin, Tuning.casualFumbleMax)
+        }
         if profile.durationMin == profile.durationMax { return profile.durationMin }
         return rng.between(profile.durationMin, profile.durationMax)
     }
@@ -173,7 +178,7 @@ struct TrapPilot {
         case .novice:
             want = v.landed >= 1
         case .casual:
-            want = v.landed >= 2 || (v.landed >= 1 && v.maxPoints >= 20)
+            want = v.landed >= 3 || (v.landed >= 2 && v.arriving == 0) || (v.landed >= 1 && v.maxPoints >= 20)
                 || (v.landed >= 1 && waited >= Tuning.casualPatience)
         case .expert:
             want = v.catchable >= 3 || (v.catchable >= 1 && v.value >= Tuning.expertValue)

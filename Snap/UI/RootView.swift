@@ -68,7 +68,8 @@ struct RootView: View {
         let fold = currentFold(canvas)
         ZStack {
             SnapTheme.bogDeep
-            gameLayer(canvas, visible: pose == .play && controller.route.isPlay)
+            // The bog is live behind Home too (an attract session the hinge can chomp).
+            gameLayer(canvas, visible: pose == .play && (controller.route.isPlay || controller.route == .home))
             switch pose {
             case .play:
                 let layout = ScreenLayout.make(viewSize: canvas, hasFold: fold, hudOnLeft: controller.hudOnLeft)
@@ -200,8 +201,9 @@ struct RootView: View {
 
     // MARK: - Layers
 
-    /// The scene renders only while a run is on screen (real runs; CI's demo launches always render: they wait for
-    /// `SNAP-T frame 120`), and holds still on a demo event freeze.
+    /// The scene renders only while a run or Home is on screen (real runs; CI's demo launches always render: they
+    /// wait for `SNAP-T frame 120`), and holds still on a demo event freeze. The closing pause stops it too (a half-shut
+    /// Duo saves its battery); the pause lifts from the hinge reports, not from frames (QA-1 #1).
     private func sceneIdle(visible: Bool) -> Bool {
         if controller.sceneHeld { return true }
         guard !controller.isDemo else { return false }
@@ -211,7 +213,8 @@ struct RootView: View {
     @ViewBuilder
     private func gameLayer(_ canvas: CGSize, visible: Bool) -> some View {
         if let scene = controller.scene {
-            SpriteView(scene: scene, isPaused: sceneIdle(visible: visible), preferredFramesPerSecond: 120)
+            SpriteView(scene: scene, isPaused: sceneIdle(visible: visible),
+                       preferredFramesPerSecond: controller.route == .home ? 60 : 120)
                 .id(controller.sceneGeneration)
                 .frame(width: canvas.width, height: canvas.height)
                 .opacity(visible ? 1 : 0.001)

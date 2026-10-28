@@ -24,10 +24,11 @@ import UIKit
 //                                 hinge (Duo CI) or touch.
 // - `progress=fresh|mid|late`     seeded in-memory progress (fresh: nothing; mid: rank 4, 9 species, best 3,200;
 //                                 late: rank 10, 16 species, best 14,800). Demo runs never write UserDefaults.
-// - `freezeOn=landed|crowd|bee|snap|feast|sting|dusk|night|lastSnap|tired|results`
+// - `freezeOn=landed|crowd|bee|snap|feast|sting|dusk|night|lastSnap|hungry|wilted|tired|results`
 //                                 stop stepping the session (the scene keeps drawing) at the first such moment, and
 //                                 print `SNAP-T freeze <tag>`. `snap` holds 0.12 s after the bite; the other event
-//                                 moments (feast, sting, lastSnap) 0.3 s, so their FX are on screen.
+//                                 moments (feast, sting, lastSnap, wilted) 0.3 s, so their FX are on screen; `hungry`
+//                                 1 s (the next snap glyph drains and "Hungry… bite!" shows).
 // - `freezeAfter=<s>`             freeze after s seconds of play (`SNAP-T freeze after`); with `freezeOn`, the moment
 //                                 only counts once s seconds have passed.
 // - `closure=<deg>`               hold the drawn closure at this many degrees (no pilot, no hinge): static jaw frames.
@@ -52,21 +53,23 @@ struct DemoMode: Equatable {
     }
     enum ModeKey: String, Equatable { case feed, daily, attract }
     enum Freeze: String, Equatable, CaseIterable {
-        case landed, crowd, bee, snap, feast, sting, dusk, night, lastSnap, tired, results
+        case landed, crowd, bee, snap, feast, sting, dusk, night, lastSnap, hungry, wilted, tired, results
 
         /// Event moments hold a beat after the event; state moments freeze at once.
         var isEvent: Bool {
             switch self {
-            case .snap, .feast, .sting, .lastSnap: return true
+            case .snap, .feast, .sting, .lastSnap, .hungry, .wilted: return true
             case .landed, .crowd, .bee, .dusk, .night, .tired, .results: return false
             }
         }
 
-        /// The beat after an event moment (s of play).
+        /// The beat after an event moment (s of play). `hungry` holds long enough for the glyph to visibly drain;
+        /// `wilted` for the "wilted −1" pop to rise.
         var holdDelay: Double {
             switch self {
             case .snap: return 0.12
-            case .feast, .sting, .lastSnap: return 0.3
+            case .feast, .sting, .lastSnap, .wilted: return 0.3
+            case .hungry: return 1.0
             case .landed, .crowd, .bee, .dusk, .night, .tired, .results: return 0
             }
         }

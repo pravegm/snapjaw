@@ -1,19 +1,23 @@
 #!/usr/bin/env node
-// Snapjaw balance simulator (Round 1): a line-by-line Node port of Snap/Core (Tuning, BugCatalog, WaveFactory,
+// Snapjaw balance simulator (Round 2): a line-by-line Node port of Snap/Core (Tuning, BugCatalog, WaveFactory,
 // TrapSession, TrapPilot). KEEP IN SYNC with Snap/Core/*.swift: same constants, same draw order.
 // Used to tune Tuning numerically without a Swift compiler.
 //
-//   node tools/balance-sim.js                      # 8 seeds x 4 skills at 60 Hz, prints SNAP-BAL lines + target checks
+//   node tools/balance-sim.js                      # 16 seeds x 4 skills at 60 Hz, prints SNAP-BAL lines + target checks
 //   node tools/balance-sim.js seeds=40 skills=casual,expert
 //   node tools/balance-sim.js verbose=1 seeds=2    # one line per run
 //   node tools/balance-sim.js windows=10           # robustness: medians of 10 different 8-seed windows
 //   node tools/balance-sim.js attract=1            # attract mode never stalls
+//   node tools/balance-sim.js crowd=1              # R2: crowd waves land within 1.2 s
+//   node tools/balance-sim.js detector=1           # the SnapDetector checks (incl. QA-1 #5 and #6)
 //   Any Tuning value can be overridden: T.beeChanceDusk=0.5
 //   Seeds are 1000 + 7919*i (the same as SnapTests/BalanceTests.swift); the pilot seed is seed*7+1.
 //
 // Numbers are not bit-identical to Swift (libm sin/cos/pow may differ in the last bit and the runs are chaotic), so
 // the Swift test uses bands around these medians. The port omits hints, telemetry and the detector (the pilot
 // drives TrapInput directly, as in the Swift harness).
+// R2: bugs x1.8 with a body rim test, nectar clusters, crowd landings, hunger (wilt), the >= 2 chain rule,
+// SessionOptions.startSnaps, spared-on-escape, and the casual pilot's fumbles (design/notes/core-R2.md).
 'use strict';
 
 // MARK: Tuning (mirror of Snap/Core/Tuning.swift)
@@ -27,19 +31,25 @@ const T = {
   // waves (GAME-DESIGN §6)
   firstWaveTime: 1.2, waveDelayMin: 3.0, waveDelayMax: 4.5,
   noonWave: 7, duskWave: 15, nightWave: 23, deepNightWave: 31,
-  nectarReseedWaves: 6, nectarMin: 5, nectarMax: 7, nectarRadiusMin: 12, nectarRadiusMax: 16,
-  nectarSpacing: 110, nectarInner: 0.3, nectarOuter: 0.72, nectarCreaseClearance: 50, nectarTries: 30,
+  nectarReseedWaves: 6, nectarMin: 6, nectarMax: 8, nectarRadiusMin: 12, nectarRadiusMax: 16,
+  nectarClusterMin: 2, nectarClusterMax: 3, nectarRingMin: 40, nectarRingMax: 48, nectarClusterGap: 190, nectarArcMargin: 0.25, nectarHalfGap: 0.45,
+  nectarClusterInner: 0.32, nectarClusterOuter: 0.55, nectarKeptClearance: 60, nectarCreaseClearance: 50,
+  nectarTries: 30, crowdNearMin: 60, crowdNearMax: 140,
   lingerMorningMin: 6, lingerMorningMax: 8, lingerNoonMin: 5, lingerNoonMax: 7,
   lingerDuskMin: 4, lingerDuskMax: 6, lingerNightMin: 3.5, lingerNightMax: 5,
   beeFromWave: 3, beeChanceMorning: 0.5, beeChanceNoon: 0.4, beeChanceDusk: 0.5, beeChanceNight: 0.55,
   beeChanceNight2: 0.15, extraBeeEvery: 8, maxProtectedPerWave: 4, beeLingerFactor: 0.6,
-  sizeFirstMin: 1, sizeFirstMax: 2, sizeMorningMin: 2, sizeMorningMax: 3, sizeNoonMin: 2, sizeNoonMax: 3,
+  sizeFirstMin: 2, sizeFirstMax: 3, sizeMorningMin: 2, sizeMorningMax: 4, sizeNoonMin: 2, sizeNoonMax: 4,
   sizeDuskMin: 2, sizeDuskMax: 4, sizeNightMin: 2, sizeNightMax: 5,
-  crowdFromWave: 4, crowdChance: 0.34, crowdSpread: 1.0, trickleMin: 0.6, trickleMax: 1.2, beeSpread: 2.5,
+  crowdFromWave: 3, crowdChance: 0.45, crowdSpread: 0.1, trickleMin: 0.6, trickleMax: 1.2, beeSpread: 2.5,
   passerChance: 0.12, beePasserChance: 0.15, maxWaveBugs: 7, maxBugsOnScreen: 18,
   scarabFromWave: 7, scarabChance: 1 / 12, gnatFromWave: 4, spotRadius: 0.75,
   // session
   tiredSeconds: 2.2, caughtSeconds: 0.5, openUpDelay: 1.0, crowdHintCount: 3, maxSubstep: 1 / 120,
+  // R2 hunger (GAME-DESIGN §5)
+  wiltMorning: 15, wiltNoon: 14, wiltDusk: 12, wiltNight: 10, hungryWarning: 3,
+  // R2 bugs x1.8 (REVIEW-1 #4)
+  bugRadiusScale: 1.8, chainMinBite: 2,
   // motion (ROUND-1 "Movement")
   hoverMin: 0.3, hoverMax: 0.6, hoverHeight: 0.5, hoverCircle: 6, approachHeightDrop: 0.5, approachPathFactor: 1.1,
   minFlightTime: 0.6, arcBend: 0.25, landSpacing: 4, landMaxRadius: 0.8, spotTries: 10,
@@ -51,8 +61,9 @@ const T = {
   // pilot (ROUND-1 "TrapPilot")
   pilotOvershoot: 6, pilotHold: 0.15, pilotReopen: 0.35, pilotIdleAngle: 160,
   noviceCreepChance: 0.25, noviceCreepDepth: 12, noviceCreepTime: 1.2,
-  casualPatience: 4, expertPatience: 6, perfectPatience: 7,
-  noviceBeeMiss: 0.6, perfectBeeHeight: 0.85, wiltSeconds: 0,
+  casualPatience: 7, expertPatience: 6, perfectPatience: 7,
+  casualFumbleChance: 0.3, casualFumbleMin: 0.3, casualFumbleMax: 0.45,
+  noviceBeeMiss: 0.6, casualBeeMiss: 0.25, expertBeeMiss: 0.02, perfectBeeHeight: 0.85,
   shooDepth: 11, shooTime: 0.5, shooHold: 0.1, expertShooAfter: 5, perfectShooAfter: 0,
   expertValue: 120, perfectValue: 400, perfectRestless: 0.7, expertRestless: 0.6,
 };
@@ -103,7 +114,7 @@ const INFO = {
   goldenScarab: [150, 0.40, 12, 20, NOON], bee: [0, 1.0, 8, 16, MORNING], bumblebee: [0, 1.0, 10, 22, NOON],
   wasp: [0, 1.0, 6, 16, DUSK],
 };
-const info = (s) => { const r = INFO[s]; return { species: s, points: r[0], reaction: r[1], nerve: r[2], radius: r[3], firstPhase: r[4] }; };
+const info = (s) => { const r = INFO[s]; return { species: s, points: r[0], reaction: r[1], nerve: r[2], radius: r[3] * T.bugRadiusScale, firstPhase: r[4] }; };
 const isProtected = (s) => s === 'bee' || s === 'bumblebee' || s === 'wasp';
 // motion: [style, speed, walkSpeed, wobbleAmp, wobbleHz, nectarChance, lingerFactor, pauseMin, pauseMax]
 const FLY = 'fly', SWARM = 'swarm', WALKER = 'walker', HOPPER = 'hopper', DARTER = 'darter', FLUTTER = 'flutter';
@@ -132,6 +143,18 @@ function reaction(inf, sipping, flying, onRim, wave) {
   if (onRim) r *= T.rimReactionFactor;
   return r;
 }
+// R2: the rim test uses the bug's outer edge (its centre pushed out by its radius), so art and rules agree.
+function onRimBody(g, p, radius) {
+  const rc = g.nr(p);
+  if (rc > 1) return false;
+  const dx = p.x - g.cx, dy = p.y - g.cy; const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return false;
+  const q = { x: p.x + dx / len * radius, y: p.y + dy / len * radius };
+  return g.nr(q) >= 0.84;
+}
+function wiltSeconds(ph) {
+  switch (ph) { case MORNING: return T.wiltMorning; case NOON: return T.wiltNoon; case DUSK: return T.wiltDusk; default: return T.wiltNight; }
+}
 function chainMultiplier(chain) { return Math.min(T.chainMaxMultiplier, 1 + T.chainStep * chain); }
 
 // MARK: WaveFactory
@@ -152,23 +175,46 @@ function waveDelay(seed, index) {
   return r.range(T.waveDelayMin, T.waveDelayMax);
 }
 function nectarSeed(seed, block) { return u64(seed ^ u64(BigInt(block) * 0xBF58476D1CE4E5B9n) ^ 0x4E4543n); }
+// R2 (REVIEW-1 #19): 6-8 drops in clusters of 2-3, the clusters alternating between the lobes, so crowds form in one place.
 function nectarDrops(seed, g) {
   const r = new SeededRandom(seed ^ 0x4E454354n);
   const n = r.int(T.nectarMin, T.nectarMax);
-  const out = [];
-  for (let k = 0; k < n; k++) {
-    const left = k % 2 === 0;
-    let p = { x: g.cx, y: g.cy };
+  const kMin = Math.floor((n + T.nectarClusterMax - 1) / T.nectarClusterMax), kMax = Math.floor(n / T.nectarClusterMin);
+  const k = r.int(kMin, kMax);
+  const extra = n - T.nectarClusterMin * k;
+  const firstLeft = r.chance(0.5);
+  const centres = [], out = [];
+  for (let c = 0; c < k; c++) {
+    const size = T.nectarClusterMin + (c < extra ? 1 : 0);
+    const left = (c % 2 === 0) === firstLeft;
+    // a lobe with two clusters puts its first in the upper half and its second in the lower half
+    const inLobe = (c % 2 === 0) ? Math.floor((k + 1) / 2) : Math.floor(k / 2);
+    const half = inLobe < 2 ? 0 : (Math.floor(c / 2) === 0 ? 1 : -1);
+    const m = T.nectarArcMargin;
+    let lo = left ? Math.PI / 2 + m : -Math.PI / 2 + m, hi = left ? 3 * Math.PI / 2 - m : Math.PI / 2 - m;
+    if (half === 1) { if (left) hi = Math.PI - T.nectarHalfGap; else lo = T.nectarHalfGap; }
+    if (half === -1) { if (left) lo = Math.PI + T.nectarHalfGap; else hi = -T.nectarHalfGap; }
+    const ring = r.range(T.nectarRingMin, T.nectarRingMax);
+    // the candidate furthest from the other centres (off the crease) wins; the first one clear of them all stops the search
+    let p = { x: g.cx, y: g.cy }, best = -Infinity;
     for (let tries = 0; tries < T.nectarTries; tries++) {
-      const t = left ? r.range(Math.PI / 2 + 0.25, 3 * Math.PI / 2 - 0.25) : r.range(-Math.PI / 2 + 0.25, Math.PI / 2 - 0.25);
-      const rr = r.range(T.nectarInner, T.nectarOuter);
-      p = g.point(t, rr);
-      let ok = Math.abs(p.x - g.cx) >= T.nectarCreaseClearance;
-      for (const d of out) if (Math.hypot(d.x - p.x, d.y - p.y) < T.nectarSpacing) ok = false;
-      if (ok) break;
+      const t = r.range(lo, hi);
+      const rr = r.range(T.nectarClusterInner, T.nectarClusterOuter);
+      const cand = g.point(t, rr);
+      let gap = 1e6;
+      for (const q of centres) gap = Math.min(gap, Math.hypot(q.x - cand.x, q.y - cand.y));
+      const clear = Math.abs(cand.x - g.cx) >= T.nectarCreaseClearance + ring;
+      const score = clear ? gap : gap - 1e9;
+      if (score > best) { best = score; p = cand; }
+      if (clear && gap >= T.nectarClusterGap) break;
     }
-    const radius = r.range(T.nectarRadiusMin, T.nectarRadiusMax);
-    out.push({ id: k, x: p.x, y: p.y, radius });
+    centres.push(p);
+    const phase = r.range(0, 2 * Math.PI);
+    for (let j = 0; j < size; j++) {
+      const ang = phase + 2 * Math.PI * j / size;
+      const radius = r.range(T.nectarRadiusMin, T.nectarRadiusMax);
+      out.push({ id: out.length, x: p.x + Math.cos(ang) * ring, y: p.y + Math.sin(ang) * ring, radius });
+    }
   }
   return out;
 }
@@ -230,6 +276,18 @@ function randomSpot(g, r, maxR) {
   const rr = Math.sqrt(r.unit()) * maxR;
   return g.point(t, rr);
 }
+function clampToRadius(g, p, maxR) {
+  const rr = g.nr(p);
+  if (rr <= maxR || rr === 0) return p;
+  const k = maxR / rr;
+  return { x: g.cx + (p.x - g.cx) * k, y: g.cy + (p.y - g.cy) * k };
+}
+// R2: the flight time of an approach (what spawn computes), or null for walkers and bugs that never land in the trap.
+function flightTime(spec) {
+  const m = motion(spec.species);
+  if (!spec.landsInTrap || m.style === WALKER) return null;
+  return Math.max(T.minFlightTime, Math.hypot(spec.target.x - spec.entry.x, spec.target.y - spec.entry.y) * T.approachPathFactor / m.speed);
+}
 function protectedCount(index, ph, r) {
   let n = 0;
   switch (ph) {
@@ -263,6 +321,13 @@ function makeWave(seed, index, g, nectar) {
   // shuffled drop order (Fisher-Yates)
   const order = nectar.map((_, i) => i);
   for (let i = order.length - 1; i > 0; i--) { const j = r.int(0, i); const tmp = order[i]; order[i] = order[j]; order[j] = tmp; }
+  // R2: a crowd wave goes to one cluster: the drops nearest a random anchor drop first, and its spots lie near it.
+  let anchor = null;
+  if (crowd && order.length > 0) {
+    anchor = nectar[order[0]];
+    const dist = (i) => Math.hypot(nectar[i].x - anchor.x, nectar[i].y - anchor.y);
+    order.sort((i, j) => { const di = dist(i), dj = dist(j); return di < dj ? -1 : (di > dj ? 1 : i - j); });
+  }
   const st = { nextDrop: 0 };
   const bugs = [];
   const [lmin, lmax] = lingerRange(ph, index);
@@ -293,6 +358,9 @@ function makeWave(seed, index, g, nectar) {
     } else if (m.nectarChance > 0 && st.nextDrop < order.length && r.chance(m.nectarChance)) {
       const d = nectar[order[st.nextDrop]]; st.nextDrop += 1;
       target = { x: d.x, y: d.y };
+    } else if (anchor !== null) {
+      const t = r.range(0, 2 * Math.PI), dd = r.range(T.crowdNearMin, T.crowdNearMax);
+      target = clampToRadius(g, { x: anchor.x + Math.cos(t) * dd, y: anchor.y + Math.sin(t) * dd }, T.spotRadius);
     } else {
       target = randomSpot(g, r, T.spotRadius);
     }
@@ -328,12 +396,18 @@ function makeWave(seed, index, g, nectar) {
     const base = crowd ? r.range(0, T.crowdSpread) : slot * r.range(T.trickleMin, T.trickleMax);
     addGroup('goldenScarab', 1, base); slot += 1;
   }
+  // R2: a crowd lands together: each flyer starts late by how much quicker its flight is than the slowest one's.
+  if (crowd) {
+    const fl = bugs.map((b) => flightTime(b));
+    let maxF = 0; for (const f of fl) if (f !== null) maxF = Math.max(maxF, f);
+    for (let i = 0; i < fl.length; i++) if (fl[i] !== null) bugs[i].groupOffset += maxF - fl[i];
+  }
   const np = protectedCount(index, ph, r);
   for (let k = 0; k < np; k++) {
     const s = protectedSpecies(ph, r);
     addGroup(s, 1, r.range(0, T.beeSpread));
   }
-  return { index, phase: ph, delay: waveDelay(seed, index), bugs };
+  return { index, phase: ph, delay: waveDelay(seed, index), bugs, crowd };
 }
 
 // MARK: TrapSession
@@ -349,9 +423,10 @@ class Session {
     this.wave = 0; this.nextWaveAt = T.firstWaveTime; this.lastWaveAt = 0; this.dayPhase = MORNING;
     this.nectar = []; this.nextDropID = 0; this.reservedBy = new Map(); this.retiring = new Set();
     this.installNectar(0);
-    this.snapsLeft = T.startSnaps; this.score = 0; this.chain = 0;
+    this.snapsLeft = clamp(opts.startSnaps == null ? T.startSnaps : opts.startSnaps, 1, T.maxSnaps); this.score = 0; this.chain = 0;
+    this.hunger = 0; this.hungrySent = false;
     this.prevArmed = true; this.prevClosure = 0;
-    this.stats = { snaps: 0, caught: 0, stings: 0, feasts: 0, dry: 0, bestBite: 0, biggest: 0, longestChain: 0, spared: 0 };
+    this.stats = { snaps: 0, caught: 0, stings: 0, feasts: 0, dry: 0, bestBite: 0, biggest: 0, longestChain: 0, spared: 0, wilts: 0 };
   }
   installNectar(block) {
     const drops = nectarDrops(nectarSeed(this.seed, block), this.g);
@@ -360,7 +435,7 @@ class Session {
     const fresh = [];
     for (const d of drops) {
       let clash = false;
-      for (const k of kept) if (Math.hypot(k.x - d.x, k.y - d.y) < T.nectarSpacing * 0.6) clash = true;
+      for (const k of kept) if (Math.hypot(k.x - d.x, k.y - d.y) < T.nectarKeptClearance) clash = true;
       if (clash) continue;
       fresh.push({ id: this.nextDropID, x: d.x, y: d.y, radius: d.radius }); this.nextDropID += 1;
     }
@@ -403,15 +478,25 @@ class Session {
     }
     for (const b of this.bugs) this.updateBug(b, h);
     this.bugs = this.bugs.filter((b) => !b.gone);
-    // EXPERIMENT (not in Swift; T.wiltSeconds=0 is off): a snap wilts after wiltSeconds without a bite
-    if (T.wiltSeconds > 0 && this.phase === 'playing' && this.opts.snapsRunOut) {
-      if (this.lastBiteAt === undefined) this.lastBiteAt = 0;
-      if (this.time - this.lastBiteAt >= T.wiltSeconds) { this.lastBiteAt = this.time; this.snapsLeft -= 1; this.stats.wilts = (this.stats.wilts || 0) + 1; if (this.snapsLeft <= 0) { this.snapsLeft = 0; this.phase = 'tired'; this.tiredElapsed = 0; this.tiredAt = this.time; this.pending = []; } }
+    // R2 hunger (GAME-DESIGN §5): no catching bite for the phase's wilt time wilts a snap; 3 s before, hungry.
+    if (this.phase === 'playing' && this.opts.snapsRunOut && this.opts.hunger !== false) {
+      const w = wiltSeconds(this.dayPhase);
+      this.hunger += h / w;
+      if (!this.hungrySent && (1 - this.hunger) * w <= T.hungryWarning) this.hungrySent = true;
+      if (this.hunger >= 1) {
+        this.hunger = 0; this.hungrySent = false; this.stats.wilts += 1;
+        this.snapsLeft = Math.max(this.snapsLeft - 1, 0);
+        if (this.snapsLeft === 0) this.becomeTired();
+      }
     }
     if (this.phase === 'tired') {
       this.tiredElapsed += h;
       if (this.tiredElapsed >= T.tiredSeconds) this.phase = 'finished';
     }
+  }
+  becomeTired() {
+    this.phase = 'tired'; this.tiredElapsed = 0; this.tiredAt = this.time; this.pending = [];
+    for (const b of this.bugs) { if (b.mode === M.caught || b.mode === M.leave || b.mode === M.escape || b.mode === M.release) continue; this.takeOff(b, M.leave); }
   }
   startWave() {
     this.wave += 1;
@@ -497,7 +582,8 @@ class Session {
     if (bestScore >= 0) return best;
     for (let i = 0; i < T.spotTries; i++) {
       const t = b.rng.range(0, 2 * Math.PI);
-      const dd = b.rng.range(Math.max(dMin, 8), Math.max(dMax, 20));
+      // R2: the search reaches at least this bug's own spacing need (radii are x1.8)
+      const dd = b.rng.range(Math.max(dMin, 8), Math.max(dMax, 20, b.info.radius * 2 + T.landSpacing + 10));
       const p = this.clampIn({ x: x + Math.cos(t) * dd, y: y + Math.sin(t) * dd }, maxR);
       const s = this.spotScore(b, p);
       if (s > bestScore) { bestScore = s; best = p; }
@@ -620,7 +706,7 @@ class Session {
         const u = Math.min(1, b.el / T.caughtSeconds);
         const e = u * u * (3 - 2 * u);
         b.x = b.fx + (this.g.cx - b.fx) * e; b.y = b.fy;
-        b.height = 0;
+        b.height = b.timer * (1 - e); // R2 (QA-1 #21): eases down from the height it was caught at
         if (b.el >= T.caughtSeconds) b.gone = true;
         break;
       }
@@ -705,7 +791,7 @@ class Session {
   }
   takeOff(b, kind) {
     this.freeDrop(b);
-    if (kind === M.leave && isProtected(b.species) && b.landedInTrap && !b.sparedSent) {
+    if ((kind === M.leave || kind === M.escape) && isProtected(b.species) && b.landedInTrap && !b.sparedSent) {
       b.sparedSent = true; this.stats.spared += 1;
     }
     const W = this.g.w, H = this.g.h;
@@ -736,15 +822,16 @@ class Session {
       const flying = a === A_ARR || a === A_HOP;
       if (a === A_ARR && b.height >= T.catchableHeight) continue;
       if (!(a === A_ARR || a === A_WALK || a === A_SIP || a === A_HOP)) continue;
-      const r = reaction(b.info, a === A_SIP, flying, this.g.onRim(b), this.wave);
+      const r = reaction(b.info, a === A_SIP, flying, onRimBody(this.g, b, b.info.radius), this.wave);
       if (d <= r) {
         if (isProtected(b.species)) { stingers.push(b.species); this.takeOff(b, M.release); }
-        else { caught.push(b.species); this.freeDrop(b); b.mode = M.caught; b.el = 0; b.fx = b.x; b.fy = b.y; }
+        else { caught.push(b.species); this.freeDrop(b); b.timer = b.height; b.mode = M.caught; b.el = 0; b.fx = b.x; b.fy = b.y; }
       } else {
         escaped += 1; this.takeOff(b, M.escape);
       }
     }
-    this.stats.snaps += 1; this.lastBiteAt = this.time;
+    this.stats.snaps += 1;
+    if (caught.length >= 1) { this.hunger = 0; this.hungrySent = false; }
     const n = caught.length;
     let sum = 0; for (const s of caught) sum += info(s).points;
     const mult = chainMultiplier(this.chain);
@@ -759,31 +846,29 @@ class Session {
     if (n >= T.feastCount) this.stats.feasts += 1;
     if (n === 0 && stingers.length === 0) this.stats.dry += 1;
     this.stats.bestBite = Math.max(this.stats.bestBite, points); this.stats.biggest = Math.max(this.stats.biggest, n);
-    if (n >= 1 && stingers.length === 0) { this.chain += 1; this.stats.longestChain = Math.max(this.stats.longestChain, this.chain); }
-    else this.chain = 0;
+    // R2 chain rule: a clean bite of >= 2 adds a step, a clean 1-bug bite holds it, a dry snap or a stinger breaks it.
+    if (n >= T.chainMinBite && stingers.length === 0) { this.chain += 1; this.stats.longestChain = Math.max(this.stats.longestChain, this.chain); }
+    else if (!(n >= 1 && stingers.length === 0)) this.chain = 0;
     if (this.opts.snapsRunOut) {
       this.snapsLeft = clamp(this.snapsLeft - T.snapCost - lost + back, 0, T.maxSnaps);
-      if (this.snapsLeft === 0) {
-        this.phase = 'tired'; this.tiredElapsed = 0; this.tiredAt = this.time; this.pending = [];
-        for (const b of this.bugs) { if (b.mode === M.caught || b.mode === M.leave || b.mode === M.escape || b.mode === M.release) continue; this.takeOff(b, M.leave); }
-      }
+      if (this.snapsLeft === 0) this.becomeTired();
     }
   }
   snapshot() {
     const bugs = this.bugs.map((b) => {
       const a = this.activityOf(b);
       const inT = this.inTrap(b);
-      return { id: b.id, species: b.species, x: b.x, y: b.y, activity: a, height: b.height, inTrap: inT, onRim: inT && this.g.onRim(b), restless: b.restless };
+      return { id: b.id, species: b.species, x: b.x, y: b.y, activity: a, height: b.height, inTrap: inT, onRim: inT && onRimBody(this.g, b, b.info.radius), restless: b.restless };
     });
-    return { phase: this.phase, time: this.time, bugs, snapsLeft: this.snapsLeft, wave: this.wave, score: this.score };
+    return { phase: this.phase, time: this.time, bugs, snapsLeft: this.snapsLeft, wave: this.wave, score: this.score, hunger: this.hunger, dayPhase: this.dayPhase };
   }
 }
 
 // MARK: TrapPilot
 const PROFILE = {
   novice: { dmin: 0.22, dmax: 0.40, delayMin: 0.35, delayMax: 0.6, beeMiss: T.noviceBeeMiss },
-  casual: { dmin: 0.14, dmax: 0.24, delayMin: 0.25, delayMax: 0.45, beeMiss: 0.2 },
-  expert: { dmin: 0.10, dmax: 0.15, delayMin: 0.15, delayMax: 0.3, beeMiss: 0.02 },
+  casual: { dmin: 0.14, dmax: 0.24, delayMin: 0.25, delayMax: 0.45, beeMiss: T.casualBeeMiss },
+  expert: { dmin: 0.10, dmax: 0.15, delayMin: 0.15, delayMax: 0.3, beeMiss: T.expertBeeMiss },
   perfect: { dmin: 0.08, dmax: 0.08, delayMin: 0.1, delayMax: 0.1, beeMiss: 0 },
 };
 class Pilot {
@@ -793,7 +878,11 @@ class Pilot {
     this.closure = 0; this.armed = true; this.el = 0; this.d = 0.2; this.creepy = false; this.peak = 0;
     this.t4 = null; this.t6 = null; this.decideAt = null; this.beeSince = null; this.missed = new Map(); this.lastSnap = 0; this.plannedD = this.p.dmin;
   }
-  planDuration() { return this.p.dmin === this.p.dmax ? this.p.dmin : this.rng.range(this.p.dmin, this.p.dmax); }
+  planDuration() {
+    // R2: a casual hand sometimes fumbles a snap (slow), which is what breaks its chains besides the bees.
+    if (this.skill === 'casual' && this.rng.chance(T.casualFumbleChance)) return this.rng.range(T.casualFumbleMin, T.casualFumbleMax);
+    return this.p.dmin === this.p.dmax ? this.p.dmin : this.rng.range(this.p.dmin, this.p.dmax);
+  }
   // A protected bug sitting in the trap (landed): what a shoo can clear.
   beeSitting(snap) {
     for (const b of snap.bugs) {
@@ -840,7 +929,7 @@ class Pilot {
     let want = false;
     switch (this.skill) {
       case 'novice': want = v.landed >= 1; break;
-      case 'casual': want = v.landed >= 2 || (v.landed >= 1 && v.maxPts >= 20) || (v.landed >= 1 && waited >= T.casualPatience); break;
+      case 'casual': want = v.landed >= 3 || (v.landed >= 2 && v.arriving === 0) || (v.landed >= 1 && v.maxPts >= 20) || (v.landed >= 1 && waited >= T.casualPatience); break;
       case 'expert': want = v.n >= 3 || (v.n >= 1 && v.value >= T.expertValue) || (v.n >= 2 && v.restless >= T.expertRestless) || (v.n >= 1 && waited >= T.expertPatience); break;
       default: want = v.n >= 5 || (v.n >= 3 && v.arriving === 0) || (v.n >= 3 && v.restless >= T.perfectRestless) || v.value >= T.perfectValue || (v.n >= 1 && waited >= T.perfectPatience); break;
     }
@@ -908,7 +997,7 @@ class Pilot {
 // MARK: SnapDetector (mirror of Snap/Core/SnapDetector.swift; not used by the balance runs, checked by detector=1)
 const D = { snapDepth: 22, snapStartDepth: 4, snapCancelDepth: 2, creepDepth: 6, creepDwell: 0.45, rearmRise: 16,
   rearmAngle: 150, rearmMinRise: 4, refWindow: 0.6, refFallRate: 25, creepWindow: 3.0, creepRefFallRate: 6,
-  tooFlatAngle: 174 };
+  tooFlatAngle: 174, settleWindow: 0.6, attemptWindow: 0.25 };
 class RollingMax {
   constructor(window, fall) { this.window = window; this.fall = fall; this.samples = []; this.value = 0; this.last = 0; }
   reset(t, a) { this.samples = [{ t, a }]; this.value = a; this.last = t; }
@@ -925,34 +1014,47 @@ class SnapDetector {
     this.fast = new RollingMax(D.refWindow, D.refFallRate); this.slow = new RollingMax(D.creepWindow, D.creepRefFallRate);
     this.has = false; this.angle = 0; this.lastC = 0; this.prevTime = 0; this.armed = true; this.attempt = false; this.ts = 0;
     this.lowest = 0; this.snapRef = 0; this.pending = null; this.creepSince = null;
+    this.recent = []; this.settling = false; this.settlePeak = 0; this.settleUntil = 0;
   }
+  startSettle(t, a) { this.settling = true; this.settlePeak = a; this.settleUntil = t + D.settleWindow; }
+  recentRise(c) { return this.recent.length > 0 ? c - this.recent[0].c : c; }
   static cross(t0, c0, t1, c1, thr) { if (c1 <= c0) return t1; return clamp(t0 + (t1 - t0) * (thr - c0) / (c1 - c0), t0, t1); }
   ingest(angle, time) {
     if (!isFinite(angle) || !isFinite(time)) return null;
     if (!this.has) {
       this.has = true; this.fast.reset(time, angle); this.slow.reset(time, angle);
-      this.angle = angle; this.lastC = 0; this.prevTime = time; return null;
+      this.angle = angle; this.lastC = 0; this.prevTime = time; this.recent = [{ t: time, c: 0 }]; this.startSettle(time, angle); return null;
     }
     this.fast.add(time, angle); this.slow.add(time, angle);
     let c = this.fast.value - angle;
     let fired = null;
     if (this.armed) {
+      this.recent.push({ t: time, c });
+      while (this.recent.length >= 2 && this.recent[1].t <= time - D.attemptWindow) this.recent.shift();
       if (!this.attempt) {
         if (c >= D.snapStartDepth) { this.attempt = true; this.ts = SnapDetector.cross(this.prevTime, this.lastC, time, c, D.snapStartDepth); }
       } else if (c < D.snapCancelDepth) this.attempt = false;
+      else if (c < D.snapDepth && this.recentRise(c) < D.snapStartDepth) this.ts = time; // QA-1 #6: not snapping (a drift or a hold): restart the clock
       if (this.attempt && c >= D.snapDepth) {
         const tc = SnapDetector.cross(this.prevTime, this.lastC, time, c, D.snapDepth);
         fired = { duration: Math.max(0, tc - this.ts), time };
         this.pending = fired; this.armed = false; this.attempt = false; this.lowest = angle; this.snapRef = this.fast.value;
-        this.creepSince = null;
+        this.creepSince = null; this.recent = [];
       }
     } else {
       this.lowest = Math.min(this.lowest, angle);
       const rise = angle - this.lowest;
       if (rise >= D.rearmRise || (angle >= D.rearmAngle && rise >= D.rearmMinRise)) {
         this.armed = true; this.attempt = false; this.fast.reset(time, angle); this.slow.reset(time, angle); c = 0;
-        this.creepSince = null;
+        this.creepSince = null; this.recent = [{ t: time, c: 0 }]; this.startSettle(time, angle);
       }
+    }
+    // QA-1 #5: after a re-arm (or the first sample, or while flat) the creep reference follows the hand while it opens
+    // and for settleWindow after its peak, so an overshoot that settles back never reads as a creep.
+    if (angle >= D.tooFlatAngle) { if (!this.settling) this.startSettle(time, angle); this.settleUntil = Math.max(this.settleUntil, time + D.settleWindow); }
+    if (this.settling) {
+      if (angle > this.settlePeak) { this.settlePeak = angle; this.settleUntil = time + D.settleWindow; }
+      if (time <= this.settleUntil) this.slow.reset(time, angle); else this.settling = false;
     }
     this.lastC = c; this.prevTime = time; this.angle = angle;
     this.updateCreep(time);
@@ -1003,6 +1105,22 @@ function detectorChecks() {
     path.forEach((a, k) => { const t = 1 + (k + 1) / 30; if (d.ingest(a, t)) fires += 1; if (rearmAt === null && d.armed && fires === 1) rearmAt = a; });
     out.push([`re-arms 16 above the lowest (fires=${fires}, at ${rearmAt})`, fires === 1 && rearmAt === 142]);
   }
+  { // QA-1 #5: a reopen that overshoots (172) and settles (165) never creeps
+    const d = new SnapDetector(); let creeps = 0, fires = 0; let t = 0;
+    for (let i = 0; i <= 30; i++) { t = i / 30; d.ingest(165, t); }
+    const path = [155, 145, 138, 135, 140, 148, 156, 164, 170, 172, 171, 169, 167, 166, 165];
+    for (const a of path) { t += 1 / 30; if (d.ingest(a, t)) fires += 1; }
+    for (let i = 0; i < 150; i++) { t += 1 / 30; d.ingest(165 + (i % 2 ? 0.4 : -0.4), t); const inp = d.input(t); if (inp.creeping) creeps += 1; }
+    out.push([`overshoot then settle never creeps (creeping frames=${creeps}, fires=${fires})`, creeps === 0 && fires === 1 && d.armed]);
+  }
+  { // QA-1 #6: a steady 8 deg/s drift then a quick snap is timed from the snap, not the drift
+    const d = new SnapDetector(); let t = 0, dur = -1;
+    for (let i = 0; i <= 30; i++) { t = i / 30; d.ingest(165, t); }
+    let a = 165;
+    for (let i = 0; i < 60; i++) { t += 1 / 30; a -= 8 / 30; d.ingest(a, t); }
+    for (let i = 0; i < 4; i++) { t += 1 / 30; a -= 25 / 3; const r = d.ingest(a, t); if (r && dur < 0) dur = r.duration; }
+    out.push([`snap after a drift is timed from the snap (d=${dur.toFixed(3)})`, dur >= 0 && dur <= 0.15]);
+  }
   return out;
 }
 
@@ -1018,10 +1136,10 @@ function runOne(skill, seed) {
   }
   return { score: s.score, seconds: s.phase === 'finished' ? s.tiredAt : s.time, snaps: s.stats.snaps, caught: s.stats.caught,
     stings: s.stats.stings, feasts: s.stats.feasts, dry: s.stats.dry, waves: s.wave, chain: s.stats.longestChain,
-    biggest: s.stats.biggest, spared: s.stats.spared, capped: s.phase !== 'finished' };
+    biggest: s.stats.biggest, spared: s.stats.spared, wilts: s.stats.wilts, capped: s.phase !== 'finished' };
 }
 function pct(a, p) { if (a.length === 0) return 0; const s = a.slice().sort((x, y) => x - y); const pos = (s.length - 1) * p; const lo = Math.floor(pos); const hi = Math.min(s.length - 1, lo + 1); return s[lo] + (s[hi] - s[lo]) * (pos - lo); }
-const KEYS = ['score', 'seconds', 'snaps', 'caught', 'stings', 'feasts', 'dry', 'waves', 'chain', 'biggest', 'spared'];
+const KEYS = ['score', 'seconds', 'snaps', 'caught', 'stings', 'feasts', 'dry', 'waves', 'chain', 'biggest', 'spared', 'wilts'];
 function medians(runs) {
   const m = {};
   for (const k of KEYS) m[k] = pct(runs.map((r) => r[k]), 0.5);
@@ -1033,21 +1151,58 @@ function medians(runs) {
 function checks(med) {
   const out = [];
   const c = med.casual, n = med.novice, e = med.expert, p = med.perfect;
-  if (c) { out.push([`casual seconds 90-240 (${c.seconds.toFixed(1)})`, c.seconds >= 90 && c.seconds <= 240]); out.push([`casual snaps 18-45 (${c.snaps})`, c.snaps >= 18 && c.snaps <= 45]); }
+  if (c) {
+    out.push([`casual seconds 100-240 (${c.seconds.toFixed(1)})`, c.seconds >= 100 && c.seconds <= 240]);
+    out.push([`casual snaps 18-45 (${c.snaps})`, c.snaps >= 18 && c.snaps <= 45]);
+    out.push([`casual longest chain 3-6 (${c.chain})`, c.chain >= 3 && c.chain <= 6]);
+  }
+  if (p) out.push([`perfect seconds 240-420 (${p.seconds.toFixed(1)})`, p.seconds >= 240 && p.seconds <= 420]);
   if (n) out.push([`novice stings >= 1 (${n.stings})`, n.stings >= 1]);
   if (p) out.push([`perfect never stung (max ${p.maxStings})`, p.maxStings === 0]);
   if (n && c) out.push([`novice < casual (${n.score} < ${c.score})`, n.score < c.score]);
   if (c && e) out.push([`casual < expert (${c.score} < ${e.score})`, c.score < e.score]);
   if (e && p) out.push([`expert <= perfect (${e.score} <= ${p.score})`, e.score <= p.score]);
-  for (const sk of ['novice', 'casual']) if (med[sk]) out.push([`${sk} never capped (${med[sk].capped})`, med[sk].capped === 0]);
+  for (const sk of ['novice', 'casual', 'expert', 'perfect']) if (med[sk]) out.push([`${sk} never capped (${med[sk].capped})`, med[sk].capped === 0]);
   return out;
 }
 function main() {
-  const seeds = Number(args.seeds || 8);
+  const seeds = Number(args.seeds || 16);
   const base = Number(args.base || 1000), stride = Number(args.stride || 7919);
   const skills = (args.skills || 'novice,casual,expert,perfect').split(',');
   if (args.detector) {
     for (const [name, ok] of detectorChecks()) console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`);
+    return;
+  }
+  if (args.crowd) {
+    // R2: crowd waves land within 1.2 s (first landing to last, flyers that land in the trap; nobody snaps)
+    let worst = 0, waves = 0, over = 0; const spreads = [];
+    for (let i = 0; i < seeds; i++) {
+      const s = new Session(base + i * stride, { snapsRunOut: true, waves: true, stingCosts: true, hunger: false }, 'feed');
+      const landed = new Map();
+      const sw = s.startWave.bind(s);
+      s.startWave = () => {
+        const n0 = s.pending.length; sw();
+        const crowd = makeWave(s.seed, s.wave, s.g, s.nectar).crowd;
+        for (let k = n0; k < s.pending.length; k++) { s.pending[k].spec.wave = s.wave; s.pending[k].spec.crowdWave = crowd; }
+      };
+      const sp = s.spawn.bind(s);
+      s.spawn = (spec) => { const id = sp(spec); if (id > 0) s.bugs[s.bugs.length - 1].spec = spec; return id; };
+      const ld = s.land.bind(s);
+      s.land = (b) => {
+        ld(b);
+        const q = b.spec;
+        if (q && q.crowdWave && !isProtected(b.species) && b.m.style !== WALKER && q.landsInTrap) {
+          if (!landed.has(q.wave)) landed.set(q.wave, []);
+          landed.get(q.wave).push(s.time);
+        }
+      };
+      for (let fr = 0; fr < 60 * 120; fr++) s.step(1 / 60, { closure: 0, armed: true, creeping: false, snap: null });
+      for (const [, ts] of landed) {
+        if (ts.length < 2) continue;
+        const d = Math.max(...ts) - Math.min(...ts); spreads.push(d); worst = Math.max(worst, d); waves += 1; if (d > 1.2) over += 1;
+      }
+    }
+    console.log(`CROWD waves=${waves} median spread=${pct(spreads, 0.5).toFixed(2)} s p90=${pct(spreads, 0.9).toFixed(2)} worst=${worst.toFixed(2)} over1.2=${over}`);
     return;
   }
   if (args.attract) {
@@ -1078,11 +1233,11 @@ function main() {
     for (let i = 0; i < seeds; i++) {
       const seed = base + i * stride;
       const r = runOne(sk, seed); runs.push(r);
-      if (args.verbose) console.log(`  ${sk} seed=${seed} score=${r.score} s=${r.seconds.toFixed(1)} snaps=${r.snaps} caught=${r.caught} stings=${r.stings} feasts=${r.feasts} dry=${r.dry} waves=${r.waves} chain=${r.chain} biggest=${r.biggest} spared=${r.spared}${r.capped ? ' CAPPED' : ''}`);
+      if (args.verbose) console.log(`  ${sk} seed=${seed} score=${r.score} s=${r.seconds.toFixed(1)} snaps=${r.snaps} caught=${r.caught} stings=${r.stings} feasts=${r.feasts} dry=${r.dry} waves=${r.waves} chain=${r.chain} biggest=${r.biggest} spared=${r.spared} wilts=${r.wilts}${r.capped ? ' CAPPED' : ''}`);
     }
     med[sk] = medians(runs);
     const m = med[sk];
-    console.log(`SNAP-BAL skill=${sk} score=${m.score} p10=${pct(runs.map((r) => r.score), 0.1).toFixed(0)} p90=${pct(runs.map((r) => r.score), 0.9).toFixed(0)} seconds=${m.seconds.toFixed(1)} snaps=${m.snaps} caught=${m.caught} stings=${m.stings} maxStings=${m.maxStings} feasts=${m.feasts} dry=${m.dry} waves=${m.waves} chain=${m.chain} biggest=${m.biggest} spared=${m.spared} capped=${m.capped} n=${runs.length}`);
+    console.log(`SNAP-BAL skill=${sk} score=${m.score} p10=${pct(runs.map((r) => r.score), 0.1).toFixed(0)} p90=${pct(runs.map((r) => r.score), 0.9).toFixed(0)} seconds=${m.seconds.toFixed(1)} snaps=${m.snaps} caught=${m.caught} stings=${m.stings} maxStings=${m.maxStings} feasts=${m.feasts} dry=${m.dry} waves=${m.waves} chain=${m.chain} biggest=${m.biggest} spared=${m.spared} wilts=${m.wilts} capped=${m.capped} n=${runs.length}`);
   }
   for (const [name, ok] of checks(med)) console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`);
 }

@@ -22,7 +22,7 @@ struct DailyView: View {
         let record = store.data.dailyRecord(day: today)
         let pause = HUDLayout.make(info).pause
         ZStack {
-            SnapBackdrop(glow: SnapTheme.gold)
+            BogBackdrop(controller: controller, glow: SnapTheme.gold)
             VStack(spacing: c ? 8 : 14) {
                 Image(systemName: "sun.max.fill")
                     .font(.system(size: c ? 40 : 56, weight: .bold))

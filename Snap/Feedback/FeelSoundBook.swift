@@ -71,8 +71,12 @@ enum FeelSoundBook {
     static let clackJitter: Float = 0.003
     /// The first tooth click lands this long after the thwack's leading edge.
     static let clackAt: Float = 0.004
+    /// R2: the Scene freezes the bite for a 50 ms hit-stop. The impact (rims, thwack, thump, knock, clack) lands at 0;
+    /// the wet tail (the squelch and the crunches) waits out the hit-stop, so the bite reads as one heavy slam, a held
+    /// beat, then the squelch.
+    static let hitStop: Float = 0.05
     /// The "mm" gulp lands this long after the bite.
-    static let gulpAt: Float = 0.3
+    static let gulpAt: Float = 0.34
     /// Home's title trap chomps a little smaller than a real bite.
     static let homeChompScale: Float = 0.8
 
@@ -87,12 +91,13 @@ enum FeelSoundBook {
     /// 1. a 2.5 ms bright tick: the instant the rims meet (the leading edge);
     /// 2. the **wet thwack**: a noise burst through a low-pass sweeping 2.4 kHz → 300 Hz in 60 ms, with a short 650 Hz
     ///    band for the slap of wet leaf on leaf;
-    /// 3. the **thump**: a sine dropping 90 → 45 Hz in 70 ms, with a 1/n harmonic stack (to 450 Hz) so a phone speaker
-    ///    carries its weight;
+    /// 3. the **thump**: a sine dropping 90 → 45 Hz in 70 ms, with a 1/n harmonic stack (to 540 Hz) so a phone speaker
+    ///    carries its weight; R2: longer and heavier, with a 160 → 70 Hz **knock** and a low-passed body **whump** on
+    ///    top (the mass of two lobes meeting);
     /// 4. the **teeth clack**: two short woody clicks (~1.8 and ~2.3 kHz resonant impulses) 18 ± 3 ms apart;
-    /// 5. the **squelch**: granular wet noise with little bubbles, 120 ms + 60 ms per bug, denser and wetter with more
-    ///    bugs (a big bite adds a low slosh);
-    /// 6. the **gulp** 0.3 s later: a nasal "mm", a 140 → 90 Hz formant blip, and a swallow.
+    /// 5. after the 50 ms **hit-stop** (`hitStop`), the **squelch**: granular wet noise with little bubbles, 120 ms +
+    ///    60 ms per bug, denser and wetter with more bugs (a big bite adds a low slosh);
+    /// 6. the **gulp** 0.34 s later: a nasal "mm", a 140 → 90 Hz formant blip, and a swallow.
     /// Weight grows with the bite (thump and thwack +5 % per extra bug). Everything shifts by the same ±4 % pitch.
     static func chomp(caught: Int, dice: inout FeelDice, scale: Float = 1) -> [FeelSynthCommand] {
         let n = min(max(caught, 0), 8)
@@ -104,17 +109,22 @@ enum FeelSoundBook {
         var commands: [FeelSynthCommand] = []
         // 1. The rims meet.
         commands.append(.noise(FeelNoiseSpec(.highPass, cutoff: 3200 * k, q: 0.7, attack: 0.0003, decay: 0.0025,
-                                             gain: 0.2 * s)))
+                                             gain: 0.17 * s)))
         // 2. The wet thwack, and the leaf slap.
-        let thwackGain: Float = min(0.32 * s * weight, 0.4)
+        let thwackGain: Float = min(0.29 * s * weight, 0.4)
         commands.append(.noise(FeelNoiseSpec(.lowPass, cutoff: 2400 * k, to: 300 * k, sweep: 0.06, q: 1.3,
                                              attack: 0.0008, decay: 0.045, gain: thwackGain)))
         commands.append(.noise(FeelNoiseSpec(.bandPass, cutoff: 650 * k, q: 2.2, attack: 0.0005, decay: 0.016,
-                                             gain: 0.26 * s)))
-        // 3. The thump.
-        let thumpGain: Float = min(0.3 * s * weight, 0.4)
-        commands.append(.tone(FeelToneSpec(start: 90 * k, end: 45 * k, glide: 0.07, duration: 0.26, attack: 0.0015,
-                                           decay: 0.075, gain: thumpGain, harmonics: 5)))
+                                             gain: 0.22 * s)))
+        // 3. The thump (the only tone at 0), the knock and the body whump.
+        let thumpGain: Float = min(0.34 * s * weight, 0.4)
+        commands.append(.tone(FeelToneSpec(start: 90 * k, end: 45 * k, glide: 0.07, duration: 0.3, attack: 0.0015,
+                                           decay: 0.09, gain: thumpGain, harmonics: 6)))
+        commands.append(.tone(FeelToneSpec(start: 160 * k, end: 70 * k, glide: 0.04, duration: 0.12, attack: 0.001,
+                                           decay: 0.03, gain: min(0.1 * s * weight, 0.2), harmonics: 4,
+                                           delay: 0.002)))
+        commands.append(.noise(FeelNoiseSpec(.lowPass, cutoff: 420 * k, to: 120 * k, sweep: 0.05, q: 1.6,
+                                             attack: 0.001, decay: 0.045, gain: min(0.1 * s * weight, 0.2))))
         // 4. The teeth clack.
         commands.append(contentsOf: clack(pitch: k, gap: gap, scale: s, dice: &dice))
         // 5. The squelch.
@@ -122,10 +132,10 @@ enum FeelSoundBook {
         let squelchGain: Float = min(0.26 * s * (1 + 0.04 * Float(n)), 0.38)
         commands.append(.squelch(FeelSquelchSpec(duration: squelchLength(caught: n), grainRate: 380 + 50 * wet,
                                                  low: 380 * k, high: 2600 * k, bubbles: 0.25 + 0.03 * wet,
-                                                 gain: squelchGain, delay: 0.012)))
+                                                 gain: squelchGain, delay: hitStop)))
         if n >= 3 {
             commands.append(.noise(FeelNoiseSpec(.lowPass, cutoff: 700 * k, to: 250 * k, sweep: 0.15, q: 1,
-                                                 attack: 0.01, decay: 0.08, gain: 0.12 * s, delay: 0.03)))
+                                                 attack: 0.01, decay: 0.08, gain: 0.12 * s, delay: hitStop + 0.02)))
         }
         // 6. The gulp.
         commands.append(.tone(FeelToneSpec(start: 140 * k, end: 90 * k, glide: 0.09, duration: 0.17, attack: 0.012,
@@ -176,25 +186,27 @@ enum FeelSoundBook {
         return commands
     }
 
-    /// When the `index`th caught bug's crunch lands (s after the bite), inside the squelch.
-    static let crunchStart: Float = 0.02
+    /// When the `index`th caught bug's crunch lands (s after the bite), inside the squelch (after the hit-stop).
+    static let crunchStart: Float = 0.058
     static let crunchSpacing: Float = 0.024
     static func crunchDelay(index: Int) -> Float {
         crunchStart + crunchSpacing * Float(min(max(index, 0), 10))
     }
 
     /// One caught bug (with the CHOMP, one per `bugCaught`): a tiny crackle of shell where it was, so a big bite has
-    /// countable crunches. Panned to the bug.
-    static func crunch(index: Int, pan: Float, dice: inout FeelDice) -> [FeelSynthCommand] {
+    /// countable crunches. Panned to the bug. `light` (QA-1 #4, bugs past the 4th): two crackles and no shell ring, so
+    /// a huge Feast still has voices left for its sparkle, scarab and chain.
+    static func crunch(index: Int, pan: Float, light: Bool = false, dice: inout FeelDice) -> [FeelSynthCommand] {
         let start = crunchDelay(index: index)
         var commands: [FeelSynthCommand] = []
         var t = start
-        for k in 0..<3 {
+        for k in 0..<(light ? 2 : 3) {
             let gain: Float = 0.13 - 0.03 * Float(k)
             commands.append(.noise(FeelNoiseSpec(.bandPass, cutoff: dice.float(2600, 4200), q: 2, attack: 0.0002,
                                                  decay: 0.0025, gain: gain, delay: t, pan: pan)))
             t += dice.float(0.005, 0.008)
         }
+        if light { return commands }
         commands.append(.ring(FeelRingSpec(.wood, fundamental: dice.float(1200, 1600), partials: 2, decay: 0.006,
                                            brightness: 0.45, gain: 0.08, delay: start, seed: dice.seed32(),
                                            pan: pan)))
@@ -285,7 +297,7 @@ enum FeelSoundBook {
     /// The chain's ladder: C major pentatonic from C6 (each productive snap climbs one rung).
     static let chainLadder: [Float] = [c6, d6, e6, g6, a6, c7, d7, e7]
     /// The chain chime lands after the gulp (s after the bite).
-    static let chainAt: Float = 0.42
+    static let chainAt: Float = 0.46
 
     /// The ladder rung (0…7) for a chain of `count`.
     static func chainRung(count: Int) -> Int {
@@ -526,6 +538,45 @@ enum FeelSoundBook {
                                  gain: 0.04, delay: delay)),
             .ring(FeelRingSpec(.pluck, fundamental: 130.81, partials: 5, decay: 0.5, brightness: 0.4, gain: 0.07,
                                delay: delay + 0.85, seed: 13)),
+        ]
+    }
+
+    // MARK: Hunger (R2, GAME-DESIGN §5 "Hunger")
+
+    /// Hungry (3 s before a snap wilts): the trap's tummy rumbles. A low growl (a 72 → 58 Hz stack with a 9 Hz wobble;
+    /// its harmonics carry it on a phone speaker), a resonant low-passed gurgle, a second rising "grrr", and three
+    /// small low bubbles. Centred and soft: a nudge, never an alarm.
+    static func hungry(dice: inout FeelDice) -> [FeelSynthCommand] {
+        let k = dice.float(0.95, 1.05)
+        var commands: [FeelSynthCommand] = [
+            .tone(FeelToneSpec(start: 72 * k, end: 58 * k, glide: 0.5, duration: 0.75, attack: 0.08, decay: 0.3,
+                               gain: 0.1, harmonics: 7, vibratoRate: 9, vibratoDepth: 0.09)),
+            .noise(FeelNoiseSpec(.lowPass, cutoff: 320 * k, to: 160 * k, sweep: 0.5, q: 3, attack: 0.06, decay: 0.22,
+                                 gain: 0.08)),
+            .tone(FeelToneSpec(start: 96 * k, end: 120 * k, glide: 0.2, duration: 0.4, attack: 0.05, decay: 0.15,
+                               gain: 0.06, harmonics: 6, vibratoRate: 13, vibratoDepth: 0.1, delay: 0.42)),
+        ]
+        for index in 0..<3 {
+            let at: Float = 0.25 + 0.14 * Float(index) + dice.float(0, 0.05)
+            commands.append(.drop(FeelDropSpec(frequency: dice.float(170, 260), chirp: 1.4, decay: 0.03, gain: 0.05,
+                                               delay: at)))
+        }
+        return commands
+    }
+
+    /// A snap wilted (no catching bite for the phase's wilt time): a soft, sinking droop. A gentle falling sigh
+    /// (G4 → G3 over 0.5 s, a little vibrato), a leafy rustle settling, and one soft low marimba note at the bottom.
+    /// Softer than the last-snap knocks.
+    static func wilted(delay: Float = 0, dice: inout FeelDice) -> [FeelSynthCommand] {
+        let k = dice.float(0.98, 1.02)
+        let at: Float = delay.isFinite ? max(delay, 0) : 0
+        return [
+            .tone(FeelToneSpec(start: 392 * k, end: 196 * k, glide: 0.5, duration: 0.65, attack: 0.03, decay: 0.28,
+                               gain: 0.06, harmonics: 3, vibratoRate: 5, vibratoDepth: 0.012, delay: at)),
+            .noise(FeelNoiseSpec(.bandPass, cutoff: 1400 * k, to: 350 * k, sweep: 0.5, q: 0.9, attack: 0.04,
+                                 decay: 0.18, gain: 0.035, delay: at)),
+            .ring(FeelRingSpec(.marimba, fundamental: 130.81 * k, partials: 3, decay: 0.3, brightness: 0.3, gain: 0.05,
+                               delay: at + 0.5, seed: dice.seed32())),
         ]
     }
 
@@ -806,11 +857,22 @@ enum FeelSoundBook {
 }
 
 /// The buzz layer's slot keeper (pure, testable): up to `FeelSynth.buzzSlots` bugs at once, the loudest first. A bug
-/// keeps its slot for its whole visit; a slot whose bug has gone fades to silence and is free again only after
-/// `reuseAfter` (the synth's ~80 ms fade), so a new bug never takes over a voice mid-sound.
+/// keeps its slot for its whole visit (QA-1 #15: a newcomer must be `hysteresis` × louder to take a seat from a bug
+/// already sounding, so the 8th and 9th bugs at similar heights never swap every few frames); a slot whose bug has
+/// gone fades to silence and is free again only after `reuseAfter` (the synth's ~80 ms fade), so a new bug never takes
+/// over a voice mid-sound.
 struct FeelBuzzMixer {
     static let slots = FeelSynth.buzzSlots
     static let reuseAfter = 0.12
+    /// A bug already in a slot ranks this much louder when the eight are chosen.
+    static let hysteresis = 1.3
+
+    /// One candidate for a slot this frame.
+    struct Want {
+        var id: Int
+        var buzz: FeelBuzz
+        var rank: Float
+    }
 
     /// The bug id in each slot (nil: free or fading).
     private(set) var ids: [Int?]
@@ -826,15 +888,17 @@ struct FeelBuzzMixer {
 
     /// This frame's buzzers at `share` (0…1) at time `now`; returns every slot's target.
     mutating func update(buzzers: [Buzzer], share: Double, now: Double) -> [FeelBuzz] {
-        var wanted: [(id: Int, buzz: FeelBuzz)] = []
+        var wanted: [FeelBuzzMixer.Want] = []
         for buzzer in buzzers {
             let target = FeelSoundBook.buzz(for: buzzer, share: share)
             if target.timbre != .silent && target.level > 0.001 {
-                wanted.append((id: buzzer.id, buzz: target))
+                let held = ids.contains(where: { $0 == buzzer.id })
+                let rank: Float = held ? target.level * Float(Self.hysteresis) : target.level
+                wanted.append(FeelBuzzMixer.Want(id: buzzer.id, buzz: target, rank: rank))
             }
         }
-        wanted.sort { (a: (id: Int, buzz: FeelBuzz), b: (id: Int, buzz: FeelBuzz)) -> Bool in
-            if a.buzz.level != b.buzz.level { return a.buzz.level > b.buzz.level }
+        wanted.sort { (a: FeelBuzzMixer.Want, b: FeelBuzzMixer.Want) -> Bool in
+            if a.rank != b.rank { return a.rank > b.rank }
             return a.id < b.id
         }
         if wanted.count > Self.slots { wanted.removeLast(wanted.count - Self.slots) }

@@ -21,6 +21,13 @@ import Foundation
 //   player opens up), never from the following reference.
 // - No samples arrive while the hinge is still, so `input(at:)` advances the references (and the creep timer) to the
 //   frame time from the latest sample.
+// - R2 (QA-1 #5): after a re-arm, the first sample, or any θ ≥ Tuning.tooFlatAngle, the creep reference is re-seeded
+//   to θ on every sample while θ reaches new highs and for Tuning.settleWindow (0.6 s) after the peak. A reopen that
+//   overshoots (172°) and settles (165°), or a bend down from flat, is never a creep.
+// - R2 (QA-1 #6): while an attempt is open, if the closure rose less than Tuning.snapStartDepth over the last
+//   Tuning.attemptWindow (0.25 s), the hand is drifting or holding, not snapping: the start time moves up to now.
+//   (A close slower than about 37 °/s can never reach 22°, because the 0.6 s reference follows it, so this never
+//   shortens a real snap's duration.)
 // Mirrored by SnapDetector in tools/balance-sim.js (`node tools/balance-sim.js detector=1`).
 
 struct SnapDetector {
@@ -83,6 +90,13 @@ struct SnapDetector {
     private var snapReference: Double = 0
     private var pending: SnapTrigger? = nil
     private var creepSince: Double? = nil
+    /// R2 (QA-1 #6): armed samples (time, closure) back to the latest one at or before now − attemptWindow.
+    private var recentTimes: [Double] = []
+    private var recentClosures: [Double] = []
+    /// R2 (QA-1 #5): the creep reference follows θ until settleUntil (pushed on by each new high since settling began).
+    private var settling: Bool = false
+    private var settlePeak: Double = 0
+    private var settleUntil: Double = 0
 
     init() {}
 
@@ -92,6 +106,21 @@ struct SnapDetector {
     var creepReference: Double { return hasSample ? slow.value : 0 }
     /// The latest angle, if any sample arrived.
     var latestAngle: Double? { return hasSample ? angle : nil }
+
+    private mutating func startSettle(time: Double, angle a: Double) {
+        settling = true
+        settlePeak = a
+        settleUntil = time + Tuning.settleWindow
+    }
+
+    private mutating func resetRecent(time: Double?) {
+        recentTimes.removeAll()
+        recentClosures.removeAll()
+        if let t = time {
+            recentTimes.append(t)
+            recentClosures.append(0)
+        }
+    }
 
     /// Feed one (filtered) angle sample at `time`. Returns a trigger on the sample where closure passes snapDepth.
     mutating func ingest(angle a: Double, at time: Double) -> SnapTrigger? {
@@ -103,6 +132,8 @@ struct SnapDetector {
             angle = a
             lastClosure = 0
             prevTime = time
+            resetRecent(time: time)
+            startSettle(time: time, angle: a)
             return nil
         }
         fast.add(time: time, angle: a)
@@ -110,6 +141,13 @@ struct SnapDetector {
         var c: Double = fast.value - a
         var fired: SnapTrigger? = nil
         if armed {
+            recentTimes.append(time)
+            recentClosures.append(c)
+            while recentTimes.count >= 2 && recentTimes[1] <= time - Tuning.attemptWindow {
+                recentTimes.removeFirst()
+                recentClosures.removeFirst()
+            }
+            let rise: Double = c - (recentClosures.first ?? 0)
             if !attempt {
                 if c >= Tuning.snapStartDepth {
                     attempt = true
@@ -117,6 +155,9 @@ struct SnapDetector {
                 }
             } else if c < Tuning.snapCancelDepth {
                 attempt = false
+            } else if c < Tuning.snapDepth && rise < Tuning.snapStartDepth {
+                // QA-1 #6: not snapping (a drift or a hold): the attempt's clock restarts here.
+                startTime = time
             }
             if attempt && c >= Tuning.snapDepth {
                 let tc: Double = SnapDetector.crossing(prevTime, lastClosure, time, c, Tuning.snapDepth)
@@ -128,6 +169,7 @@ struct SnapDetector {
                 lowest = a
                 snapReference = fast.value
                 creepSince = nil
+                resetRecent(time: nil)
             }
         } else {
             lowest = min(lowest, a)
@@ -139,6 +181,24 @@ struct SnapDetector {
                 slow.reset(time: time, angle: a)
                 c = 0
                 creepSince = nil
+                resetRecent(time: time)
+                startSettle(time: time, angle: a)
+            }
+        }
+        // QA-1 #5: the creep reference follows the hand while it opens up and settles.
+        if a >= Tuning.tooFlatAngle {
+            if !settling { startSettle(time: time, angle: a) }
+            settleUntil = max(settleUntil, time + Tuning.settleWindow)
+        }
+        if settling {
+            if a > settlePeak {
+                settlePeak = a
+                settleUntil = time + Tuning.settleWindow
+            }
+            if time <= settleUntil {
+                slow.reset(time: time, angle: a)
+            } else {
+                settling = false
             }
         }
         lastClosure = c

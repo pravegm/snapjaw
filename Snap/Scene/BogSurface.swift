@@ -8,9 +8,13 @@ final class BogDropView {
     let sprite: SKSpriteNode
     let twinkle: SKSpriteNode
     let glow: SKSpriteNode
+    /// Core's radius (the drawn one is `BogTextures.nectarDrawnRadius` of it).
     var radius: CGFloat = 0
+    var drawn: CGFloat = 0
     var level: CGFloat = 0
     var alive = true
+    /// Seconds a bug has sipped from it (it shrinks 3 % a second, to 75 %).
+    var sipped: CGFloat = 0
     let phase: CGFloat
 
     init(id: Int) {
@@ -30,10 +34,13 @@ final class BogDropView {
     func setRadius(_ r: CGFloat) {
         guard abs(r - radius) > 0.25 else { return }
         radius = r
-        sprite.texture = BogTextures.nectar(radius: r)
-        sprite.size = CGSize(width: r.rounded() * 3, height: r.rounded() * 3)
-        twinkle.size = CGSize(width: r * 1.6, height: r * 1.6)
-        glow.size = CGSize(width: r * 5, height: r * 5)
+        let d = BogTextures.nectarDrawnRadius(r)
+        drawn = d
+        sprite.texture = BogTextures.nectar(radius: d)
+        // (Sizes are set with the scale reset first: SpriteKit's `size` is the scaled size.)
+        bogResize(sprite, CGSize(width: d * 3, height: d * 3))
+        bogResize(twinkle, CGSize(width: d * 1.6, height: d * 1.6))
+        bogResize(glow, CGSize(width: d * 4.5, height: d * 4.5))
     }
 }
 
@@ -121,15 +128,17 @@ final class BogSurface {
             v.glow.position = n.position
             v.level = BogMath.approach(v.level, 1, rate: 4, dt: fdt)
             let sipped = n.occupant != nil
+            if sipped { v.sipped += fdt }
+            let drink = max(1 - 0.03 * v.sipped, 0.75)
             let wobble: CGFloat = sipped ? 0.035 * sin(t * 7 + v.phase) : 0.012 * sin(t * 1.7 + v.phase)
-            let k = (sipped ? 0.92 : 1) + wobble
+            let k = ((sipped ? 0.94 : 1) + wobble) * drink
             v.sprite.setScale(k * (0.6 + 0.4 * v.level))
             v.sprite.alpha = v.level
             let s = max(0, sin(t * 1.1 + v.phase))
             let s2 = s * s
             let s8 = s2 * s2 * s2 * s2
             v.twinkle.alpha = s8 * s2 * s2 * v.level
-            v.twinkle.position = CGPoint(x: -v.radius * 0.32, y: v.radius * 0.44)
+            v.twinkle.position = CGPoint(x: -v.drawn * 0.32, y: v.drawn * 0.44)
             v.twinkle.zRotation = t * 0.6
             v.glow.alpha = (0.5 * night + 0.06) * v.level
         }

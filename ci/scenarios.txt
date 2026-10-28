@@ -19,7 +19,7 @@
 04-lesson-2-first-snap|screen=lesson;lessonStep=2|7|Lesson step 2: one fat housefly sipping on a nectar drop, "When it's sipping… tap to snap!"|SNAP-T canvas
 05-lesson-3-open-again|screen=lesson;lessonStep=3|7|Lesson step 3: "Open up to reset the trap."|SNAP-T canvas
 06-lesson-4-too-slow|screen=lesson;lessonStep=4|7|Lesson step 4: two flies land, "Quick snaps catch more."|SNAP-T canvas
-07-lesson-5-bee|screen=lesson;lessonStep=5|8|Lesson step 5: a bee sipping with its white protected halo, "Never eat a bee. Wait…"|SNAP-T canvas
+07-lesson-5-bee|screen=lesson;lessonStep=5|5|Lesson step 5: a bee sipping with its white protected halo, "Never eat a bee. Wait…"|SNAP-T canvas
 08-lesson-6-triple|screen=lesson;lessonStep=6|8|Lesson step 6: three flies landing together, "Wait for a crowd… now!"|SNAP-T canvas
 09-lesson-7-card|screen=lesson;lessonStep=7|6|Lesson step 7 card: "Snaps run out. Big bites earn them back."|SNAP-T canvas
 # Play (Feed), a pilot drives the trap, frozen on a moment (the scene keeps drawing)
@@ -29,7 +29,7 @@
 13-play-snap|screen=play;seed=7;pilot=casual;freezeOn=snap|45|0.12 s after a bite: teeth interlocked at both outer edges, the dark vignette, juice splats, the "+N" score pop|SNAP-T event snapped
 14-play-feast|screen=play;seed=7;wave=8;pilot=perfect;freezeOn=feast|90|A Feast: 3+ caught in one bite, "TRIPLE ×3" and "Feast! +1 snap"|SNAP-T event feast
 15-play-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=sting|90|A bee or wasp in the bite: "Bzzt!", the stinger let go, snaps down by the cost|SNAP-T event stung
-16-play-dusk|screen=play;seed=7;wave=14;pilot=expert;freezeOn=dusk|60|Dusk: the peach tint, moths drawn to the fold|SNAP-T event dayPhaseChanged
+16-play-dusk|screen=play;seed=7;wave=17;pilot=expert;freezeOn=landed|40|Dusk (wave 17, already dusk at the start so the tint has settled): the peach tint, moths drawn to the fold|SNAP-T canvas
 17-play-night|screen=play;seed=7;wave=22;pilot=expert;freezeOn=night|60|Night: the blue tint, fireflies glowing with blooms, other bugs dimmed|SNAP-T event dayPhaseChanged
 18-play-last-snap|screen=play;seed=7;pilot=novice;freezeOn=lastSnap|150|One snap left: "Last snap — make it count"|SNAP-T event lastSnap
 19-play-tired|screen=play;seed=7;pilot=novice;freezeOn=tired|180|Snaps at 0: "Your trap is tired.", the bugs leaving|SNAP-T event tired
@@ -48,3 +48,6 @@
 30-settings|screen=settings|5|Settings: Sound, Haptics, Respect silent switch, HUD on the left, Reduce motion, Replay First Bite, About, Credits|SNAP-T canvas
 31-pose|screen=pose|5|The pose card: "Hold it open like a book" with its diagram|SNAP-T canvas
 32-cover|screen=cover|5|The cover-display card: "Open to carry on"|SNAP-T canvas
+# R2: hunger (GAME-DESIGN §5)
+33-play-hungry|screen=play;seed=7;freezeOn=hungry|40|No pilot and no taps, so nothing is eaten. Hungry: the next snap glyph draining, "Hungry… bite!"|SNAP-T event hungry
+34-play-wilted|screen=play;seed=7;freezeOn=wilted|45|No pilot and no taps. A snap wilted: the "wilted −1" pop, the snaps row one shorter|SNAP-T event wilted

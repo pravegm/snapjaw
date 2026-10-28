@@ -3,20 +3,19 @@ import Foundation
 import Testing
 @testable import Snap
 
-// MARK: - Headless balance playtest (Round 1)
+// MARK: - Headless balance playtest (Round 2)
 //
-// Every PilotSkill plays real TrapSessions (mode .feed, SNAP_BAL_SEEDS seeds, default 8) at 60 Hz, the pilot fed the
+// Every PilotSkill plays real TrapSessions (mode .feed, SNAP_BAL_SEEDS seeds, default 16) at 60 Hz, the pilot fed the
 // previous frame's snapshot the way GameController feeds it. Each run is capped at 10 min. Prints, per skill:
-//   SNAP-BAL skill=casual score=9129 p10=… p90=… seconds=115.4 snaps=23.0 caught=67.5 stings=3.0 maxStings=6 …
-// tools/balance-sim.js (a line-by-line port) predicts on these seeds (design/notes/core-R1.md):
-//   novice  277 protein /  46 s / 12 snaps / 1 sting (median)
-//   casual  9,129       / 115 s / 23 snaps / 3 stings
-//   expert  29,014      / 600 s (capped) / 34 snaps / 0 stings
-//   perfect 34,871      / 600 s (capped) / 28.5 snaps / never stung
-// ROUND-1 targets (asserted on medians): novice < casual < expert ≤ perfect; casual runs 90–240 s and 18–45 snaps;
-// perfect never stung; novice stung ≥ 1. Novice and casual runs always end (never capped). Expert and perfect may be
-// capped: once the night saturates with bees, a pilot that only takes feast bites never loses a snap (core-R1.md,
-// "Open design question"), so their score is compared at the 10-minute cap.
+//   SNAP-BAL skill=casual score=5542 p10=… p90=… seconds=138.3 snaps=22.5 caught=66.5 stings=3.0 maxStings=6 …
+// tools/balance-sim.js (a line-by-line port) predicts on these 16 seeds (design/notes/core-R2.md):
+//   novice  255 protein    /  41 s / 10 snaps   / 1.5 stings (median)
+//   casual  5,542          / 138 s / 22.5 snaps / 3 stings / longest chain 4.5
+//   expert  24,340         / 255 s / 29 snaps   / 0 stings
+//   perfect 35,608         / 292 s / 25 snaps   / never stung
+// R2 targets (asserted on medians): perfect runs 4–7 min (240–420 s); casual runs 100–240 s and 18–45 snaps, with a
+// longest chain of 3–6; plus R1's: novice < casual < expert ≤ perfect, perfect never stung, novice stung ≥ 1. With
+// hunger (a snap wilts after 15/14/12/10 s without a catch) every run ends, so no skill may hit the 10-minute cap.
 // Each skill is simulated once (memoised), so the tests share the runs.
 
 struct SnapBalanceRun {
@@ -67,7 +66,7 @@ enum SnapBalanceHarness {
 
     static var seedCount: Int {
         if let raw = ProcessInfo.processInfo.environment["SNAP_BAL_SEEDS"], let n = Int(raw), n > 0 { return n }
-        return 8
+        return 16
     }
 
     /// The same seeds as tools/balance-sim.js.
@@ -156,10 +155,9 @@ struct BalanceTests {
         // Unbuffered, so the line survives even if a later test crashes the runner.
         FileHandle.standardOutput.write(Data((line + "\n").utf8))
         #expect(runs.count == SnapBalanceHarness.seedCount)
-        if skill == .novice || skill == .casual {
-            let capped: Int = runs.filter { (r: SnapBalanceRun) -> Bool in r.capped }.count
-            #expect(capped == 0, "\(line)")
-        }
+        // R2: hunger ends every run, so no skill reaches the cap.
+        let capped: Int = runs.filter { (r: SnapBalanceRun) -> Bool in r.capped }.count
+        #expect(capped == 0, "\(line)")
     }
 
     @Test func casualRunLengthAndSnaps() {
@@ -167,8 +165,24 @@ struct BalanceTests {
         let line: String = SnapBalanceHarness.report(.casual, runs)
         let seconds: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in r.seconds }
         let snaps: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in Double(r.snaps) }
-        #expect(seconds >= 90 && seconds <= 240, "casual seconds \(seconds): \(line)")
+        #expect(seconds >= 100 && seconds <= 240, "casual seconds \(seconds): \(line)")
         #expect(snaps >= 18 && snaps <= 45, "casual snaps \(snaps): \(line)")
+    }
+
+    @Test func casualLongestChain() {
+        // R2 chain rule: only bites of ≥ 2 add a step, so a casual run's longest chain is 3–6.
+        let runs: [SnapBalanceRun] = SnapBalanceMemo.shared.runs(.casual)
+        let line: String = SnapBalanceHarness.report(.casual, runs)
+        let chain: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in Double(r.longestChain) }
+        #expect(chain >= 3 && chain <= 6, "casual longest chain \(chain): \(line)")
+    }
+
+    @Test func perfectRunLength() {
+        // R2 hunger: a perfect player's run ends at 4–7 minutes (median).
+        let runs: [SnapBalanceRun] = SnapBalanceMemo.shared.runs(.perfect)
+        let line: String = SnapBalanceHarness.report(.perfect, runs)
+        let seconds: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in r.seconds }
+        #expect(seconds >= 240 && seconds <= 420, "perfect seconds \(seconds): \(line)")
     }
 
     @Test func perfectIsNeverStung() {

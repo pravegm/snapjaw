@@ -150,21 +150,24 @@ enum FeelHapticBook {
         0.09 + 0.02 * Double(min(max(caught, 0), 6))
     }
 
-    /// The CHOMP: the strongest transient the phone has (1.0), the second tooth's tap on the sound's clack, and a
-    /// heavy rumble that fades in three steps (90 ms + 20 ms per bug, stronger with more bugs); one keen crunch tap per
-    /// caught bug (up to 5, on the sound's crunches); the gulp's soft thud. No intensity curve (it would scale the
-    /// later taps too): the fade is built from the steps.
+    /// The CHOMP: the strongest transient the phone has (1.0), then (R2) a deep, held **clamp** for the Scene's 50 ms
+    /// hit-stop (the lobes pressed shut), the second tooth's tap on the sound's clack, and a heavy rumble that fades in
+    /// three steps after the hit-stop (90 ms + 20 ms per bug, stronger with more bugs); one keen crunch tap per caught
+    /// bug (up to 5, on the sound's crunches, after the hit-stop); the gulp's soft thud. No intensity curve (it would
+    /// scale the later taps too): the fade is built from the steps.
     static func chomp(caught: Int) -> FeelHapticCue {
         let n = min(max(caught, 0), 8)
         let rumble = rumbleLength(caught: n)
         let strength = min(0.8 + 0.04 * Float(n), 1)
         let third = rumble / 3
+        let hold = Double(FeelSoundBook.hitStop)
         let clack = Double(FeelSoundBook.clackAt + FeelSoundBook.clackGap)
         var notes: [FeelHapticNote] = [
             .tap(1.0, 0.55),
-            .buzz(strength, 0.12, duration: third),
-            .buzz(strength * 0.7, 0.12, at: third, duration: third),
-            .buzz(strength * 0.4, 0.12, at: 2 * third, duration: third),
+            .buzz(min(strength + 0.1, 1), 0.05, duration: hold),
+            .buzz(strength, 0.12, at: hold, duration: third),
+            .buzz(strength * 0.7, 0.12, at: hold + third, duration: third),
+            .buzz(strength * 0.4, 0.12, at: hold + 2 * third, duration: third),
             .tap(0.75, 0.9, at: clack),
         ]
         for index in 0..<min(n, 5) {
@@ -228,6 +231,47 @@ enum FeelHapticBook {
         let begin = start.isFinite ? max(start, 0) : 0
         return FeelHapticCue(notes: [.tap(0.4, 0.8, at: begin), .tap(0.5, 0.9, at: begin + 0.085),
                                      .tap(0.65, 0.95, at: begin + 0.17)])
+    }
+
+    // MARK: Hunger (R2)
+
+    /// Hungry: a stomach rumble. Four soft, very round grumbles (low sharpness), uneven like a real tummy.
+    static let hungry = FeelHapticCue(notes: [
+        .buzz(0.35, 0.05, duration: 0.14), .buzz(0.18, 0.05, at: 0.16, duration: 0.1),
+        .buzz(0.4, 0.08, at: 0.3, duration: 0.2), .buzz(0.2, 0.05, at: 0.52, duration: 0.12),
+    ])
+
+    /// Wilted: a weak, sinking droop (three fading soft steps). Weaker than the last-snap nudges.
+    static func wilted(at start: Double = 0) -> FeelHapticCue {
+        let begin = start.isFinite ? max(start, 0) : 0
+        return FeelHapticCue(notes: [
+            .buzz(0.3, 0.1, at: begin, duration: 0.12), .buzz(0.18, 0.1, at: begin + 0.12, duration: 0.14),
+            .buzz(0.08, 0.1, at: begin + 0.26, duration: 0.16),
+        ])
+    }
+
+    // MARK: One frame, one pattern (QA-1 #18)
+
+    /// Every cue without an intensity curve folded into one cue (notes in time order), so a bite frame builds one
+    /// pattern and one player instead of about seven. Cues with a curve stay separate (a curve scales its whole
+    /// pattern). Empty cues are dropped.
+    static func merge(_ cues: [FeelHapticCue]) -> [FeelHapticCue] {
+        var plain: [FeelHapticNote] = []
+        var curved: [FeelHapticCue] = []
+        for cue in cues where !cue.notes.isEmpty {
+            if cue.curve.isEmpty {
+                plain.append(contentsOf: cue.notes)
+            } else {
+                curved.append(cue)
+            }
+        }
+        var merged: [FeelHapticCue] = []
+        if !plain.isEmpty {
+            let sorted = plain.sorted { (a: FeelHapticNote, b: FeelHapticNote) -> Bool in a.time < b.time }
+            merged.append(FeelHapticCue(notes: sorted))
+        }
+        merged.append(contentsOf: curved)
+        return merged
     }
 
     static let uiTap = FeelHapticCue(notes: [.tap(0.35, 0.7)])

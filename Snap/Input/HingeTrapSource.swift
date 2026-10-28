@@ -21,6 +21,13 @@ import QuartzCore
 /// Core's creep rule reads `closure` too). A display-rate prediction is available for drawing only
 /// (`predictedAngle(at:)`, Swoop's `HingePredictor`); it never feeds the snap rule.
 ///
+/// Creep (QA-1 #5): the detector's creep is reported only when `FeelCreepGuard` agrees (no creep while θ is rising,
+/// within 0.6 s of a re-arm or the first sample, or just after the hinge was too flat). When the guard vetoes it, the
+/// closure is the plain rest-reference closure.
+///
+/// Stale snaps (QA-1 #2, #7): a trigger that no frame consumed within `staleSnap` (0.25 s) is dropped, so a clap made
+/// on Results, in a menu or while paused never fires on the first frame of the next run.
+///
 /// The closing pause: `isClosing` is the filtered angle under `Tuning.closingAngle` (50°) for `Tuning.closingDwell`
 /// (0.6 s), clearing above 58°. Never near 90° (a hard snap often reaches 90–100°).
 ///
@@ -39,11 +46,18 @@ final class HingeTrapSource: TrapSource {
     static let keepAlive = 1.0 / 30
     /// `SNAP-T hinge` diagnostic lines: at most one per this many seconds.
     static let logInterval = 0.5
+    /// A snap trigger older than this (s) when a frame finally asks is dropped (nobody was playing).
+    static let staleSnap = 0.25
+    /// No measured snap is shorter than one Duo report interval (it reports every 33–40 ms while moving). A ≥ 22° jump
+    /// inside one report (the simulator's hinge CLI, or a dropped report) interpolates both crossings into one gap and
+    /// would read as a ~10 ms snap that catches everything; it is clamped to this instead (Duo sim run 40603497021).
+    static let minSnapDuration = 1.0 / 30
 
     private var detector = SnapDetector()
     private var snapFilter = OneEuroSmoother(minCutoff: 1.2, beta: 0.5, dCutoff: 4.0, escape: 2.0)
     private var predictor = HingePredictor()
     private var gate = FeelClosingGate()
+    private var creepGuard = FeelCreepGuard()
     /// A trigger `ingest` returned that no frame has consumed yet (two reports inside one frame can't lose it).
     private var pendingSnap: SnapTrigger?
     /// The time of the detector's newest sample (real or still).
@@ -63,6 +77,10 @@ final class HingeTrapSource: TrapSource {
     private(set) var lastSampleTime: TimeInterval?
     /// Snaps the detector has fired (diagnostics and tests).
     private(set) var snapsFired = 0
+    /// Snaps dropped as stale (diagnostics and tests).
+    private(set) var staleSnapsDropped = 0
+    /// Frames where the detector said "creeping" and the creep guard vetoed it (diagnostics and tests).
+    private(set) var creepsVetoed = 0
 
     /// The clock `isClosing` judges its dwell against (the hinge samples' clock). Tests set their own.
     var clock: () -> TimeInterval = { CACurrentMediaTime() }
@@ -132,6 +150,25 @@ final class HingeTrapSource: TrapSource {
         var input = detector.input(at: time)
         if input.snap == nil { input.snap = pendingSnap }
         pendingSnap = nil
+        if let snap = input.snap { input.snap = Self.sane(snap) }
+        if let snap = input.snap, time - snap.time > Self.staleSnap {
+            input.snap = nil
+            staleSnapsDropped += 1
+            if FeelDemoLog.isEnabled {
+                FeelDemoLog.line(String(format: "SNAP-T hinge stale snap dropped age %.2f", time - snap.time))
+            }
+        }
+        creepGuard.update(at: time)
+        if input.creeping {
+            if creepGuard.isCreeping(at: time) {
+                // Both agree: the deeper of the rest closure and the guard's (re-seeded) creep depth.
+                input.closure = max(max(0, detector.reference - (angle ?? 0)), creepGuard.depth)
+            } else {
+                input.creeping = false
+                input.closure = max(0, detector.reference - (angle ?? 0))
+                creepsVetoed += 1
+            }
+        }
         if !input.closure.isFinite { input.closure = 0 }
         input.angle = angle
         if let a = angle { gate.update(angle: a, at: time) }
@@ -153,6 +190,7 @@ final class HingeTrapSource: TrapSource {
         detector = SnapDetector()
         snapFilter.reset()
         predictor.reset()
+        creepGuard.reset()
         pendingSnap = nil
         lastQuery = nil
         lastDetectorTime = nil
@@ -172,10 +210,22 @@ final class HingeTrapSource: TrapSource {
 
     // MARK: Private
 
+    /// A trigger with a finite duration of at least `minSnapDuration`.
+    static func sane(_ trigger: SnapTrigger) -> SnapTrigger {
+        var clean = trigger
+        if !clean.duration.isFinite || !(clean.duration >= Self.minSnapDuration) {
+            clean.duration = Self.minSnapDuration
+        }
+        return clean
+    }
+
     private func feedDetector(_ value: Double, at time: Double) {
         angle = value
         lastDetectorTime = time
-        if let trigger = detector.ingest(angle: value, at: time) {
+        let fired = detector.ingest(angle: value, at: time)
+        creepGuard.sample(value, at: time, armed: detector.armed)
+        if let found = fired {
+            let trigger = Self.sane(found)
             pendingSnap = trigger
             snapsFired += 1
             if FeelDemoLog.isEnabled {

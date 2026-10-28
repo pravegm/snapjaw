@@ -12,25 +12,37 @@ struct SettingsView: View {
         let c = info.isCompact
         let pause = HUDLayout.make(info).pause
         ZStack {
-            SnapBackdrop()
+            BogBackdrop(controller: controller)
             ScrollView(showsIndicators: false) {
                 toggles(c)
                     .padding(.top, info.top)
-                    .padding(.bottom, 20)
+                    .padding(.bottom, 28)
             }
+            .mask { Self.footFade }
             .frame(width: info.otherPage.width, height: info.size.height)
             .position(x: info.otherPage.midX, y: info.size.height / 2)
             ScrollView(showsIndicators: false) {
+                // Starts under the back button (REVIEW-1 juror 11), all cards one width.
                 about(c)
-                    .padding(.top, info.top + (c ? 44 : 56))
-                    .padding(.bottom, 20)
+                    .padding(.top, pause.maxY + 10)
+                    .padding(.bottom, 28)
             }
+            .mask { Self.footFade }
             .frame(width: info.hudPage.width, height: info.size.height)
             .position(x: info.hudPage.midX, y: info.size.height / 2)
             SnapRoundButton(systemImage: "chevron.backward", label: "Back") { controller.show(.home) }
                 .position(x: pause.midX, y: pause.midY)
         }
         .frame(width: info.size.width, height: info.size.height)
+    }
+
+    /// A fade at the foot of a scrolling column: there's more below.
+    static var footFade: some View {
+        VStack(spacing: 0) {
+            Color.black
+            LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
+                .frame(height: 36)
+        }
     }
 
     private func toggles(_ c: Bool) -> some View {
@@ -101,6 +113,7 @@ struct SettingsView: View {
                         .foregroundStyle(SnapTheme.haze)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .snapCard(padding: c ? 10 : 14, radius: 22)
             VStack(alignment: .leading, spacing: 6) {
                 SnapOverline(text: "Credits", compact: c)
@@ -113,7 +126,9 @@ struct SettingsView: View {
                      + "\(AppRules.formatted(store.data.lifetimeSpared)) bees spared")
                     .font(SnapType.caption(c))
                     .foregroundStyle(SnapTheme.haze)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .snapCard(padding: c ? 10 : 14, radius: 22)
         }
     }

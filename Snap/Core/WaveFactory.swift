@@ -11,6 +11,8 @@ struct WaveSpec: Equatable {
     /// Seconds after the previous wave (wave 1: Tuning.firstWaveTime after the session began).
     var delay: Double
     var bugs: [SpawnSpec]
+    /// R2: a crowd wave (its flyers land together, near one nectar cluster).
+    var crowd: Bool = false
 }
 
 struct SpawnSpec: Equatable {
@@ -56,32 +58,69 @@ enum WaveFactory {
         return seed ^ (UInt64(truncatingIfNeeded: block) &* 0xBF58_476D_1CE4_E5B9) ^ 0x4E_4543
     }
 
-    /// 5–7 drops alternating between the lobes, off the crease, ~110 pt apart. Ids 0…n−1.
+    /// R2 (REVIEW-1 #19): 6–8 drops in clusters of 2–3 (each cluster's drops evenly spaced on a 40–48 pt ring), the
+    /// clusters alternating between the lobes, off the crease. Ids 0…n−1, cluster by cluster.
     static func nectar(seed: UInt64, geometry: TrapGeometry) -> [NectarDrop] {
         var r = SeededRandom(seed: seed ^ 0x4E45_4354)
         let n: Int = r.int(Tuning.nectarMin...Tuning.nectarMax)
+        let kMin: Int = (n + Tuning.nectarClusterMax - 1) / Tuning.nectarClusterMax
+        let kMax: Int = max(kMin, n / Tuning.nectarClusterMin)
+        let k: Int = r.int(kMin...kMax)
+        let extra: Int = n - Tuning.nectarClusterMin * k
+        let firstLeft: Bool = r.chance(0.5)
+        var centres: [CGPoint] = []
         var out: [NectarDrop] = []
         let cx: Double = Double(geometry.center.x)
-        var k: Int = 0
-        while k < n {
-            let left: Bool = k % 2 == 0
+        var c: Int = 0
+        while c < k {
+            let size: Int = Tuning.nectarClusterMin + (c < extra ? 1 : 0)
+            let left: Bool = (c % 2 == 0) == firstLeft
+            // A lobe with two clusters puts its first in the upper half and its second in the lower half.
+            let inLobe: Int = c % 2 == 0 ? (k + 1) / 2 : k / 2
+            let half: Int = inLobe < 2 ? 0 : (c / 2 == 0 ? 1 : -1)
+            let margin: Double = Tuning.nectarArcMargin
+            var lo: Double = left ? Double.pi / 2 + margin : -Double.pi / 2 + margin
+            var hi: Double = left ? 3 * Double.pi / 2 - margin : Double.pi / 2 - margin
+            if half == 1 {
+                if left { hi = Double.pi - Tuning.nectarHalfGap } else { lo = Tuning.nectarHalfGap }
+            }
+            if half == -1 {
+                if left { lo = Double.pi + Tuning.nectarHalfGap } else { hi = -Tuning.nectarHalfGap }
+            }
+            let ring: Double = r.between(Tuning.nectarRingMin, Tuning.nectarRingMax)
+            // The candidate furthest from the other centres (and off the crease) wins; the first one clear of them
+            // all ends the search.
             var p: CGPoint = geometry.center
+            var best: Double = -Double.infinity
             var tries: Int = 0
             while tries < Tuning.nectarTries {
-                let t: Double = left ? r.between(Double.pi / 2 + 0.25, 3 * Double.pi / 2 - 0.25)
-                                     : r.between(-Double.pi / 2 + 0.25, Double.pi / 2 - 0.25)
-                let rr: Double = r.between(Tuning.nectarInner, Tuning.nectarOuter)
-                p = geometry.point(angle: t, radius: rr)
-                var ok: Bool = abs(Double(p.x) - cx) >= Tuning.nectarCreaseClearance
-                for d in out {
-                    if hypot(Double(d.position.x - p.x), Double(d.position.y - p.y)) < Tuning.nectarSpacing { ok = false }
+                let t: Double = r.between(lo, hi)
+                let rr: Double = r.between(Tuning.nectarClusterInner, Tuning.nectarClusterOuter)
+                let cand: CGPoint = geometry.point(angle: t, radius: rr)
+                var gap: Double = 1e6
+                for q in centres {
+                    gap = min(gap, hypot(Double(q.x - cand.x), Double(q.y - cand.y)))
                 }
-                if ok { break }
+                let clear: Bool = abs(Double(cand.x) - cx) >= Tuning.nectarCreaseClearance + ring
+                let score: Double = clear ? gap : gap - 1e9
+                if score > best {
+                    best = score
+                    p = cand
+                }
+                if clear && gap >= Tuning.nectarClusterGap { break }
                 tries += 1
             }
-            let radius: Double = r.between(Tuning.nectarRadiusMin, Tuning.nectarRadiusMax)
-            out.append(NectarDrop(id: k, position: p, radius: CGFloat(radius)))
-            k += 1
+            centres.append(p)
+            let spin: Double = r.between(0, 2 * Double.pi)
+            var j: Int = 0
+            while j < size {
+                let ang: Double = spin + 2 * Double.pi * Double(j) / Double(size)
+                let radius: Double = r.between(Tuning.nectarRadiusMin, Tuning.nectarRadiusMax)
+                let pos = CGPoint(x: Double(p.x) + cos(ang) * ring, y: Double(p.y) + sin(ang) * ring)
+                out.append(NectarDrop(id: out.count, position: pos, radius: CGFloat(radius)))
+                j += 1
+            }
+            c += 1
         }
         return out
     }
@@ -180,6 +219,24 @@ enum WaveFactory {
         return CGPoint(x: xx, y: x < 0.9 ? h + 30 : -30)
     }
 
+    private static func clampToRadius(_ g: TrapGeometry, _ p: CGPoint, _ maxR: Double) -> CGPoint {
+        let rr: Double = g.normalizedRadius(p)
+        if rr <= maxR || rr == 0 { return p }
+        let k: Double = maxR / rr
+        let cx: Double = Double(g.center.x)
+        let cy: Double = Double(g.center.y)
+        return CGPoint(x: cx + (Double(p.x) - cx) * k, y: cy + (Double(p.y) - cy) * k)
+    }
+
+    /// R2: the approach flight time the session will give this spawn (nil: walkers, and bugs that never land in the
+    /// trap). The session's spacing check can still move a random spot a little before landing.
+    static func flightTime(_ spec: SpawnSpec) -> Double? {
+        let m: BugMotion = BugCatalog.motion(spec.species)
+        if !spec.landsInTrap || m.style == .walker { return nil }
+        let dist: Double = hypot(Double(spec.target.x - spec.entry.x), Double(spec.target.y - spec.entry.y))
+        return max(Tuning.minFlightTime, dist * Tuning.approachPathFactor / m.speed)
+    }
+
     private static func randomSpot(_ g: TrapGeometry, _ r: inout SeededRandom, _ maxR: Double) -> CGPoint {
         let t: Double = r.between(0, 2 * Double.pi)
         let rr: Double = r.unit().squareRoot() * maxR
@@ -238,6 +295,21 @@ enum WaveFactory {
             order.swapAt(i, j)
             i -= 1
         }
+        // R2: a crowd goes to one cluster: the drops nearest a random anchor drop first, its spots near the anchor.
+        var anchor: CGPoint? = nil
+        if crowd && !order.isEmpty {
+            let ap: CGPoint = nectar[order[0]].position
+            anchor = ap
+            func dist(_ k: Int) -> Double {
+                return hypot(Double(nectar[k].position.x - ap.x), Double(nectar[k].position.y - ap.y))
+            }
+            order.sort { (x: Int, y: Int) -> Bool in
+                let dx: Double = dist(x)
+                let dy: Double = dist(y)
+                if dx != dy { return dx < dy }
+                return x < y
+            }
+        }
         var nextDrop: Int = 0
         var bugs: [SpawnSpec] = []
         let lr: (Double, Double) = lingerRange(phase: ph, index: index)
@@ -282,6 +354,11 @@ enum WaveFactory {
             } else if m.nectarChance > 0 && nextDrop < order.count && r.chance(m.nectarChance) {
                 target = nectar[order[nextDrop]].position
                 nextDrop += 1
+            } else if let ap = anchor {
+                let t: Double = r.between(0, 2 * Double.pi)
+                let dd: Double = r.between(Tuning.crowdNearMin, Tuning.crowdNearMax)
+                target = clampToRadius(geometry, CGPoint(x: Double(ap.x) + cos(t) * dd, y: Double(ap.y) + sin(t) * dd),
+                                       Tuning.spotRadius)
             } else {
                 target = randomSpot(geometry, &r, Tuning.spotRadius)
             }
@@ -336,6 +413,21 @@ enum WaveFactory {
             addGroup(.goldenScarab, 1, base)
             slot += 1
         }
+        // R2: a crowd lands together: each flyer starts late by how much quicker its flight is than the slowest one's.
+        if crowd {
+            var flights: [Double?] = []
+            var maxF: Double = 0
+            for x in bugs {
+                let f: Double? = flightTime(x)
+                flights.append(f)
+                if let v = f { maxF = max(maxF, v) }
+            }
+            var q: Int = 0
+            while q < bugs.count {
+                if let v = flights[q] { bugs[q].groupOffset += maxF - v }
+                q += 1
+            }
+        }
         let np: Int = protectedCount(index, ph, &r)
         var b: Int = 0
         while b < np {
@@ -344,6 +436,6 @@ enum WaveFactory {
             addGroup(s, 1, base)
             b += 1
         }
-        return WaveSpec(index: index, phase: ph, delay: delay(seed: seed, index: index), bugs: bugs)
+        return WaveSpec(index: index, phase: ph, delay: delay(seed: seed, index: index), bugs: bugs, crowd: crowd)
     }
 }

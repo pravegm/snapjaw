@@ -148,7 +148,7 @@ private let feelEveryEvent: [TrapEvent] = [
     .stung(id: 10, species: .wasp, cost: 2), .stung(id: 11, species: .bumblebee, cost: 1), .drySnap,
     .feast(count: 3, snapsBack: 1), .luckySnap(species: .ladybird), .luckySnap(species: .goldenScarab),
     .chainUp(count: 3, multiplier: 2), .chainBroken(count: 4), .rearmed, .beeSpared(species: .bee),
-    .beeSpared(species: .wasp), .lastSnap, .tired, .newBest, .finished,
+    .beeSpared(species: .wasp), .lastSnap, .hungry(secondsLeft: 3), .wilted(snapsLeft: 4), .tired, .newBest, .finished,
 ]
 
 private let feelPentatonic: Set<Int> = [0, 2, 4, 7, 9]
@@ -474,6 +474,10 @@ struct FeelTests {
         recipes.append(FeelSoundBook.hop(pan: -0.4, dice: &dice))
         recipes.append(FeelSoundBook.whiff(pan: 0.8, delay: 0.05, dice: &dice))
         recipes.append(FeelSoundBook.spooked(pan: -0.8, dice: &dice))
+        recipes.append(FeelSoundBook.hungry(dice: &dice))
+        recipes.append(FeelSoundBook.wilted(dice: &dice))
+        recipes.append(FeelSoundBook.wilted(delay: 0.4, dice: &dice))
+        recipes.append(FeelSoundBook.crunch(index: 6, pan: 0.5, light: true, dice: &dice))
         for phase in DayPhase.allCases {
             recipes.append(FeelSoundBook.dayChime(phase, dice: &dice))
         }
@@ -905,7 +909,8 @@ struct FeelTests {
             FeelHapticBook.lucky(), FeelHapticBook.rearm, FeelHapticBook.spared, FeelHapticBook.lastSnap(),
             FeelHapticBook.tired(), FeelHapticBook.newBest(), FeelHapticBook.uiTap, FeelHapticBook.uiConfirm,
             FeelHapticBook.celebrate, FeelHapticBook.landing(.gnat), FeelHapticBook.landing(.dragonfly),
-            FeelHapticBook.chomp(caught: 0), one, five, FeelHapticBook.chomp(caught: 99),
+            FeelHapticBook.chomp(caught: 0), one, five, FeelHapticBook.chomp(caught: 99), FeelHapticBook.hungry,
+            FeelHapticBook.wilted(), FeelHapticBook.wilted(at: 0.7),
         ]
         for cue in cues {
             #expect(!cue.notes.isEmpty)
@@ -1075,6 +1080,394 @@ struct FeelTests {
         director.hapticsOn = true
         #expect(director.hapticProfile == .normal)
         director.hapticsOn = false
+    }
+
+    // MARK: - R2: the creep after reopening (QA-1 #5)
+
+    @Test func aReopenThatOvershootsTheRestNeverCreeps() {
+        let hinge = FeelFakeHinge(source: HingeTrapSource())
+        hinge.run(1.0) { _ in 160 }
+        hinge.run(0.5) { t in 160 - 25 * min(t / 0.12, 1) }
+        #expect(hinge.source.snapsFired == 1)
+        // Open fast past the rest (to 172°), settle back to 165° and hold: nobody is closing the trap.
+        hinge.run(0.3) { t in 135 + 37 * min(t / 0.25, 1) }
+        hinge.run(0.4) { t in 172 - 7 * min(t / 0.35, 1) }
+        hinge.run(3.0) { _ in 165 }
+        let calm = hinge.inputs.allSatisfy { !$0.creeping }
+        #expect(calm)
+        let deepest = hinge.inputs.map { $0.closure }.max() ?? 99
+        #expect(deepest < Tuning.creepDepth)
+        #expect(hinge.inputs.last?.armed == true)
+        #expect(hinge.source.snapsFired == 1)
+        // A real slow close after it still creeps (and still never bites).
+        hinge.run(2.0) { t in 165 - 15 * t }
+        let crept = hinge.inputs.contains { $0.creeping }
+        #expect(crept)
+        #expect(hinge.source.snapsFired == 1)
+    }
+
+    @Test func bendingALittleFromFlatNeverCreeps() {
+        let hinge = FeelFakeHinge(source: HingeTrapSource())
+        hinge.run(1.0) { _ in 178 }
+        // The "Bend it a little" hint obeyed gently: 178° → 168° over 0.8 s, then held.
+        hinge.run(0.8) { t in 178 - 10 * min(t / 0.8, 1) }
+        let bending = hinge.inputs.allSatisfy { !$0.creeping }
+        hinge.run(3.0) { _ in 168 }
+        let holding = hinge.inputs.allSatisfy { !$0.creeping }
+        #expect(bending)
+        #expect(holding)
+        #expect(hinge.source.snapsFired == 0)
+    }
+
+    @Test func theCreepGuardReseedsWhileRisingAndAfterARearm() {
+        // A still hold, then a slow close: it creeps after the dwell.
+        var still = FeelCreepGuard()
+        var t = 0.0
+        still.sample(160, at: t, armed: true)
+        #expect(still.isCreeping(at: t) == false)
+        while t < 1.0 {
+            t += 1.0 / 30
+            still.sample(160, at: t, armed: true)
+        }
+        var crept = false
+        while t < 2.5 {
+            t += 1.0 / 30
+            still.sample(160 - 20 * (t - 1), at: t, armed: true)
+            if still.isCreeping(at: t) { crept = true }
+        }
+        #expect(crept)
+        // Unarmed never creeps.
+        still.sample(110, at: t + 0.05, armed: false)
+        still.update(at: t + 1)
+        #expect(still.isCreeping(at: t + 1) == false)
+
+        // A reopen from 135° (re-arming at 150°) that overshoots to 172° and settles at 165°: the reference follows.
+        var reopen = FeelCreepGuard()
+        var u = 0.0
+        reopen.sample(135, at: u, armed: false)
+        while u < 0.25 {
+            u += 1.0 / 30
+            let a = 135 + 37 * min(u / 0.25, 1)
+            reopen.sample(a, at: u, armed: a >= 150)
+        }
+        while u < 0.6 {
+            u += 1.0 / 30
+            reopen.sample(172 - 7 * min((u - 0.25) / 0.35, 1), at: u, armed: true)
+        }
+        var creptAfter = false
+        while u < 4 {
+            u += 1.0 / 30
+            reopen.sample(165, at: u, armed: true)
+            if reopen.isCreeping(at: u) { creptAfter = true }
+        }
+        #expect(creptAfter == false)
+        #expect(abs(reopen.reference - 165) < 1)
+        #expect(reopen.depth < 1)
+        reopen.reset()
+        #expect(reopen.hasSample == false)
+        #expect(reopen.depth == 0)
+        // Garbage in: nothing changes.
+        reopen.sample(Double.nan, at: 1, armed: true)
+        #expect(reopen.hasSample == false)
+    }
+
+    // MARK: - R2: stale and impossible snaps (QA-1 #2, #7; Duo sim run 40603497021)
+
+    @Test func aHingeSnapNobodyConsumedIsDroppedNotFiredOnTheNextRun() {
+        let hinge = FeelFakeHinge(source: HingeTrapSource())
+        hinge.run(1.0) { _ in 160 }
+        // On Results nothing asks for the trap; the player claps the Duo.
+        hinge.run(1.0, frames: false) { t in 160 - 25 * min(t / 0.12, 1) }
+        #expect(hinge.source.snapsFired == 1)
+        // The next run's first frames: no dry snap at t = 0.
+        hinge.run(0.5) { _ in 135 }
+        #expect(hinge.snapFrames.isEmpty)
+        #expect(hinge.source.staleSnapsDropped == 1)
+    }
+
+    @Test func aWholeSnapInOneReportGetsASaneDuration() {
+        let source = HingeTrapSource()
+        source.clock = { 0 }
+        source.ingest(angleDegrees: 160, at: 0)
+        var frame = 0.0
+        while frame < 1.0 {
+            frame += 1.0 / 120
+            _ = source.input(at: frame)
+        }
+        // The simulator's hinge CLI jumps 32° between two reports.
+        source.ingest(angleDegrees: 128, at: frame + 0.004)
+        let bite = source.input(at: frame + 0.005)
+        #expect(bite.snap != nil)
+        let duration = bite.snap?.duration ?? 0
+        #expect(duration >= HingeTrapSource.minSnapDuration - 1e-12)
+        #expect(duration.isFinite)
+        let tiny = HingeTrapSource.sane(SnapTrigger(duration: 0.004, time: 1))
+        #expect(abs(tiny.duration - HingeTrapSource.minSnapDuration) < 1e-12)
+        let broken = HingeTrapSource.sane(SnapTrigger(duration: Double.nan, time: 1))
+        #expect(broken.duration.isFinite)
+        let real = HingeTrapSource.sane(SnapTrigger(duration: 0.12, time: 1))
+        #expect(abs(real.duration - 0.12) < 1e-12)
+    }
+
+    @Test func aTapJustBeforeAPauseNeverBitesAfterIt() {
+        let touch = TouchTrapSource()
+        touch.tap(at: 10)
+        // The menu opened inside the 90 ms; the next frame comes on Resume, 2 s later.
+        let resumed = touch.input(at: 12)
+        #expect(resumed.snap == nil)
+        #expect(resumed.armed)
+        #expect(resumed.closure == 0)
+        #expect(touch.staleBites == 1)
+        // The trap is armed again at once.
+        touch.tap(at: 12.1)
+        #expect(touch.bites == 2)
+        let bite = touch.input(at: 12.1 + Tuning.touchSnapTime + 0.01)
+        #expect(bite.snap != nil)
+    }
+
+    // MARK: - R2: voices (QA-1 #4)
+
+    @Test func theSynthStealsByStartOrderAndNeverFromItsOwnDrain() {
+        #expect(FeelSynth.voiceCount == 128)
+        let synth = FeelSynth(sampleRate: 48_000)
+        let left = UnsafeMutablePointer<Float>.allocate(capacity: 512)
+        let right = UnsafeMutablePointer<Float>.allocate(capacity: 512)
+        defer {
+            left.deallocate()
+            right.deallocate()
+        }
+        func ring(_ index: Int) -> FeelSynthCommand {
+            .ring(FeelRingSpec(.bell, fundamental: 300 + Float(index), partials: 2, decay: 1, gain: 0.002))
+        }
+        for index in 0..<FeelSynth.voiceCount { synth.send(ring(index)) }
+        synth.render(frames: 512, left: left, right: right)
+        #expect(synth.stolenVoices == 0)
+        #expect(synth.droppedVoices == 0)
+        // All 128 ring on; ten more in a later drain take over the ten oldest.
+        for index in 0..<10 { synth.send(ring(index)) }
+        synth.render(frames: 512, left: left, right: right)
+        #expect(synth.stolenVoices == 10)
+        #expect(synth.droppedVoices == 0)
+        // 200 in one drain: they take every older voice, then drop the rest instead of cutting each other off.
+        for index in 0..<200 { synth.send(ring(index)) }
+        synth.render(frames: 512, left: left, right: right)
+        #expect(synth.stolenVoices == 10 + FeelSynth.voiceCount)
+        #expect(synth.droppedVoices == 200 - FeelSynth.voiceCount)
+    }
+
+    @Test func ringVoicesEndAfterFiveTimeConstants() {
+        let synth = FeelSynth(sampleRate: 48_000)
+        for index in 0..<FeelSynth.voiceCount {
+            synth.send(.ring(FeelRingSpec(.chime, fundamental: 500 + Float(index), partials: 2, decay: 0.1,
+                                          gain: 0.002)))
+        }
+        // 0.6 s > 5 τ (0.5 s): every voice has ended, so 128 new ones steal nothing.
+        let first = feelRender(synth, seconds: 0.6)
+        #expect(first.finite)
+        for index in 0..<FeelSynth.voiceCount {
+            synth.send(.ring(FeelRingSpec(.chime, fundamental: 500 + Float(index), partials: 2, decay: 0.1,
+                                          gain: 0.002)))
+        }
+        _ = feelRender(synth, seconds: 0.02)
+        #expect(synth.stolenVoices == 0)
+        #expect(abs(FeelSynth.ringLengthTaus - 5) < 1e-6)
+    }
+
+    @Test func aBigFeastKeepsItsRewardSounds() {
+        // An 8-bug Feast with a Golden Scarab, a chain step and a new best on top of a playing marimba bed.
+        let synth = FeelSynth(sampleRate: 48_000)
+        var bed = FeelSoundBook.idleBed(master: FeelAudioEngine.masterGain, glide: 0.01)
+        bed.music = 1
+        bed.musicVoices = 4
+        synth.send(.bed(bed))
+        _ = feelRender(synth, seconds: 2)
+        var dice = FeelDice(seed: 4)
+        var bite: [FeelSynthCommand] = FeelSoundBook.chomp(caught: 8, dice: &dice)
+        for index in 0..<8 {
+            bite += FeelSoundBook.crunch(index: index, pan: 0, light: index >= FeedbackDirector.fullCrunches,
+                                         dice: &dice)
+        }
+        bite += FeelSoundBook.feast(count: 8, snapsBack: 2, dice: &dice)
+        bite += FeelSoundBook.lucky(.goldenScarab, dice: &dice)
+        bite += FeelSoundBook.chainUp(count: 3, delay: FeelSoundBook.chainAt, dice: &dice)
+        bite += FeelSoundBook.newBest(delay: FeedbackDirector.newBestAt)
+        #expect(bite.count < FeelSynth.voiceCount)
+        for command in bite { synth.send(command) }
+        let result = feelRender(synth, seconds: 1)
+        #expect(result.finite)
+        #expect(result.peak < 1)
+        #expect(synth.droppedVoices == 0)
+    }
+
+    @Test func aNaNBedNeverLatchesTheSynthSilent() {
+        let synth = FeelSynth(sampleRate: 48_000)
+        var bad = FeelBed()
+        bad.master = Float.nan
+        bad.groan = Float.infinity
+        bad.groanHz = Float.nan
+        bad.wind = -Float.infinity
+        bad.dripRate = Float.nan
+        bad.musicVoices = Float.nan
+        bad.glide = Float.nan
+        synth.send(.bed(bad))
+        let poisoned = feelRender(synth, seconds: 0.3)
+        #expect(poisoned.finite)
+        let clean = FeelSynth.sanitised(bad)
+        #expect(clean.master == 0)
+        #expect(clean.groan == 0)
+        #expect(clean.groanHz.isFinite)
+        #expect(clean.wind == 0)
+        #expect(clean.dripRate == 0)
+        #expect(clean.musicVoices == 1)
+        // A good bed and a CHOMP afterwards are heard.
+        synth.send(.bed(FeelSoundBook.idleBed(master: FeelAudioEngine.masterGain, glide: 0.01)))
+        _ = feelRender(synth, seconds: 0.1)
+        var dice = FeelDice(seed: 8)
+        for command in FeelSoundBook.chomp(caught: 2, dice: &dice) { synth.send(command) }
+        let after = feelRender(synth, seconds: 0.4)
+        #expect(after.finite)
+        #expect(after.peak > 0.01)
+    }
+
+    // MARK: - R2: the heavier CHOMP (50 ms hit-stop)
+
+    @Test func theChompSlamsAtOnceAndItsTailWaitsOutTheHitStop() {
+        var dice = FeelDice(seed: 21)
+        for n in 1...8 {
+            let chomp = FeelSoundBook.chomp(caught: n, dice: &dice)
+            var squelches = 0
+            for command in chomp {
+                if case .squelch(let spec) = command {
+                    squelches += 1
+                    #expect(spec.delay >= FeelSoundBook.hitStop - 1e-6)
+                }
+            }
+            #expect(squelches == 1)
+            // The impact is all there in the first 10 ms.
+            let impact = chomp.filter { $0.delay < 0.01 }.map { $0.gain }.reduce(0, +)
+            #expect(impact > 0.8)
+            let tail = chomp.filter { $0.delay >= FeelSoundBook.hitStop - 1e-6 }
+            #expect(!tail.isEmpty)
+        }
+        for index in 0..<8 {
+            #expect(FeelSoundBook.crunchDelay(index: index) >= FeelSoundBook.hitStop)
+        }
+        #expect(FeelSoundBook.gulpAt > FeelSoundBook.hitStop + FeelSoundBook.squelchLength(caught: 1))
+        // The haptic: the slam, a deep hold through the hit-stop, crunch taps after it.
+        let cue = FeelHapticBook.chomp(caught: 3)
+        let hold = cue.notes.first { $0.kind == .continuous && $0.time == 0 }
+        #expect(hold != nil)
+        if let hold {
+            #expect(abs(hold.duration - Double(FeelSoundBook.hitStop)) < 1e-6)
+            #expect(hold.intensity >= 0.9)
+        }
+        let crunches = cue.notes.filter { $0.kind == .transient && $0.sharpness == 1.0 }
+        #expect(crunches.count == 3)
+        #expect(crunches.allSatisfy { $0.time >= Double(FeelSoundBook.hitStop) })
+        // Light crunches are smaller.
+        var d2 = FeelDice(seed: 2)
+        let full = FeelSoundBook.crunch(index: 1, pan: 0, dice: &d2)
+        let light = FeelSoundBook.crunch(index: 5, pan: 0, light: true, dice: &d2)
+        #expect(light.count < full.count)
+    }
+
+    // MARK: - R2: hunger
+
+    @Test func hungerSoundsAreSoftAndTheDroopSinks() {
+        var dice = FeelDice(seed: 17)
+        let rumble = FeelSoundBook.hungry(dice: &dice)
+        let droop = FeelSoundBook.wilted(dice: &dice)
+        let chompPeak = FeelSoundBook.chomp(caught: 1, dice: &dice).map { $0.gain }.max() ?? 0
+        let lastPeak = FeelSoundBook.lastSnap().map { $0.gain }.max() ?? 0
+        #expect((rumble.map { $0.gain }.max() ?? 1) < chompPeak)
+        #expect((droop.map { $0.gain }.max() ?? 1) < lastPeak)
+        // The rumble is low (its fundamentals under 130 Hz); the droop falls.
+        for command in rumble {
+            if case .tone(let spec) = command { #expect(spec.start < 130) }
+        }
+        var falls = false
+        for command in droop {
+            if case .tone(let spec) = command, spec.end < spec.start { falls = true }
+        }
+        #expect(falls)
+        // Their haptics: round and soft; the wilt weaker than the last-snap nudge.
+        let rumbleHaptic = FeelHapticBook.hungry.notes
+        #expect(rumbleHaptic.allSatisfy { $0.sharpness <= 0.2 && $0.intensity <= 0.5 })
+        let wiltPeak = FeelHapticBook.wilted().notes.map { $0.intensity }.max() ?? 1
+        let lastSnapPeak = FeelHapticBook.lastSnap().notes.map { $0.intensity }.max() ?? 0
+        #expect(wiltPeak < lastSnapPeak)
+        let later = FeelHapticBook.wilted(at: 0.7)
+        #expect(abs((later.notes.first?.time ?? 0) - 0.7) < 1e-9)
+    }
+
+    @Test func theDirectorRumblesOnHungryAndDroopsOnWilted() {
+        let director = FeedbackDirector()
+        director.soundOn = false
+        director.hapticsOn = false
+        let playing = TrapTelemetry(closure: 0, creeping: false, buzzers: [], chain: 0, dayClock: 1, playing: true)
+        director.handle([.hungry(secondsLeft: 3)], telemetry: playing)
+        #expect(director.rumbles == 1)
+        director.handle([.wilted(snapsLeft: 1), .lastSnap], telemetry: playing)
+        #expect(director.droops == 1)
+        director.handle([.wilted(snapsLeft: 0), .tired], telemetry: TrapTelemetry(playing: false))
+        #expect(director.droops == 2)
+        // A whole bite frame builds one haptic pattern (QA-1 #18).
+        let before = director.hapticPatterns
+        let bite: [TrapEvent] = [
+            .snapped(feelBite(caught: [.housefly, .gnat, .goldenScarab])),
+            .bugCaught(id: 1, species: .housefly, position: CGPoint(x: 300, y: 300)),
+            .bugCaught(id: 2, species: .gnat, position: CGPoint(x: 400, y: 300)),
+            .bugCaught(id: 3, species: .goldenScarab, position: CGPoint(x: 500, y: 300)),
+            .feast(count: 3, snapsBack: 1), .luckySnap(species: .goldenScarab), .chainUp(count: 2, multiplier: 1.5),
+            .newBest,
+        ]
+        director.handle(bite, telemetry: playing)
+        #expect(director.hapticPatterns == before + 1)
+    }
+
+    // MARK: - R2: haptic merging, buzz hysteresis, audio rules
+
+    @Test func oneFramesHapticCuesMergeIntoOnePattern() {
+        let chomp = FeelHapticBook.chomp(caught: 3)
+        let merged = FeelHapticBook.merge([chomp, FeelHapticBook.feast, FeelHapticCue(notes: []), FeelHapticBook.lucky()])
+        #expect(merged.count == 1)
+        let total = chomp.notes.count + FeelHapticBook.feast.notes.count + FeelHapticBook.lucky().notes.count
+        #expect(merged.first?.notes.count == total)
+        let times = merged.first?.notes.map { $0.time } ?? []
+        #expect(times == times.sorted())
+        let curved = FeelHapticCue(notes: [.tap(0.5, 0.5)], curve: [FeelHapticPoint(time: 0, value: 1)])
+        #expect(FeelHapticBook.merge([curved, FeelHapticBook.rearm]).count == 2)
+        #expect(FeelHapticBook.merge([]).isEmpty)
+    }
+
+    @Test func theBuzzMixerKeepsItsEightUnlessANewcomerIsMuchLouder() {
+        var mixer = FeelBuzzMixer()
+        var eight: [Buzzer] = []
+        for index in 0..<FeelSynth.buzzSlots {
+            eight.append(Buzzer(id: 10 + index, species: .housefly, pan: 0, height: 0.5, flying: true))
+        }
+        _ = mixer.update(buzzers: eight, share: 1, now: 0)
+        let seated = Set(mixer.ids.compactMap { $0 })
+        #expect(seated.count == FeelSynth.buzzSlots)
+        // A ninth bug a little louder: nobody loses a seat, frame after frame.
+        let ninth = Buzzer(id: 99, species: .housefly, pan: 0, height: 0.4, flying: true)
+        for frame in 1...30 {
+            _ = mixer.update(buzzers: eight + [ninth], share: 1, now: Double(frame) / 60)
+            #expect(Set(mixer.ids.compactMap { $0 }) == seated)
+        }
+        // A much louder one (more than 1.3×) takes the quietest seat after its fade.
+        let loud = Buzzer(id: 100, species: .housefly, pan: 0, height: 0, flying: true)
+        _ = mixer.update(buzzers: eight + [loud], share: 1, now: 1)
+        _ = mixer.update(buzzers: eight + [loud], share: 1, now: 1.2)
+        #expect(mixer.ids.contains(where: { $0 == 100 }))
+    }
+
+    @Test func aRefusedAudioStartIsNotAnEngineFailure() {
+        #expect(FeelAudioRules.isBlocked(code: 561_015_905))   // '!pla'
+        #expect(FeelAudioRules.isBlocked(code: 561_017_449))   // '!pri'
+        #expect(FeelAudioRules.isBlocked(code: -10_851) == false)
+        #expect(FeelAudioRules.isBlocked(code: 0) == false)
+        #expect(FeelAudioRules.blockedBackoff > 1)
     }
 
     #if DEBUG

@@ -101,11 +101,12 @@ final class BogParticlePool {
         q.maxLife = max(q.life, 0.01)
         parts[slot] = q
         let s = sprites[slot]
-        s.size = CGSize(width: size, height: size)
+        // (The scale is reset before the size: SpriteKit's `size` is the scaled size, so a recycled, shrunken
+        // sprite would otherwise come back too big.)
+        bogResize(s, CGSize(width: size, height: size))
         s.color = color
         s.position = q.position
         s.zRotation = 0
-        s.setScale(1)
         s.alpha = q.alphaScale
         s.isHidden = false
     }
@@ -267,15 +268,21 @@ final class BogEffects {
         }
         let i = splats.next()
         splats.flashes[i] = BogFlash(age: 0, life: 1.1, active: true, origin: p, angle: rng.range(0, 2 * .pi),
-                                     size: max(r * 2.6, 30))
+                                     size: max(r * 2, 30))
         let s = splats.sprites[i]
         s.texture = BogTextures.splat(Int(rng.range(0, 3)))
-        // (Under the day tint already: no colour blend, so the glisten keeps its own pale colours.)
+        // (No colour blend: the glisten keeps its own pale colours.)
         s.colorBlendFactor = 0
         s.isHidden = false
-        sparkBurst(at: p, count: 4, color: BogPaint.ui(TrapArt.palette.gold), speed: 120, size: 16)
+        sparkBurst(at: p, count: 4, color: BogPaint.ui(TrapArt.sipRing), speed: 140, size: 18)
         puff(from: CGPoint(x: p.x - r * 0.5, y: p.y), to: CGPoint(x: p.x + r * 0.5, y: p.y), count: 3,
-             color: UIColor(white: 1, alpha: 1), size: max(r * 1.6, 18))
+             color: UIColor(white: 1, alpha: 1), size: max(r * 1.4, 18))
+    }
+
+    /// The bite's impact on the trap: a soft white flash along the midrib (the jaws meeting).
+    func impact(at p: CGPoint, height: CGFloat) {
+        puff(from: CGPoint(x: p.x, y: p.y - height * 0.45), to: CGPoint(x: p.x, y: p.y + height * 0.45), count: 6,
+             color: UIColor(white: 1, alpha: 1), size: 46)
     }
 
     /// Sparks bursting out of a point.
@@ -309,26 +316,28 @@ final class BogEffects {
         }
     }
 
-    /// Motion lines behind an escaping bug (`heading` radians: the way it flies).
+    /// Motion lines behind an escaping bug (`heading` radians: the way it flies), plus a startle "!" over it (R2:
+    /// 1.5 × bigger, so a slow snap that missed reads as yours).
     func whiff(at p: CGPoint, heading: CGFloat, radius r: CGFloat) {
         let i = whiffs.next()
-        whiffs.flashes[i] = BogFlash(age: 0, life: 0.4, active: true, origin: p, angle: heading,
-                                     size: max(r * 3.2, 40))
+        whiffs.flashes[i] = BogFlash(age: 0, life: 0.45, active: true, origin: p, angle: heading,
+                                     size: max(r * 3, 60))
         whiffs.sprites[i].isHidden = false
+        startle(at: p, radius: r)
     }
 
     /// A startled bug: a little burst over it.
     func startle(at p: CGPoint, radius r: CGFloat) {
         let i = startles.next()
         startles.flashes[i] = BogFlash(age: 0, life: 0.55, active: true,
-                                       origin: CGPoint(x: p.x, y: p.y + r * 0.9), angle: 0, size: max(r * 1.6, 22))
+                                       origin: CGPoint(x: p.x, y: p.y + r * 0.9), angle: 0, size: max(r * 1.3, 33))
         startles.sprites[i].isHidden = false
     }
 
     /// A landing "tik": a thin ring opening out under the bug.
     func ripple(at p: CGPoint, radius r: CGFloat) {
         let i = ripples.next()
-        ripples.flashes[i] = BogFlash(age: 0, life: 0.38, active: true, origin: p, angle: 0, size: r * 2.6)
+        ripples.flashes[i] = BogFlash(age: 0, life: 0.38, active: true, origin: p, angle: 0, size: r * 2.2)
         ripples.sprites[i].isHidden = false
     }
 
@@ -384,8 +393,9 @@ final class BogEffects {
 
 // MARK: - Score pops
 
-/// The in-world callouts at the bite ("+240", "TRIPLE ×3", "Feast! +1 snap", "Bzzt!"): a pooled outlined label
-/// with a soft drop shadow, popping in with an overshoot, rising and fading on the FX clock.
+/// The in-world callouts ("FEAST ×5 · +255", "+40", "Bzzt!", "wilted −1"): a pooled outlined label with a soft drop
+/// shadow, popping in with an overshoot, rising and fading on the FX clock. R2: 20 slots; when all are busy the
+/// oldest is recycled (QA-1 #22), never a pop that has only just appeared.
 @MainActor
 final class BogPops {
     /// Scene z 60.
@@ -398,10 +408,12 @@ final class BogPops {
     private var starts: [CGPoint] = []
     private var rises: [CGFloat] = []
     private var texts: [String] = []
+    private var boxes: [CGSize] = []
+    private var heroes: [Bool] = []
     private var cursor = 0
     private static var fonts: [Int: UIFont] = [:]
 
-    init(capacity: Int = 10) {
+    init(capacity: Int = 20) {
         root = SKNode()
         root.zPosition = 60
         for _ in 0..<max(capacity, 1) {
@@ -425,8 +437,12 @@ final class BogPops {
             starts.append(.zero)
             rises.append(0)
             texts.append("")
+            boxes.append(.zero)
+            heroes.append(false)
         }
     }
+
+    var capacity: Int { labels.count }
 
     /// The rounded black display face (cached per point size).
     static func font(_ size: CGFloat) -> UIFont {
@@ -443,12 +459,36 @@ final class BogPops {
         return f
     }
 
+    /// The size a pop's text takes at `size` points (its stroke included). Measured on events only, never per frame.
+    static func measure(_ text: String, size: CGFloat) -> CGSize {
+        let f = font(size)
+        let s = (text as NSString).size(withAttributes: [.font: f])
+        return CGSize(width: ceil(s.width) + 6, height: ceil(s.height))
+    }
+
+    /// How far a pop overshoots its size as it pops in (the crease clamp leaves room for it).
+    nonisolated static func overshoot(hero: Bool) -> CGFloat { hero ? 0.22 : 0.18 }
+
     var activeCount: Int { ages.filter { $0 >= 0 }.count }
 
     /// The texts on screen now (tests, demo frames).
     var activeTexts: [String] {
         var out: [String] = []
         for i in 0..<ages.count where ages[i] >= 0 { out.append(texts[i]) }
+        return out
+    }
+
+    /// Each active pop's text box at its resting scale, where it is now (scene space; tests: off the crease).
+    var activeRects: [CGRect] {
+        var out: [CGRect] = []
+        for i in 0..<ages.count where ages[i] >= 0 {
+            let u = max(ages[i] - delays[i], 0)
+            let f = CGFloat(min(u / lives[i], 1))
+            let ease = 1 - (1 - f) * (1 - f)
+            let p = CGPoint(x: starts[i].x, y: starts[i].y + rises[i] * ease)
+            let b = boxes[i]
+            out.append(CGRect(x: p.x - b.width / 2, y: p.y - b.height / 2, width: b.width, height: b.height))
+        }
         return out
     }
 
@@ -460,8 +500,9 @@ final class BogPops {
         }
     }
 
+    /// Shows `text` centred at `p`. `hero`: the bite's one big callout (a bigger overshoot, a longer hold).
     func pop(_ text: String, at p: CGPoint, size: CGFloat, fill: UIColor, stroke: UIColor, rise: CGFloat = 46,
-             delay: Double = 0, life: Double = 1.15) {
+             delay: Double = 0, life: Double = 1.15, hero: Bool = false) {
         let n = labels.count
         var slot = -1
         for k in 0..<n {
@@ -471,7 +512,12 @@ final class BogPops {
                 break
             }
         }
-        if slot < 0 { slot = cursor }
+        if slot < 0 {
+            // All busy: recycle the oldest.
+            var oldest = 0
+            for i in 1..<max(n, 1) where ages[i] > ages[oldest] { oldest = i }
+            slot = oldest
+        }
         cursor = (slot + 1) % n
         let font = BogPops.font(size)
         let main: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: fill, .strokeColor: stroke,
@@ -486,6 +532,8 @@ final class BogPops {
         starts[slot] = p
         rises[slot] = rise
         texts[slot] = text
+        boxes[slot] = BogPops.measure(text, size: size)
+        heroes[slot] = hero
         labels[slot].isHidden = true
         shadows[slot].isHidden = true
     }
@@ -508,11 +556,12 @@ final class BogPops {
             }
             l.isHidden = false
             sh.isHidden = false
+            let over = BogPops.overshoot(hero: heroes[i])
             let k: CGFloat
             if u < 0.09 {
-                k = 0.3 + 0.98 * CGFloat(u / 0.09)
-            } else if u < 0.2 {
-                k = 1.28 - 0.28 * BogMath.smoothstep(0.09, 0.2, CGFloat(u))
+                k = 0.3 + (0.7 + over) * CGFloat(u / 0.09)
+            } else if u < 0.22 {
+                k = 1 + over - over * BogMath.smoothstep(0.09, 0.22, CGFloat(u))
             } else {
                 k = 1
             }

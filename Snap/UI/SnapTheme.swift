@@ -87,6 +87,39 @@ struct SnapBackdrop: View {
     }
 }
 
+/// The menus' backdrop (juror 7: "menus have no world"): the bog as the scene last drew it, blurred and dimmed, with
+/// the page glow on top, so Results, the Bug Book, Settings and the Daily sit in the same place as play. Before the
+/// scene has drawn anything it is the painted gradient.
+struct BogBackdrop: View {
+    @ObservedObject var controller: GameController
+    var glow: Color = SnapTheme.goldLight
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                if let still = controller.bogStill {
+                    Image(uiImage: still)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .blur(radius: 12, opaque: true)
+                        .clipped()
+                    Color.black.opacity(0.45)
+                    RadialGradient(colors: [glow.opacity(0.14), glow.opacity(0)], center: UnitPoint(x: 0.5, y: 0.08),
+                                   startRadius: 10, endRadius: 520)
+                } else {
+                    SnapBackdrop(glow: glow)
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .onAppear { controller.ensureStill() }
+    }
+}
+
 /// A sprinkle of dew (fixed positions, so frames are stable).
 struct DewField: View {
     static let drops: [(x: CGFloat, y: CGFloat, r: CGFloat)] = [

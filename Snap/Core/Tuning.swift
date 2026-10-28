@@ -5,7 +5,8 @@ import Foundation
 //
 // Nothing is hard-coded elsewhere in Core. tools/balance-sim.js mirrors the balance-relevant values in its `T` table
 // (same names) and the detector values in its `D` table: KEEP THEM IDENTICAL. R1 tuning (design/notes/core-R1.md)
-// changed some GAME-DESIGN starting values; each change is marked "R1".
+// changed some GAME-DESIGN starting values; each change is marked "R1". R2 changes (design/notes/core-R2.md) are
+// marked "R2".
 
 enum Tuning {
 
@@ -36,6 +37,12 @@ enum Tuning {
     static let creepRefFallRate: Double = 6
     /// θ at or above this is "too flat" (hint only).
     static let tooFlatAngle: Double = 174
+    /// R2 (QA-1 #5): after a re-arm, the first sample or a too-flat θ, the creep reference follows θ while it rises
+    /// and for this long after its peak (an overshoot that settles back is not a creep).
+    static let settleWindow: Double = 0.6
+    /// R2 (QA-1 #6): an attempt whose closure rose less than snapStartDepth over this window (s) is not a snap yet,
+    /// so its start time moves up to now (a drift or a hold never makes a later quick snap slow).
+    static let attemptWindow: Double = 0.25
     /// θ below this for `closingDwell` pauses the game (App/Input).
     static let closingAngle: Double = 50
     static let closingDwell: Double = 0.6
@@ -62,6 +69,18 @@ enum Tuning {
     /// Each productive clean snap adds this to the multiplier, up to the max.
     static let chainStep: Double = 0.5
     static let chainMaxMultiplier: Double = 4
+    /// R2 chain rule (GAME-DESIGN §5): only a clean bite of at least this many adds a step; a clean 1-bug bite holds.
+    static let chainMinBite: Int = 2
+
+    // MARK: Hunger (R2, GAME-DESIGN §5 "Hunger")
+
+    /// Seconds without a catching bite before a snap wilts, by day phase.
+    static let wiltMorning: Double = 15
+    static let wiltNoon: Double = 14
+    static let wiltDusk: Double = 12
+    static let wiltNight: Double = 10
+    /// `hungry` fires (and the hint shows) this many seconds before a wilt.
+    static let hungryWarning: Double = 3
 
     // MARK: The bite rule (GAME-DESIGN §4)
 
@@ -91,13 +110,26 @@ enum Tuning {
     /// The attract mode's day repeats after this many waves.
     static let attractDayWaves: Int = 28
     static let nectarReseedWaves: Int = 6
-    static let nectarMin: Int = 5
-    static let nectarMax: Int = 7
+    /// R2 (REVIEW-1 #19): 6–8 drops in clusters of 2–3, the clusters alternating between the lobes.
+    static let nectarMin: Int = 6
+    static let nectarMax: Int = 8
     static let nectarRadiusMin: Double = 12
     static let nectarRadiusMax: Double = 16
-    static let nectarSpacing: Double = 110
-    static let nectarInner: Double = 0.3
-    static let nectarOuter: Double = 0.72
+    static let nectarClusterMin: Int = 2
+    static let nectarClusterMax: Int = 3
+    /// A cluster's drops sit on a ring of this radius (pt) round its centre, evenly spaced.
+    static let nectarRingMin: Double = 40
+    static let nectarRingMax: Double = 48
+    /// Cluster centres keep this far apart (pt), at these normalised radii, at least nectarArcMargin rad from the
+    /// vertical. A lobe with two clusters puts the first in its upper half and the second in its lower half, each at
+    /// least nectarHalfGap rad from the horizontal.
+    static let nectarClusterGap: Double = 190
+    static let nectarArcMargin: Double = 0.25
+    static let nectarHalfGap: Double = 0.45
+    static let nectarClusterInner: Double = 0.32
+    static let nectarClusterOuter: Double = 0.55
+    /// A re-seeded drop this close (pt) to a drop that is still being sipped is skipped.
+    static let nectarKeptClearance: Double = 60
     static let nectarCreaseClearance: Double = 50
     static let nectarTries: Int = 30
     static let lingerMorningMin: Double = 6
@@ -120,21 +152,27 @@ enum Tuning {
     static let maxProtectedPerWave: Int = 4
     /// R1: bees drop in for a quicker sip than the bugs.
     static let beeLingerFactor: Double = 0.6
-    /// Catchable bugs per wave (R1: smaller than the design's starting values).
-    static let sizeFirstMin: Int = 1
-    static let sizeFirstMax: Int = 2
+    /// Catchable bugs per wave (R1: smaller than the design's starting values; R2: the morning and noon a little
+    /// bigger again, so bigger bugs still make crowds).
+    static let sizeFirstMin: Int = 2
+    static let sizeFirstMax: Int = 3
     static let sizeMorningMin: Int = 2
-    static let sizeMorningMax: Int = 3
+    static let sizeMorningMax: Int = 4
     static let sizeNoonMin: Int = 2
-    static let sizeNoonMax: Int = 3
+    static let sizeNoonMax: Int = 4
     static let sizeDuskMin: Int = 2
     static let sizeDuskMax: Int = 4
     static let sizeNightMin: Int = 2
     static let sizeNightMax: Int = 5
     /// Crowd waves (everything lands close together) from this wave, with this chance.
-    static let crowdFromWave: Int = 4
-    static let crowdChance: Double = 0.34
-    static let crowdSpread: Double = 1.0
+    static let crowdFromWave: Int = 3
+    static let crowdChance: Double = 0.45
+    /// R2: a crowd's flyers are timed to land together (each starts late by how much quicker its flight is than the
+    /// slowest one's), plus 0…crowdSpread s of jitter: they land within 1.2 s (hover and group steps included).
+    static let crowdSpread: Double = 0.1
+    /// R2: a crowd goes to one cluster: its random spots lie crowdNearMin…crowdNearMax pt from the anchor drop.
+    static let crowdNearMin: Double = 60
+    static let crowdNearMax: Double = 140
     /// Non-crowd waves: each group starts slot × (trickleMin…trickleMax) s after the wave.
     static let trickleMin: Double = 0.6
     static let trickleMax: Double = 1.2
@@ -151,6 +189,9 @@ enum Tuning {
     static let spotRadius: Double = 0.75
 
     // MARK: Session
+
+    /// R2 (REVIEW-1 #4): bug radii (BugInfo.radius) are the R1 art radii × this, for the art and the rules alike.
+    static let bugRadiusScale: Double = 1.8
 
     static let tiredSeconds: Double = 2.2
     static let caughtSeconds: Double = 0.5
@@ -206,12 +247,17 @@ enum Tuning {
     static let noviceCreepChance: Double = 0.25
     static let noviceCreepDepth: Double = 12
     static let noviceCreepTime: Double = 1.2
-    static let casualPatience: Double = 4
+    static let casualPatience: Double = 7
     static let expertPatience: Double = 6
     static let perfectPatience: Double = 7
     static let noviceBeeMiss: Double = 0.6
-    static let casualBeeMiss: Double = 0.2
+    static let casualBeeMiss: Double = 0.25
     static let expertBeeMiss: Double = 0.02
+    /// R2: a casual hand fumbles this share of its snaps (a slow casualFumbleMin…Max s close); with the bees, that is
+    /// what breaks its chains.
+    static let casualFumbleChance: Double = 0.3
+    static let casualFumbleMin: Double = 0.3
+    static let casualFumbleMax: Double = 0.45
     /// Perfect waits while a protected bug in the trap is flying below this height.
     static let perfectBeeHeight: Double = 0.85
     /// Others notice a protected arriving bug below this height.
