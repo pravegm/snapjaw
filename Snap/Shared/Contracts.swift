@@ -260,6 +260,7 @@ public enum TrapHint: String, Codable, Sendable {
     case beeInside        // a protected bug is sipping in the trap: "Bee! Wait…"
     case crowd            // ≥ 3 bugs sipping and no bee: "Now!"
     case lastSnap         // 1 snap left: "Last snap — make it count"
+    case hungry           // R2: a snap wilts within 3 s: "Hungry… bite!"
 }
 
 /// The last bite, for the HUD callout and the results.
@@ -307,16 +308,20 @@ public struct TrapSnapshot: Equatable, Sendable {
     public var hint: TrapHint?
     public var bugsCaught: Int
     public var beesSpared: Int              // protected bugs that came into the trap and left uneaten
+    /// R2 hunger: 0 just fed … 1 a snap wilts (GAME-DESIGN §5 "Hunger"). Drives the draining snap glyph.
+    public var hunger: Double
     public init(phase: RunPhase = .playing, mode: RunMode = .feed, time: Double = 0, bugs: [BugState] = [],
                 nectar: [NectarDrop] = [], closure: Double = 0, armed: Bool = true, creeping: Bool = false,
                 snapsLeft: Int = 0, snapsMax: Int = 12, score: Int = 0, best: Int = 0, chain: Int = 0,
                 chainMultiplier: Double = 1, wave: Int = 0, dayPhase: DayPhase = .morning, dayClock: Double = 0,
-                lastBite: BiteReport? = nil, hint: TrapHint? = nil, bugsCaught: Int = 0, beesSpared: Int = 0) {
+                lastBite: BiteReport? = nil, hint: TrapHint? = nil, bugsCaught: Int = 0, beesSpared: Int = 0,
+                hunger: Double = 0) {
         self.phase = phase; self.mode = mode; self.time = time; self.bugs = bugs; self.nectar = nectar
         self.closure = closure; self.armed = armed; self.creeping = creeping; self.snapsLeft = snapsLeft
         self.snapsMax = snapsMax; self.score = score; self.best = best; self.chain = chain
         self.chainMultiplier = chainMultiplier; self.wave = wave; self.dayPhase = dayPhase; self.dayClock = dayClock
         self.lastBite = lastBite; self.hint = hint; self.bugsCaught = bugsCaught; self.beesSpared = beesSpared
+        self.hunger = hunger
     }
 }
 
@@ -343,6 +348,10 @@ public enum TrapEvent: Equatable, Sendable {
     case rearmed
     case beeSpared(species: BugSpecies)                 // a protected bug left the trap uneaten
     case lastSnap                                       // snapsLeft reached 1
+    /// R2 hunger: 3 s before a snap wilts (once per hunger cycle).
+    case hungry(secondsLeft: Double)
+    /// R2 hunger: no catching bite for the phase's wilt time, so a snap wilted.
+    case wilted(snapsLeft: Int)
     case tired                                          // snapsLeft reached 0
     case newBest                                        // passed the personal best (once per run)
     case finished

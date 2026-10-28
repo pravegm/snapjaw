@@ -105,6 +105,13 @@ notice anything. Touch snaps (no hinge) count as `d = 0.09 s`.
   - "Double ×2", "Triple ×3", "Quad ×4", "FEAST ×5+" on screen.
 - **Chain:** each consecutive snap that catches ≥ 1 bug and no stinger adds 0.5 to the multiplier (×1, ×1.5, ×2 … up
   to ×4). A dry snap (nothing caught) or a stinger resets it to ×1.
+- **Chain (R2 rule):** only a bite of ≥ 2 bugs adds +0.5; a 1-bug clean bite holds the chain; a dry snap or a stinger
+  breaks it.
+- **Hunger (R2):** patience can't be infinite. With no catching bite for the phase's wilt time (morning 15 s, noon
+  14 s, dusk 12 s, night 10 s), one snap **wilts** (−1) and the timer restarts. A dry snap doesn't reset the timer; any
+  catch does. 3 s before a wilt: `hungry` (the next snap glyph drains, "Hungry… bite!"). The lesson and attract never
+  wilt.
+- **First runs (R2):** while the plant rank is Sprout, a run starts with 12 snaps instead of 10.
 - **The run ends** when snaps reach 0: "Your trap is tired." The score is the **protein** total.
 - A typical casual run: 25–35 snaps, 2–3 minutes. The difficulty ramp (§6) ends runs; a perfect player still ends
   around 6–8 minutes.
