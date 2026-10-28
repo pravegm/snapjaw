@@ -1026,7 +1026,9 @@ struct TallyTests {
         for a in Achievements.all where BadgePainter.tier(for: a.id) == .gold { gold += 1 }
         #expect(gold >= 3 && gold <= 6)
         #expect(BadgePainter.species(for: Achievements.scarab.id) == [.goldenScarab])
-        #expect(BadgePainter.species(for: Achievements.spare50.id).allSatisfy(\.isProtected))
+        let spareBugs = BadgePainter.species(for: Achievements.spare50.id)
+        let allProtected = spareBugs.allSatisfy { $0.isProtected }
+        #expect(allProtected)
     }
 
     @Test func tallyIgnoresHunger() {
