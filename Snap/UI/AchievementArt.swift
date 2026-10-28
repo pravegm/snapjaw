@@ -25,6 +25,9 @@ struct BadgeArt {
     var trap: CGImage?
     /// The Scene's own 3/4 trap, when it has one (R4); else the open trap is tilted here.
     var hero: CGImage?
+    /// R5 (REVIEW-4 #6, #14): the Scene's hero trap with its own sipping fly (drawn in the trap's style), so no
+    /// outlined bug is laid on the outline-free trap.
+    var heroFly: CGImage?
     var bugs: [BugSpecies: CGImage] = [:]
 
     /// Bugs are drawn big (radius 70 pt at 4×), so they stay crisp at 1024 px.
@@ -34,11 +37,16 @@ struct BadgeArt {
     static func load(for id: String) -> BadgeArt {
         var art = BadgeArt(trap: TrapImageCache.image())
         for s in BadgePainter.species(for: id) {
-            // R4 (REVIEW-3 #18): the scarab's wings are folded under its own wing cases (drawn by the badge).
-            let spread: CGFloat = s == .dragonfly ? 1 : (s == .goldenScarab ? 0 : 0.8)
+            // R4 (REVIEW-3 #18): the scarab's wings are folded under its own wing cases (drawn by the badge). R5: the
+            // bugs flying in round a badge have their wings spread.
+            let flying = BadgePainter.fliesIn(id: id)
+            let spread: CGFloat = s == .dragonfly || flying ? 1 : (s == .goldenScarab ? 0 : 0.8)
             art.bugs[s] = TrapArt.bugImage(s, radius: bugRadius, scale: 4, wingSpread: spread)
         }
-        art.hero = TrapImageCache.heroImage(bug: false)
+        if BadgePainter.usesHero(id: id) {
+            art.hero = TrapImageCache.heroImage(bug: false)
+            art.heroFly = TrapImageCache.heroImage(bug: true)
+        }
         return art
     }
 }
@@ -63,13 +71,14 @@ enum BadgePainter {
         }
     }
 
-    /// The bugs each badge draws (loaded up front).
+    /// The bugs each badge draws (loaded up front). R5 (REVIEW-4 #14): no bug is laid on the hero trap any more (its
+    /// sipping fly is the Scene's own, `BadgeArt.heroFly`); these fly round it, or are the subject.
     static func species(for id: String) -> [BugSpecies] {
         switch id {
-        case Achievements.feast.id: return [.housefly, .gnat, .fruitFly]
+        case Achievements.feast.id: return [.gnat, .fruitFly]
         case Achievements.bite5.id: return [.housefly, .bluebottle, .gnat, .ladybird, .fruitFly]
-        case Achievements.nobees.id: return [.bee, .housefly, .gnat]
-        case Achievements.daily.id, Achievements.monarch.id, Achievements.score10k.id: return [.housefly]
+        case Achievements.nobees.id: return [.bee]
+        case Achievements.daily.id, Achievements.score10k.id: return [.housefly]
         case Achievements.scarab.id: return [.goldenScarab]
         case Achievements.dragonfly.id: return [.dragonfly]
         case Achievements.spare50.id: return [.bee]
@@ -79,70 +88,114 @@ enum BadgePainter {
         }
     }
 
+    /// R5 (REVIEW-4 #14: five of twelve reused one trap drawing): only three badges draw the hero trap, each in its own
+    /// composition (First Feast: big, with bugs flying in; Bog Monarch: crowned; Bee-Free Diet: a bee flying off).
+    static let heroBadges: Set<String> = [Achievements.feast.id, Achievements.monarch.id, Achievements.nobees.id]
+
+    static func usesHero(id: String) -> Bool {
+        heroBadges.contains(id) || !Achievements.all.contains { $0.id == id }
+    }
+
+    /// Badges whose bugs are flying in (wings spread).
+    static func fliesIn(id: String) -> Bool {
+        id == Achievements.feast.id || id == Achievements.daily.id || id == Achievements.score10k.id
+            || id == Achievements.nobees.id
+    }
+
+    /// R5 (REVIEW-4 #14: the petiole leaf broke the ring on four badges): every subject is drawn inside this disc
+    /// (the medallion's face less its dark lip), and clipped to it.
+    static let discRadius: CGFloat = 196
+    static var disc: CGRect {
+        CGRect(x: center.x - discRadius, y: center.y - discRadius, width: discRadius * 2, height: discRadius * 2)
+    }
+
+    /// The widest hero (at most `width`) whose box, `aspect` × as tall and centred on `c`, lies inside the disc with
+    /// a little room. Pure; tested.
+    static func heroFit(width: CGFloat, center c: CGPoint, aspect: CGFloat) -> CGFloat {
+        let k = aspect.isFinite && aspect > 0 ? aspect : 0.75
+        var w = max(width.isFinite ? width : 200, 20)
+        while w > 20 {
+            let h = w * k
+            var far: CGFloat = 0
+            for sx in [CGFloat(-1), 1] {
+                for sy in [CGFloat(-1), 1] {
+                    let dx = c.x + sx * w / 2 - center.x
+                    let dy = c.y + sy * h / 2 - center.y
+                    far = max(far, (dx * dx + dy * dy).squareRoot())
+                }
+            }
+            if far <= discRadius - 4 { return w }
+            w -= 2
+        }
+        return 20
+    }
+
     static func paint(_ ctx: inout GraphicsContext, id: String, art: BadgeArt) {
         let night = id == Achievements.night.id
         background(&ctx)
         medallion(&ctx, tier: tier(for: id), night: night)
+        var g = ctx
+        g.clip(to: Path(ellipseIn: disc))
         switch id {
         case Achievements.feast.id:
-            // R4 (REVIEW-3 #16, #18): the 3/4 trap with a crowd of three sipping on its near lobe (off the midrib).
-            let c = CGPoint(x: 256, y: 262)
-            hero(&ctx, art, width: 340, center: c)
-            heroBugs(&ctx, art, width: 340, center: c, [(.housefly, -0.34, 0.5, 72), (.gnat, 0.34, 0.56, 62),
-                                                        (.fruitFly, 0.0, 0.76, 62)])
+            // R5: the hero trap, big, its own fly sipping, and two more flying in for the feast.
+            beeTrail(&g, from: CGPoint(x: 120, y: 190), to: CGPoint(x: 160, y: 140), alpha: 0.45)
+            beeTrail(&g, from: CGPoint(x: 392, y: 180), to: CGPoint(x: 352, y: 136), alpha: 0.45)
+            hero(&g, art, width: 300, center: CGPoint(x: 256, y: 292), withFly: true)
+            flyers(&g, art, [(.gnat, -96, -114, 76, 40), (.fruitFly, 98, -120, 74, 140)])
         case Achievements.bite5.id:
             // R4 (REVIEW-3 #18): no trap here (that is First Feast): five bugs swooping in round the 5.
-            swirl(&ctx)
-            ringOfBugs(&ctx, art, [.housefly, .bluebottle, .gnat, .ladybird, .fruitFly], radius: 128, width: 92)
-            coin(&ctx, "5", at: center)
+            swirl(&g)
+            ringOfBugs(&g, art, [.housefly, .bluebottle, .gnat, .ladybird, .fruitFly], radius: 128, width: 92)
+            coin(&g, "5", at: center)
         case Achievements.chain4.id:
-            chain(&ctx)
-            coin(&ctx, "×4", at: CGPoint(x: 256, y: 372))
+            chain(&g)
+            coin(&g, "×4", at: CGPoint(x: 256, y: 372))
         case Achievements.scarab.id:
-            glow(&ctx, at: center, radius: 170, color: SnapTheme.goldLight)
-            bugs(&ctx, art, [(.goldenScarab, 0, 0, 250)])
+            glow(&g, at: center, radius: 170, color: SnapTheme.goldLight)
+            bugs(&g, art, [(.goldenScarab, 0, 0, 250)])
             // R4 (REVIEW-3 #18): a beetle's domed wing cases, not a bee's glassy wings.
-            wingCases(&ctx, center: center, width: 250, degrees: -24)
-            sparkles(&ctx)
+            wingCases(&g, center: center, width: 250, degrees: -24)
+            sparkles(&g)
         case Achievements.dragonfly.id:
-            bugs(&ctx, art, [(.dragonfly, 0, 0, 290)])
+            bugs(&g, art, [(.dragonfly, 0, 0, 290)])
         case Achievements.spare50.id:
-            halo(&ctx)
-            bugs(&ctx, art, [(.bee, 0, -12, 190)])
-            coin(&ctx, "50", at: CGPoint(x: 256, y: 380))
+            halo(&g)
+            bugs(&g, art, [(.bee, 0, -12, 190)])
+            coin(&g, "50", at: CGPoint(x: 256, y: 380))
         case Achievements.bugbook.id:
-            book(&ctx, art)
-            coin(&ctx, "16", at: CGPoint(x: 256, y: 384))
+            book(&g, art)
+            coin(&g, "16", at: CGPoint(x: 256, y: 384))
         case Achievements.monarch.id:
-            let c = CGPoint(x: 256, y: 316)
-            hero(&ctx, art, width: 260, center: c)
-            heroBugs(&ctx, art, width: 260, center: c, [(.housefly, 0.3, 0.6, 60)])
-            crown(&ctx)
+            // R5: the hero trap wears the crown, tipped on its back lobe.
+            glow(&g, at: CGPoint(x: 256, y: 250), radius: 180, color: SnapTheme.goldLight)
+            let c = CGPoint(x: 256, y: 300)
+            let size = hero(&g, art, width: 300, center: c, withFly: true)
+            crown(&g, at: CGPoint(x: 236, y: c.y - size.height / 2 + 8), scale: 0.62, degrees: -12)
+            sparkles(&g)
         case Achievements.night.id:
-            moon(&ctx)
-            glow(&ctx, at: CGPoint(x: 232, y: 300), radius: 110, color: Color(snapHex: 0xF6FF8A))
-            bugs(&ctx, art, [(.firefly, -24, 44, 170)])
+            moon(&g)
+            glow(&g, at: CGPoint(x: 232, y: 300), radius: 110, color: Color(snapHex: 0xF6FF8A))
+            bugs(&g, art, [(.firefly, -24, 44, 170)])
         case Achievements.daily.id:
-            sun(&ctx)
-            let c = CGPoint(x: 256, y: 324)
-            hero(&ctx, art, width: 250, center: c)
-            heroBugs(&ctx, art, width: 250, center: c, [(.housefly, 0.3, 0.6, 58)])
+            // R5: no trap: today's page of the calendar, its sun, and a fly coming to dine.
+            calendar(&g)
+            flyers(&g, art, [(.housefly, 104, -106, 82, 135)])
         case Achievements.score10k.id:
-            let c = CGPoint(x: 256, y: 176)
-            hero(&ctx, art, width: 200, center: c)
-            heroBugs(&ctx, art, width: 200, center: c, [(.housefly, 0.3, 0.6, 46)])
-            numeral(&ctx, "10K", size: 128, at: CGPoint(x: 256, y: 360))
+            // R5: no trap: the big number in a ring of nectar, a fly diving in.
+            glow(&g, at: center, radius: 170, color: SnapTheme.goldLight)
+            nectarRing(&g)
+            numeral(&g, "10K", size: 128, at: CGPoint(x: 256, y: 276))
+            flyers(&g, art, [(.housefly, 0, -122, 76, 90)])
         case Achievements.nobees.id:
             // R4 (REVIEW-3 #18): unlike Bee Kind (a bee in its halo), the trap feeds on flies while a bee buzzes off
-            // free along a dashed trail.
-            let c = CGPoint(x: 236, y: 298)
-            hero(&ctx, art, width: 290, center: c)
-            heroBugs(&ctx, art, width: 290, center: c, [(.housefly, -0.3, 0.52, 60), (.gnat, 0.28, 0.6, 52)])
-            beeTrail(&ctx, from: CGPoint(x: 220, y: 214), to: CGPoint(x: 352, y: 132))
-            bugs(&ctx, art, [(.bee, 104, -132, 104)])
-            coin(&ctx, "30", at: CGPoint(x: 366, y: 388))
+            // free along a dashed trail. R5: the trap low on the left, its own fly sipping, the bee inside the disc.
+            hero(&g, art, width: 270, center: CGPoint(x: 226, y: 296), withFly: true)
+            beeTrail(&g, from: CGPoint(x: 226, y: 196), to: CGPoint(x: 318, y: 148))
+            flyers(&g, art, [(.bee, 86, -116, 92, -24)])
+            coin(&g, "30", at: CGPoint(x: 346, y: 362))
         default:
-            hero(&ctx, art, width: 340, center: center)
+            hero(&g, art, width: 340, center: center)
         }
     }
 
@@ -234,27 +287,97 @@ enum BadgePainter {
         return CGPoint(x: c.x + x * ca - y * sa, y: c.y + x * sa + y * ca)
     }
 
-    /// The trap open and tilted 3/4 on a shadow (the Scene's own 3/4 art when there is one).
-    static func hero(_ ctx: inout GraphicsContext, _ art: BadgeArt, width: CGFloat, center c: CGPoint) {
-        // The Scene's 3/4 trap brings its own ground shadow and petiole leaf.
-        if let threeQuarter = art.hero, threeQuarter.width > 0 {
-            image(&ctx, threeQuarter, center: c, width: width)
-            return
+    /// The trap open and tilted 3/4 on a shadow (the Scene's own 3/4 art when there is one), fitted inside the disc
+    /// (`heroFit`). `withFly`: the Scene's own hero with its sipping fly. Returns the size drawn.
+    @discardableResult
+    static func hero(_ ctx: inout GraphicsContext, _ art: BadgeArt, width: CGFloat, center c: CGPoint,
+                     withFly: Bool = false) -> CGSize {
+        // The Scene's 3/4 trap brings its own ground shadow, petiole leaf and (R5) sipping fly.
+        let scene = withFly ? (art.heroFly ?? art.hero) : art.hero
+        if let threeQuarter = scene, threeQuarter.width > 0, threeQuarter.height > 0 {
+            let aspect = CGFloat(threeQuarter.height) / CGFloat(threeQuarter.width)
+            let w = heroFit(width: width, center: c, aspect: aspect)
+            image(&ctx, threeQuarter, center: c, width: w)
+            return CGSize(width: w, height: w * aspect)
         }
-        let shadow = CGRect(x: c.x - width * 0.46, y: c.y + width * 0.12, width: width * 0.92, height: width * 0.2)
+        let w = heroFit(width: width, center: c, aspect: 0.7)
+        let shadow = CGRect(x: c.x - w * 0.46, y: c.y + w * 0.12, width: w * 0.92, height: w * 0.2)
         ctx.fill(Path(ellipseIn: shadow), with: .radialGradient(Gradient(colors: [Color.black.opacity(0.45), .clear]),
                                                                  center: CGPoint(x: shadow.midX, y: shadow.midY),
-                                                                 startRadius: 0, endRadius: width * 0.46))
+                                                                 startRadius: 0, endRadius: w * 0.46))
         guard let cg = art.trap, cg.width > 0, cg.height > 0 else {
-            trap(&ctx, art, width: width, y: c.y)
-            return
+            trap(&ctx, art, width: w, y: c.y)
+            return CGSize(width: w, height: w * 0.68)
         }
-        let h = width * CGFloat(cg.height) / CGFloat(cg.width)
+        let h = w * CGFloat(cg.height) / CGFloat(cg.width)
         var g = ctx
         g.translateBy(x: c.x, y: c.y)
         g.rotate(by: .degrees(heroTurn))
         g.scaleBy(x: 1, y: heroSquash)
-        g.draw(Image(decorative: cg, scale: 1), in: CGRect(x: -width / 2, y: -h / 2, width: width, height: h))
+        g.draw(Image(decorative: cg, scale: 1), in: CGRect(x: -w / 2, y: -h / 2, width: w, height: h))
+        return CGSize(width: w, height: h * heroSquash)
+    }
+
+    /// Bugs flying round a badge's subject (never on the trap): (species, dx, dy from the centre, width, heading in
+    /// degrees; the portraits face +x).
+    static func flyers(_ ctx: inout GraphicsContext, _ art: BadgeArt,
+                       _ list: [(BugSpecies, CGFloat, CGFloat, CGFloat, Double)]) {
+        for (s, dx, dy, w, heading) in list {
+            image(&ctx, art.bugs[s], center: CGPoint(x: center.x + dx, y: center.y + dy), width: w, degrees: heading)
+        }
+    }
+
+    /// Daily Diner (R5): today's calendar page, its sun on it.
+    static func calendar(_ ctx: inout GraphicsContext) {
+        let page = CGRect(x: 160, y: 156, width: 192, height: 214)
+        let shape = Path(roundedRect: page, cornerRadius: 26)
+        ctx.fill(shape.offsetBy(dx: 0, dy: 8), with: .color(Color.black.opacity(0.35)))
+        ctx.fill(shape, with: .color(SnapTheme.cream))
+        // The header band.
+        var band = ctx
+        band.clip(to: shape)
+        band.fill(Path(CGRect(x: page.minX, y: page.minY, width: page.width, height: 50)),
+                  with: .linearGradient(Gradient(colors: [SnapTheme.pink, SnapTheme.crimson]),
+                                        startPoint: CGPoint(x: 256, y: page.minY),
+                                        endPoint: CGPoint(x: 256, y: page.minY + 50)))
+        ctx.stroke(shape, with: .color(SnapTheme.goldDeep), lineWidth: 4)
+        // The binder rings.
+        for x in [CGFloat(206), 306] {
+            let ring = Path(roundedRect: CGRect(x: x - 9, y: page.minY - 18, width: 18, height: 36), cornerRadius: 9)
+            ctx.fill(ring, with: .linearGradient(Gradient(colors: [SnapTheme.goldLight, SnapTheme.goldDeep]),
+                                                 startPoint: CGPoint(x: x, y: page.minY - 18),
+                                                 endPoint: CGPoint(x: x, y: page.minY + 18)))
+        }
+        // The sun on the page.
+        let c = CGPoint(x: 256, y: 292)
+        for i in 0..<12 {
+            let a = Double(i) / 12 * 2 * Double.pi
+            var ray = Path()
+            ray.move(to: CGPoint(x: c.x + CGFloat(cos(a)) * 54, y: c.y + CGFloat(sin(a)) * 54))
+            ray.addLine(to: CGPoint(x: c.x + CGFloat(cos(a)) * 70, y: c.y + CGFloat(sin(a)) * 70))
+            ctx.stroke(ray, with: .color(SnapTheme.goldDeep), style: StrokeStyle(lineWidth: 8, lineCap: .round))
+        }
+        ctx.fill(Path(ellipseIn: CGRect(x: c.x - 44, y: c.y - 44, width: 88, height: 88)),
+                 with: .radialGradient(Gradient(colors: [SnapTheme.goldLight, SnapTheme.gold]), center: c,
+                                       startRadius: 0, endRadius: 44))
+    }
+
+    /// Well Fed (R5): a ring of glistening nectar drops (open at the top for the diving fly).
+    static func nectarRing(_ ctx: inout GraphicsContext) {
+        for i in 0..<12 where i != 9 {
+            let a = Double(i) / 12 * 2 * Double.pi
+            let p = CGPoint(x: center.x + CGFloat(cos(a)) * 150, y: center.y + CGFloat(sin(a)) * 150)
+            let r: CGFloat = i % 2 == 0 ? 15 : 11
+            let drop = CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)
+            ctx.fill(Path(ellipseIn: drop.offsetBy(dx: 0, dy: 3)), with: .color(Color.black.opacity(0.3)))
+            ctx.fill(Path(ellipseIn: drop), with: .radialGradient(Gradient(colors: [SnapTheme.goldLight,
+                                                                                    SnapTheme.gold,
+                                                                                    SnapTheme.goldDeep]),
+                                                                   center: CGPoint(x: p.x - r * 0.3, y: p.y - r * 0.3),
+                                                                   startRadius: 0, endRadius: r * 1.3))
+            ctx.fill(Path(ellipseIn: CGRect(x: p.x - r * 0.5, y: p.y - r * 0.6, width: r * 0.5, height: r * 0.4)),
+                     with: .color(Color.white.opacity(0.7)))
+        }
     }
 
     /// Bugs sipping on the 3/4 trap's back face: (species, u, v, w), `u` −1…1 along the hinge and `v` 0…1 up the back
@@ -301,13 +424,13 @@ enum BadgePainter {
     }
 
     /// Bee-Free Diet (R4): the dashed trail of a bee flying off free.
-    static func beeTrail(_ ctx: inout GraphicsContext, from a: CGPoint, to b: CGPoint) {
+    static func beeTrail(_ ctx: inout GraphicsContext, from a: CGPoint, to b: CGPoint, alpha: Double = 0.9) {
         var p = Path()
         p.move(to: a)
         p.addQuadCurve(to: b, control: CGPoint(x: a.x - 30, y: (a.y + b.y) / 2 - 40))
-        ctx.stroke(p, with: .color(Color.black.opacity(0.3)),
+        ctx.stroke(p, with: .color(Color.black.opacity(0.3 * alpha / 0.9)),
                    style: StrokeStyle(lineWidth: 10, lineCap: .round, dash: [14, 14]))
-        ctx.stroke(p, with: .color(Color.white.opacity(0.9)),
+        ctx.stroke(p, with: .color(Color.white.opacity(alpha)),
                    style: StrokeStyle(lineWidth: 6, lineCap: .round, dash: [14, 14]))
     }
 
@@ -431,6 +554,17 @@ enum BadgePainter {
         spine.addLine(to: CGPoint(x: 256, y: 340))
         ctx.stroke(spine, with: .color(SnapTheme.goldDeep), lineWidth: 6)
         bugs(&ctx, art, [(.ladybird, -76, -10, 104), (.moth, 76, -10, 116)])
+    }
+
+    /// The crown centred on `c`, scaled and tipped (R5: worn by the hero trap on Bog Monarch).
+    static func crown(_ ctx: inout GraphicsContext, at c: CGPoint, scale k: CGFloat, degrees: Double) {
+        var g = ctx
+        g.translateBy(x: c.x, y: c.y)
+        g.rotate(by: .degrees(degrees))
+        g.scaleBy(x: k, y: k)
+        // The crown is drawn round (256, 137).
+        g.translateBy(x: -256, y: -137)
+        crown(&g)
     }
 
     static func crown(_ ctx: inout GraphicsContext) {

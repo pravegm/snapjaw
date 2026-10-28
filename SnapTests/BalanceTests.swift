@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import Snap
 
-// MARK: - Headless balance playtest (Round 4)
+// MARK: - Headless balance playtest (Round 5)
 //
 // Every PilotSkill plays real TrapSessions (mode .feed, SNAP_BAL_SEEDS seeds, default 16; CI sets 8) at 60 Hz, the
 // pilot fed the previous frame's snapshot the way GameController feeds it. Each run is capped at 10 min. R4: every
@@ -11,17 +11,20 @@ import Testing
 // any balance test asks, and the whole table is printed then as ONE block between "SNAP-BAL ==== table" and
 // "SNAP-BAL ==== end", so it sits at the start of the balance section of the CI log:
 //   SNAP-BAL skill=casual score=5206 p10=… p90=… seconds=147.4 snaps=24.5 caught=70.5 stings=2.5 maxStings=6 …
-// tools/balance-sim.js (a line-by-line port) predicts on these 16 seeds (design/notes/core-R4.md):
-//   novice  191 protein    /  45 s / 10 snaps   / 1 sting (median) / 0 wilts
-//   casual  5,206          / 147 s / 24.5 snaps / 2.5 stings / longest chain 5 / 0 wilts
-//   expert  28,763         / 326 s / 43 snaps   / 0 stings / 3 wilts
-//   perfect 42,761         / 377 s / 43 snaps   / never stung / 3 wilts
-//   Sprout run 1 (SessionOptions.firstRun: 14 snaps, no wilting, the first sting free, a calm first morning):
-//   novice 105 s, casual 165 s
-// (8 seeds: casual 128 s, chain 5, 0 wilts; expert 3 wilts; perfect 366 s, 2 wilts; novice Sprout run 1 101 s.)
+// tools/balance-sim.js (a line-by-line port) predicts on these 16 seeds (design/notes/core-R5.md):
+//   novice  230 score      /  48 s / 10.5 snaps / 1 sting (median) / 0 wilts
+//   casual  4,875          / 141 s / 24 snaps   / 3 stings / longest chain 5 / 0 wilts
+//   expert  25,210         / 335 s / 43 snaps   / 0 stings / 2 wilts
+//   perfect 42,133         / 393 s / 43 snaps   / never stung / 2 wilts
+//   Sprout run 1 (SessionOptions.sprout(feedRun: 1): 14 snaps, no wilting, the first sting free, a calm morning):
+//   novice 101 s, casual 166 s. R5 taper: novice Sprout run 2 (13 snaps, free sting, calm) 100 s; run 3 (12, calm) 90 s.
+//   R5 (REVIEW-4 P2): expert / perfect without Tuning.pilotGiveUp (TrapPilot.givesUp false, reported only): 14 of 16
+//   capped at 600 s, 8 / 5 wilts. SNAP_BAL_NOGIVEUP=0 skips those runs.
+// (8 seeds: casual 128 s, chain 5, 0 wilts; expert 2 wilts; perfect 389 s, 2.5 wilts; novice Sprout runs 1 / 2 / 3
+// 98 / 95 / 85 s.)
 // R4 targets (asserted on medians): perfect runs 4–8 min (240–480 s) with ≤ 5 wilts; expert ≤ 6 wilts; casual runs
 // 100–240 s and 18–45 snaps, with a longest chain of 3–6 and ≤ 2 wilts; the novice and casual pilots' Sprout run 1
-// lasts ≥ 90 s and never wilts; plus R1's: novice < casual < expert ≤ perfect, perfect never stung, novice stung (R3:
+// lasts ≥ 90 s and never wilts; R5: the novice's Sprout run 2 lasts ≥ 75 s and run 3 ≥ 60 s; plus R1's: novice < casual < expert ≤ perfect, perfect never stung, novice stung (R3:
 // median ≥ 0.5). The late night (reactions × 0.96 per wave to 0.2, lingers × 0.92 to 0.2) ends every run, so no skill
 // may hit the 10-minute cap.
 
@@ -66,9 +69,21 @@ final class SnapBalanceMemo: @unchecked Sendable {
     private var built: Bool = false
     private var results: [PilotSkill: [SnapBalanceRun]] = [:]
     private var sprout: [PilotSkill: [SnapBalanceRun]] = [:]
+    /// R5: the novice's Sprout runs 2 and 3, by run.
+    private var taper: [Int: [SnapBalanceRun]] = [:]
+    /// R5: expert and perfect without Tuning.pilotGiveUp (reported only).
+    private var stubbornRuns: [PilotSkill: [SnapBalanceRun]] = [:]
 
     /// The skills whose Sprout run 1 is simulated too.
     static let sproutSkills: [PilotSkill] = [.novice, .casual]
+    /// R5 (REVIEW-4 #8): the taper runs simulated for the novice pilot.
+    static let taperRunNumbers: [Int] = [2, 3]
+    /// R5 (REVIEW-4 P2): the skills whose pilotGiveUp rule is reported both ways.
+    static let giveUpSkills: [PilotSkill] = [.expert, .perfect]
+
+    static var reportsNoGiveUp: Bool {
+        return ProcessInfo.processInfo.environment["SNAP_BAL_NOGIVEUP"] != "0"
+    }
 
     func runs(_ skill: PilotSkill) -> [SnapBalanceRun] {
         build()
@@ -85,9 +100,25 @@ final class SnapBalanceMemo: @unchecked Sendable {
         return sprout[skill] ?? []
     }
 
+    /// R5: the novice's Sprout run `run` (2 or 3) on every seed.
+    func taperRunResults(_ run: Int) -> [SnapBalanceRun] {
+        build()
+        lock.lock()
+        defer { lock.unlock() }
+        return taper[run] ?? []
+    }
+
+    private enum Kind {
+        case plain
+        /// Sprout Feed run n (1, 2 or 3).
+        case sprout(Int)
+        /// R5: the pilot without Tuning.pilotGiveUp.
+        case noGiveUp
+    }
+
     private struct Job {
         var skill: PilotSkill
-        var sprout: Bool
+        var kind: Kind
         var index: Int
     }
 
@@ -100,43 +131,76 @@ final class SnapBalanceMemo: @unchecked Sendable {
         for s in PilotSkill.allCases {
             var i: Int = 0
             while i < n {
-                jobs.append(Job(skill: s, sprout: false, index: i))
+                jobs.append(Job(skill: s, kind: .plain, index: i))
                 i += 1
             }
         }
         for s in SnapBalanceMemo.sproutSkills {
             var i: Int = 0
             while i < n {
-                jobs.append(Job(skill: s, sprout: true, index: i))
+                jobs.append(Job(skill: s, kind: .sprout(1), index: i))
                 i += 1
+            }
+        }
+        for run in SnapBalanceMemo.taperRunNumbers {
+            var i: Int = 0
+            while i < n {
+                jobs.append(Job(skill: .novice, kind: .sprout(run), index: i))
+                i += 1
+            }
+        }
+        if SnapBalanceMemo.reportsNoGiveUp {
+            for s in SnapBalanceMemo.giveUpSkills {
+                var i: Int = 0
+                while i < n {
+                    jobs.append(Job(skill: s, kind: .noGiveUp, index: i))
+                    i += 1
+                }
             }
         }
         let box = SnapBalanceBox()
         let list: [Job] = jobs
         DispatchQueue.concurrentPerform(iterations: list.count) { (k: Int) in
             let j: Job = list[k]
-            let options: SessionOptions = j.sprout ? SnapBalanceHarness.sproutRunOne : SessionOptions.for(.feed)
+            var options: SessionOptions = SessionOptions.for(.feed)
+            var givesUp: Bool = true
+            switch j.kind {
+            case .plain: break
+            case .sprout(let run): options = SnapBalanceHarness.sproutRun(run)
+            case .noGiveUp: givesUp = false
+            }
             let r: SnapBalanceRun = SnapBalanceHarness.runOne(j.skill, seed: SnapBalanceHarness.seed(j.index),
-                                                              options: options)
+                                                              options: options, givesUp: givesUp)
             box.put(k, r)
         }
         let done: [Int: SnapBalanceRun] = box.all()
         var plain: [PilotSkill: [SnapBalanceRun]] = [:]
         var first: [PilotSkill: [SnapBalanceRun]] = [:]
+        var later: [Int: [SnapBalanceRun]] = [:]
+        var stubborn: [PilotSkill: [SnapBalanceRun]] = [:]
         var k: Int = 0
         while k < list.count {
             let j: Job = list[k]
             if let r = done[k] {
-                if j.sprout {
-                    first[j.skill, default: []].append(r)
-                } else {
+                switch j.kind {
+                case .plain:
                     plain[j.skill, default: []].append(r)
+                case .sprout(let run):
+                    if run == 1 {
+                        first[j.skill, default: []].append(r)
+                    } else {
+                        later[run, default: []].append(r)
+                    }
+                case .noGiveUp:
+                    stubborn[j.skill, default: []].append(r)
                 }
             }
             k += 1
         }
         results = plain
         sprout = first
+        taper = later
+        stubbornRuns = stubborn
         built = true
         // One write, so the table is one block in the log (unbuffered: it survives a later crash of the runner).
         var lines: [String] = []
@@ -146,6 +210,23 @@ final class SnapBalanceMemo: @unchecked Sendable {
         }
         for s in SnapBalanceMemo.sproutSkills {
             lines.append("SNAP-BAL sprout1 " + SnapBalanceHarness.report(s, first[s] ?? [], prefix: ""))
+        }
+        // R5 (REVIEW-4 #8): the novice's Sprout runs 2 and 3 (the taper).
+        for run in SnapBalanceMemo.taperRunNumbers {
+            lines.append("SNAP-BAL sprout" + String(run) + " "
+                         + SnapBalanceHarness.report(.novice, later[run] ?? [], prefix: ""))
+        }
+        // R5 (REVIEW-4 P2): pilotGiveUp is the player model, not the game: the same expert and perfect runs without it.
+        if SnapBalanceMemo.reportsNoGiveUp {
+            for s in SnapBalanceMemo.giveUpSkills {
+                let withWilts: [Double] = (plain[s] ?? []).map { (r: SnapBalanceRun) -> Double in Double(r.wilts) }
+                let withCapped: Int = (plain[s] ?? []).filter { (r: SnapBalanceRun) -> Bool in r.capped }.count
+                let note: String = String(format: " (with pilotGiveUp: wilts=%.1f capped=%d)",
+                                          SnapBalanceHarness.percentile(withWilts, 0.5), withCapped)
+                lines.append("SNAP-BAL nogiveup " + SnapBalanceHarness.report(s, stubborn[s] ?? [], prefix: "") + note)
+            }
+        } else {
+            lines.append("SNAP-BAL nogiveup skipped (SNAP_BAL_NOGIVEUP=0)")
         }
         lines.append("SNAP-BAL ==== end ====")
         FileHandle.standardOutput.write(Data((lines.joined(separator: "\n") + "\n").utf8))
@@ -169,17 +250,24 @@ enum SnapBalanceHarness {
     /// R4: what the App passes for a Sprout's first Feed run: `startSnaps` 12 (every Sprout Feed run) and
     /// `firstRun`, which overrides it (14 snaps, no wilting, the first stinger bite free, a calm first morning).
     static var sproutRunOne: SessionOptions {
-        var o: SessionOptions = SessionOptions.for(.feed)
+        return sproutRun(1)
+    }
+
+    /// R5 (REVIEW-4 #8): Sprout Feed run `run` as the App builds it: SessionOptions.sprout(feedRun:) plus the Sprout
+    /// rank's `startSnaps` 12 (the taper's own snaps override it).
+    static func sproutRun(_ run: Int) -> SessionOptions {
+        var o: SessionOptions = SessionOptions.sprout(feedRun: run)
         o.startSnaps = 12
-        o.firstRun = true
         return o
     }
 
+    /// R5: `givesUp` false runs the pilot without Tuning.pilotGiveUp (TrapPilot.givesUp).
     static func runOne(_ skill: PilotSkill, seed: UInt64,
-                       options: SessionOptions = SessionOptions.for(.feed)) -> SnapBalanceRun {
+                       options: SessionOptions = SessionOptions.for(.feed), givesUp: Bool = true) -> SnapBalanceRun {
         let geometry = TrapGeometry(sceneSize: CGSize(width: ScreenLayout.canvasWidth, height: ScreenLayout.canvasHeight))
         let session = TrapSession(mode: .feed, seed: seed, best: 0, geometry: geometry, options: options)
         var pilot = TrapPilot(skill: skill, seed: seed &* 7 &+ 1)
+        pilot.givesUp = givesUp
         var t: Double = 0
         var frames: Int = 0
         var wilts: Int = 0
@@ -299,6 +387,21 @@ struct BalanceTests {
         #expect(runs.count == SnapBalanceHarness.seedCount)
         #expect(seconds >= 90, "Sprout run 1 seconds \(seconds): \(line)")
         #expect(wilts == 0, "Sprout run 1 never wilts: \(line)")
+        #expect(capped == 0, "\(line)")
+    }
+
+    /// R5 (REVIEW-4 #8, founder call): the taper keeps a weak hand's second and third Feed runs long: the novice
+    /// pilot's Sprout run 2 (13 snaps, a free sting, the calm morning) lasts ≥ 75 s and run 3 (12 snaps, the calm
+    /// morning) ≥ 60 s (median). Neither reaches the cap.
+    @Test(arguments: SnapBalanceMemo.taperRunNumbers)
+    func sproutTaperRunLasts(run: Int) {
+        let runs: [SnapBalanceRun] = SnapBalanceMemo.shared.taperRunResults(run)
+        let line: String = "sprout" + String(run) + " " + SnapBalanceHarness.report(.novice, runs)
+        let seconds: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in r.seconds }
+        let target: Double = run == 2 ? 75 : 60
+        let capped: Int = runs.filter { (r: SnapBalanceRun) -> Bool in r.capped }.count
+        #expect(runs.count == SnapBalanceHarness.seedCount)
+        #expect(seconds >= target, "Sprout run \(run) seconds \(seconds), target \(target): \(line)")
         #expect(capped == 0, "\(line)")
     }
 

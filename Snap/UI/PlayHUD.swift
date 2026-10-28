@@ -80,7 +80,13 @@ struct PlayLayer: View {
                     SnapsRing(rect: l.snaps, reduceMotion: controller.reduceMotion)
                         .allowsHitTesting(false)
                 }
-                if let gain = v.snapGain {
+                if let loss = v.snapLoss {
+                    // R5 (REVIEW-4 #7): a costly sting says what it cost, at the row ("−2 snaps").
+                    SnapGainTag(text: loss, compact: c, loss: true)
+                        .position(x: l.chain.midX, y: l.chain.minY - (c ? 14 : 18))
+                        .allowsHitTesting(false)
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                } else if let gain = v.snapGain {
                     SnapGainTag(text: gain, compact: c)
                         .position(x: l.chain.midX, y: l.chain.minY - (c ? 14 : 18))
                         .allowsHitTesting(false)
@@ -138,6 +144,7 @@ struct PlayLayer: View {
         .animation(SnapTheme.pop(controller.reduceMotion), value: v.chainMultiplier > 1.01)
         .animation(SnapTheme.pop(controller.reduceMotion), value: v.tired)
         .animation(SnapTheme.pop(controller.reduceMotion), value: v.snapGain)
+        .animation(SnapTheme.pop(controller.reduceMotion), value: v.snapLoss)
         .onAppear { reportAnchor(l, left: v.snapsLeft) }
         .onChange(of: info) { _, _ in
             reportAnchor(HUDLayout.make(info), left: hud.values.snapsLeft)
@@ -307,7 +314,7 @@ struct LessonPointer: View {
 
 // MARK: - HUD pieces
 
-/// The protein total (big, rounded heavy) and the best under it.
+/// The score (big, rounded heavy) and the best under it.
 struct ScoreBlock: View {
     let score: Int
     let best: Int
@@ -317,11 +324,12 @@ struct ScoreBlock: View {
     /// The Daily's "Daily Bog · 28 Oct" (nil outside a Daily).
     var daily: String? = nil
 
-    /// The line under the score: "NEW BEST", the Daily's name, "BEST 3,200" or "PROTEIN". Pure; tested.
+    /// The line under the score: "NEW BEST", the Daily's name, "BEST 3,200" or "SCORE" (R5, REVIEW-4 #13: the
+    /// founder's word; it was "PROTEIN"). Pure; tested.
     static func caption(passedBest: Bool, best: Int, daily: String?) -> String {
         if passedBest { return "NEW BEST" }
         if let daily { return daily.uppercased() }
-        return best > 0 ? "BEST " + AppRules.formatted(best) : "PROTEIN"
+        return best > 0 ? "BEST " + AppRules.formatted(best) : AppRules.scoreWord.uppercased()
     }
 
     var body: some View {
@@ -343,7 +351,7 @@ struct ScoreBlock: View {
                 .snapLegible()
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Protein \(score)" + (best > 0 ? ", best \(best)" : ""))
+        .accessibilityLabel("Score \(score)" + (best > 0 ? ", best \(best)" : ""))
     }
 }
 
@@ -414,8 +422,9 @@ struct SnapsRow: View {
                              size: layout.glyph)
                         .position(layout.glyphCenter(i))
                 }
+                // R5 (REVIEW-4 #13: "tiny next to the big score"): the numeral is set at the layout's size.
                 Text("\(shown)")
-                    .font(.system(size: layout.glyph > 18 ? 17 : 15, weight: .heavy, design: .rounded).monospacedDigit())
+                    .font(.system(size: layout.numeralSize, weight: .heavy, design: .rounded).monospacedDigit())
                     .foregroundStyle(shown <= 1 || hungry ? SnapTheme.danger : SnapTheme.cream)
                     .lineLimit(1)
                     .fixedSize()
@@ -456,19 +465,21 @@ struct SnapsRing: View {
     }
 }
 
-/// The first Feast's one-time label over the snaps ("+1 snap", REVIEW-2 #12).
+/// The first Feast's one-time label over the snaps ("+1 snap", REVIEW-2 #12). R5 (REVIEW-4 #7): `loss` is its crimson
+/// mirror for a costly sting ("−1 snap", "−2 snaps").
 struct SnapGainTag: View {
     let text: String
     let compact: Bool
+    var loss = false
 
     var body: some View {
         Text(text)
             .font(.system(size: compact ? 15 : 18, weight: .black, design: .rounded))
-            .foregroundStyle(SnapTheme.ink)
+            .foregroundStyle(loss ? SnapTheme.cream : SnapTheme.ink)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(Capsule().fill(SnapTheme.limeLight))
-            .overlay(Capsule().stroke(SnapTheme.lime, lineWidth: 1.5))
+            .background(Capsule().fill(loss ? SnapTheme.crimson : SnapTheme.limeLight))
+            .overlay(Capsule().stroke(loss ? SnapTheme.pink : SnapTheme.lime, lineWidth: 1.5))
             .fixedSize()
             .shadow(color: SnapTheme.shadow.opacity(0.5), radius: 6, y: 2)
     }
@@ -629,7 +640,7 @@ struct PauseMenu: View {
                     Text("Home")
                 }
                 if controller.isScoredDaily {
-                    Text("Leaving keeps today's protein so far.")
+                    Text("Leaving keeps today's score so far.")
                         .font(SnapType.caption(c))
                         .foregroundStyle(SnapTheme.mist)
                         .multilineTextAlignment(.center)
@@ -775,9 +786,11 @@ struct LessonFinalCard: View {
     /// The HUD hugs the right edge (the pointer arrow aims at the snaps' corner).
     var trailing = true
 
-    /// R4 (REVIEW-3 #10): the chain is named on the card.
-    static let rules = "Every snap costs one. Three bugs in one bite give one back. Bees and wasps cost more. "
-        + "Wait too long and a snap wilts. " + AppRules.chainLesson
+    /// R4 (REVIEW-3 #10): the chain is named on the card. R5 (REVIEW-4 #13, founder call): at most three short
+    /// sentences (the bee step taught the stinger cost, and "Too slow! −1 snap" teaches the wilt when it happens).
+    static let rules = "Every snap costs one. Three bugs in one bite give one back. " + AppRules.chainLesson
+    /// The card's sentence cap (tested).
+    static let maxSentences = 3
     static let snapsLine = "These are your snaps"
 
     var body: some View {

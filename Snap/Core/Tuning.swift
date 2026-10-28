@@ -6,7 +6,8 @@ import Foundation
 // Nothing is hard-coded elsewhere in Core. tools/balance-sim.js mirrors the balance-relevant values in its `T` table
 // (same names) and the detector values in its `D` table: KEEP THEM IDENTICAL. R1 tuning (design/notes/core-R1.md)
 // changed some GAME-DESIGN starting values; each change is marked "R1". R2 changes (design/notes/core-R2.md) are
-// marked "R2", R3 changes (design/notes/core-R3.md) "R3", R4 changes (design/notes/core-R4.md) "R4".
+// marked "R2", R3 changes (design/notes/core-R3.md) "R3", R4 changes (design/notes/core-R4.md) "R4", R5 changes
+// (design/notes/core-R5.md) "R5".
 
 enum Tuning {
 
@@ -63,6 +64,12 @@ enum Tuning {
     /// snaps alone: a hand that bites every landing spends a snap per wave).
     static let firstRunCalmWaves: Int = 14
     static let firstRunWaveGap: Double = 1.6
+    /// R5 (REVIEW-4 #8, founder call): the Sprout taper (SproutPerks.forFeedRun). Feed run 1 is the first run above;
+    /// run 2 starts with sproutRun2Snaps, a free first sting and the calm morning (it wilts); run 3 with
+    /// sproutRun3Snaps and the calm morning. From run sproutTaperRuns + 1 the rules are standard.
+    static let sproutRun2Snaps: Int = 13
+    static let sproutRun3Snaps: Int = 12
+    static let sproutTaperRuns: Int = 3
     static let snapCost: Int = 1
     /// Caught ≥ feastCount: +feastRefund; caught ≥ bigFeastCount: +bigFeastRefund (instead).
     static let feastCount: Int = 3
@@ -216,6 +223,12 @@ enum Tuning {
     /// to the bug's own lobe, and a walker walks in on its spot's side, so only approaches (height ≥ 0.5), crossers
     /// (0.85), take-offs and the caught slide ever pass over the crease.
     static let creaseAirHeight: Double = 0.5
+    /// R5 (REVIEW-4 #15): the Duo's book-pose thumbs rest on the outer edges at mid-height. No protected bug's entry
+    /// lies within thumbBandWidth pt of either outer edge with its y strictly between thumbBandLow and thumbBandHigh
+    /// of the scene height (WaveFactory.thumbSafeEntry mirrors such a y out of the band; no extra draws).
+    static let thumbBandWidth: Double = 90
+    static let thumbBandLow: Double = 0.25
+    static let thumbBandHigh: Double = 0.75
 
     // MARK: Session
 

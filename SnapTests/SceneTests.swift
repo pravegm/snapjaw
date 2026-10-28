@@ -641,12 +641,14 @@ struct SceneTests {
         #expect(lit.r > 2 * lit.b && lit.r > 2 * lit.g)
         let dusk = BogLight.lobeLight(BogLight.key(at: 2)).1
         #expect(dusk > CGFloat(0.05) && dusk < CGFloat(0.25))
-        // Dusk shows: a warm rim light on the lobes and a peach bog.
+        // Dusk shows: R5 (#9) a peach sky glow on the bog (under the trap), and only a faint warm rim on the lobes
+        // (kept off the margin: no salmon ring).
         s.dayClock = 2
         scene.show(s, events: [], dt: 1.0 / 60.0)
-        #expect(scene.rimLightAlpha > CGFloat(0.4))
+        #expect(scene.bogSkyAlpha > CGFloat(0.25))
+        #expect(scene.rimLightAlpha < CGFloat(0.15))
         let k = BogLight.key(at: 2)
-        #expect(k.env.r > 0.95 && k.env.b < 0.65 && k.hazeAlpha > 0.2)
+        #expect(k.env.r > 0.95 && k.env.g < k.env.b && k.skyAlpha > 0.25)
     }
 
     @Test func theTrapIsAFlytrapNotAWatermelon() {
@@ -1024,12 +1026,13 @@ struct SceneTests {
             let lc = BogLight.lightClock(clock(wave: w))
             let k = BogLight.key(at: lc)
             #expect(lc >= 2 && lc < 2.1)
-            #expect(k.env.g < 0.75 && k.env.b < 0.6 && k.env.r > 0.95)
-            #expect(k.hazeAlpha > 0.2 && k.rimAlpha > 0.4)
+            // R5 (#9): the multiply keeps its blue and cuts the green (the R4 one cut the blue: olive-khaki).
+            #expect(k.env.g < 0.75 && k.env.b > k.env.g && k.env.r > 0.95)
+            #expect(k.skyAlpha > 0.25 && k.rimAlpha <= 0.15)
             // The trap warms at dusk but never lightens towards salmon: its overlay is a deep warm, never a pale peach.
             #expect(BogPaint.luminance(k.lobe) < BogPaint.luminance(RGBA(hex: 0xF08080)))
             #expect(BogLight.nightness(lc) < CGFloat(0.05))
-            #expect(k.liftAlpha > 0.05 && k.lift.b < 0.5)
+            #expect(k.liftAlpha > 0.05 && k.lift.r > k.lift.g)
         }
         // Noon (waves 7–14) is held white and higher-key than the morning.
         for w in stride(from: 7.0, to: 15.0, by: 1) {
@@ -1045,8 +1048,8 @@ struct SceneTests {
         var s = SceneTests.crowd()
         s.dayClock = clock(wave: 18)
         scene.show(s, events: [], dt: 1.0 / 60.0)
-        #expect(scene.rimLightAlpha > CGFloat(0.4))
-        #expect(scene.bogLiftAlpha > CGFloat(0.05) && scene.bogLiftColor.b < 0.5)
+        #expect(scene.bogSkyAlpha > CGFloat(0.25) && scene.rimLightAlpha < CGFloat(0.15))
+        #expect(scene.bogLiftAlpha > CGFloat(0.05) && scene.bogLiftColor.r > scene.bogLiftColor.g)
         s.dayClock = clock(wave: 22.8)
         for _ in 0..<10 { scene.show(s, events: [], dt: 1.0 / 60.0) }
         #expect(scene.nightLevel < CGFloat(0.05))
@@ -1115,34 +1118,85 @@ struct SceneTests {
         #expect(scene.livePopRects.isEmpty)
     }
 
-    /// REVIEW-3 #16: the isolated trap, 3/4-tilted like the icon, with its leaf back and petiole leaf (never a centred
-    /// vertical slit), optionally with a sipping bug.
-    @Test func theIsolatedTrapIsThreeQuarterTilted() {
+    /// REVIEW-4 #6 (was REVIEW-3 #16): one hero trap, the icon's own drawing (`AppIconPainter`'s curves scaled from
+    /// its ±320 corners), tilted like the icon (the right corner up), jaws open: a crimson face with no stipple, a lime
+    /// margin and a lime lip, cilia on both lips, a green front lobe and stem; optionally a sipping fly.
+    @Test func theHeroTrapIsTheIconsTrap() {
         let img = TrapArt.trapImage(style: .threeQuarter, width: 300, scale: 1)
         #expect(img != nil)
         guard let im = img else { return }
         #expect(abs(CGFloat(im.width) - CGFloat(300)) < CGFloat(2))
         let aspect = CGFloat(im.height) / CGFloat(im.width)
         #expect(abs(aspect - TrapArt.threeQuarterAspect) < CGFloat(0.02))
-        #expect(TrapPose.tilt < CGFloat(-0.1) && TrapPose.tilt > CGFloat(-0.35))
+        // At most square (the cover and the pose card clamp the aspect to ≤ 1; a badge disc is square).
+        #expect(aspect > CGFloat(0.6) && aspect <= CGFloat(1.0), "aspect \(aspect)")
+        // The icon's geometry and tilt (its −0.2 rad in y-down space is +0.2 here, y up).
+        #expect(abs(TrapPose.tilt - CGFloat(0.2)) < CGFloat(0.0001))
+        #expect(abs(TrapPose.unit * 320 - TrapPose.halfSpan) < CGFloat(0.0001))
+        #expect(abs(TrapPose.backRim.point(0.5).y - TrapPose.height) < CGFloat(0.5))
+        #expect(abs(TrapPose.frontLip.point(0.5).y - TrapPose.icon(0, 123.75).y) < CGFloat(0.5))
         // Where trap-frame points land in the image.
         let box = TrapPose.bounds()
         let k = CGFloat(300) / box.width
-        func px(_ p: CGPoint) -> RGBA {
+        func spot(_ p: CGPoint) -> (Int, Int) {
             let q = p.applying(TrapPose.turn)
-            return SceneTests.average(im, x: Int((q.x - box.minX) * k), yUp: Int((q.y - box.minY) * k), n: 1)
+            return (Int((q.x - box.minX) * k), Int((q.y - box.minY) * k))
         }
-        let L = TrapPose.halfSpan, H = TrapPose.height
-        // The back lobe's face is crimson; the front lobe shows its green leaf back; the petiole leaf is green.
-        let face = px(CGPoint(x: -L * 0.05, y: H * 0.85))
+        func px(_ p: CGPoint, n: Int = 1) -> RGBA {
+            let (x, y) = spot(p)
+            return SceneTests.average(im, x: x, yUp: y, n: n)
+        }
+        // The open mouth: the back lobe's crimson face, smooth (no stipple at hero size: a 7 × 7 window barely varies).
+        let mouth = TrapPose.icon(150, -130)
+        let face = px(mouth)
         #expect(face.r > 2 * face.g && face.a > 0.9)
-        let front = px(CGPoint(x: L * 0.1, y: -H * 0.45))
-        #expect(front.g > front.r && front.a > 0.9)
-        let stalk = px(CGPoint(x: -L * 0.55, y: -H * 1.25))
+        let (fx, fy) = spot(mouth)
+        var lo = 1.0, hi = 0.0
+        for dx in -3...3 {
+            for dy in -3...3 {
+                let l = BogPaint.luminance(SceneTests.pixel(im, x: fx + dx, yUp: fy + dy))
+                lo = min(lo, l)
+                hi = max(hi, l)
+            }
+        }
+        #expect(hi - lo < 0.05, "face varies \(lo)…\(hi)")
+        // The lime margin on the back lobe (just outside its rim) and the lime lip on the front one.
+        let backMargin = px(TrapPose.icon(0, -284))
+        #expect(backMargin.g > backMargin.r && backMargin.r > 2 * backMargin.b && backMargin.a > 0.9)
+        let lip = px(TrapPose.icon(0, 123.75))
+        #expect(lip.g > lip.r && lip.r > 2 * lip.b && lip.a > 0.9)
+        // The back lobe's green outside, as a band beyond the margin; the front lobe's green outside; the stem.
+        let band = px(TrapPose.icon(0, -304))
+        #expect(band.g > band.r && band.a > 0.9)
+        let front = px(TrapPose.icon(60, 180))
+        #expect(front.g > front.r && front.g > front.b && front.a > 0.9)
+        let stalk = px(TrapPose.icon(-130, 265))
         #expect(stalk.g > stalk.r && stalk.a > 0.9)
-        // The hinge is turned (not a vertical slit): the corners sit at different heights, side by side.
+        // Cilia on both lips, pointing away from the mouth: a crown on the back, a fringe on the front.
+        let crown = TrapPose.backCilia(), fringe = TrapPose.frontCilia()
+        #expect(crown.count == 13 && fringe.count == 8)
+        let mid = CGPoint(x: 0, y: TrapPose.height * 0.3)
+        for h in crown {
+            let tx = h.tip.x - mid.x, ty = h.tip.y - mid.y, bx = h.base.x - mid.x, by = h.base.y - mid.y
+            let dTip = (tx * tx + ty * ty).squareRoot(), dBase = (bx * bx + by * by).squareRoot()
+            #expect(dTip > dBase + h.length * CGFloat(0.5))
+        }
+        let mouthPath = TrapPose.facePath()
+        for h in crown { #expect(!mouthPath.contains(h.tip)) }
+        // The fringe hangs below the hinge line, over the front lobe's outside, never into the mouth.
+        for h in fringe { #expect(h.tip.y < CGFloat(0) && !mouthPath.contains(h.tip)) }
+        // The middle hair is drawn cream beyond the band (on its centre line, 60 % along the shape's curves).
+        let m = crown[6]
+        let body = CGPoint(x: m.base.x + m.dir.x * m.length * 0.6, y: m.base.y + m.dir.y * m.length * 0.6)
+        let centre = CGPoint(x: 0.16 * m.base.x + 0.48 * body.x + 0.36 * m.tip.x,
+                             y: 0.16 * m.base.y + 0.48 * body.y + 0.36 * m.tip.y)
+        let hair = px(centre, n: 0)
+        #expect(BogPaint.luminance(hair) > 0.5 && hair.a > 0.5, "hair \(hair.r) \(hair.g) \(hair.b) \(hair.a)")
+        // The hinge is turned like the icon's (the right corner higher), not a vertical slit.
         let l = TrapPose.cornerL.applying(TrapPose.turn), r = TrapPose.cornerR.applying(TrapPose.turn)
-        #expect(r.x - l.x > CGFloat(250) && abs(r.y - l.y) > CGFloat(20))
+        #expect(r.x - l.x > CGFloat(250) && r.y - l.y > CGFloat(20))
+        // The fly sits on the open face.
+        #expect(TrapPose.facePath().contains(TrapPose.bugSpot))
         // With a sipping bug the face changes where it sits; without one it doesn't.
         let fed = TrapArt.trapImage(style: .threeQuarter, width: 300, scale: 1, sippingBug: .housefly)
         #expect(fed != nil && fed?.width == im.width && fed?.height == im.height)
@@ -1244,5 +1298,234 @@ struct SceneTests {
         #expect(jaws.hungerDroop > CGFloat(0.7))
         for _ in 0..<90 { jaws.show(j, events: [], dt: 1.0 / 120.0) }
         #expect(jaws.hungerDroop < CGFloat(0.01))
+    }
+
+    // MARK: R5
+
+    /// REVIEW-4 #3: the release never reads as a plum or a bottom. The face darkens only while closing; from 80 ms
+    /// into the release it is the open-state crimson again, with the cilia out, the closed trap gone and the lobes wide,
+    /// even with the hands still shut (the Duo); once the hands close again, it darkens with them again.
+    @Test func theReleaseIsCrimsonWithinEightyMs() {
+        #expect(BogJaws.releaseFade <= 0.08 + 1e-9)
+        #expect(BogJaws.biteShade(slam: 1, t: 0.1) > CGFloat(0.999))
+        #expect(BogJaws.biteShade(slam: 1, t: BogJaws.holdEnd + BogJaws.releaseFade) < CGFloat(0.001))
+        #expect(BogJaws.squeezeLevel(t: 0.1) > CGFloat(0.999))
+        #expect(BogJaws.squeezeLevel(t: BogJaws.holdEnd + BogJaws.releaseFade) < CGFloat(0.5))
+
+        let scene = BogScene(layout: SceneTests.duo)
+        let g = SceneTests.geometry
+        let fly = CGPoint(x: g.center.x - 220, y: g.center.y + 50)
+        var s = TrapSnapshot(bugs: [SceneTests.bug(1, .housefly, fly, .sipping)])
+        for _ in 0..<4 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        #expect(scene.faceShade < CGFloat(0.01))
+        // Closing darkens (the hands at the snap depth).
+        s.closure = Tuning.snapDepth
+        scene.show(s, events: [], dt: 1.0 / 120.0)
+        #expect(scene.faceShade > CGFloat(0.5))
+        // The bite; the hands stay at the snap depth through the release.
+        s.bugs[0].activity = .caught(elapsed: 0)
+        let report = BiteReport(caught: [.housefly], escaped: 0, stingers: [], points: 10, countMultiplier: 1,
+                                chainMultiplier: 1, snapsBack: 0, snapsLost: 0, duration: 0.1, time: 1)
+        scene.show(s, events: [.snapped(report), .bugCaught(id: 1, species: .housefly, position: fly)],
+                   dt: 1.0 / 120.0)
+        let face = TrapArt.palette.lobeOuter
+        let dark = RGBA(hex: 0x24030D)
+        var t = 1.0 / 120.0
+        var shutDark = false
+        var checked = 0
+        while t < 0.5 {
+            scene.show(s, events: [], dt: 1.0 / 120.0)
+            t += 1.0 / 120.0
+            if t < BogJaws.holdEnd && scene.biteShade > CGFloat(0.9) { shutDark = true }
+            if t >= BogJaws.holdEnd + BogJaws.releaseFade + 0.001 {
+                checked += 1
+                #expect(scene.faceShade < CGFloat(0.02), "shade \(scene.faceShade) at \(t)")
+                let shown = face.mixed(with: dark, Double(scene.faceShade))
+                #expect(shown.r > 2.5 * shown.g && BogPaint.luminance(shown) > 0.9 * BogPaint.luminance(face))
+                #expect(scene.ciliaAlpha > CGFloat(0.98))
+                #expect(scene.toothReach > CGFloat(0.9))
+                #expect(scene.closedTrapAlpha < CGFloat(0.01))
+                #expect(scene.lobeScale > CGFloat(0.65))
+            }
+        }
+        #expect(shutDark)
+        #expect(checked > 10)
+        // Opening a little more keeps it crimson; closing again darkens it again.
+        s.closure = Tuning.snapDepth * 0.6
+        for _ in 0..<6 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        #expect(scene.faceShade < CGFloat(0.05))
+        s.closure = Tuning.snapDepth
+        for _ in 0..<40 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        #expect(scene.faceShade > CGFloat(0.5))
+    }
+
+    /// REVIEW-4 #12 (18: "DOUBLE ×2 · +32" on a bug): no pop is ever placed over a free bug.
+    @Test func popsNeverSitOnABug() {
+        let scene = BogScene(layout: SceneTests.duo)
+        let g = SceneTests.geometry
+        let low = g.center.y - g.b
+        let c1 = CGPoint(x: g.center.x - 230, y: low + 70)
+        let c2 = CGPoint(x: g.center.x - 170, y: low + 60)
+        var s = TrapSnapshot(bugs: [
+            SceneTests.bug(1, .housefly, c1, .sipping), SceneTests.bug(2, .gnat, c2, .sipping),
+            // Bugs round the spot the callout would take, just above the crowd.
+            SceneTests.bug(3, .housefly, CGPoint(x: g.center.x - 200, y: low + 150), .sipping),
+            SceneTests.bug(4, .bee, CGPoint(x: g.center.x - 300, y: low + 140), .walking),
+            SceneTests.bug(5, .ladybird, CGPoint(x: g.center.x - 110, y: low + 200), .sipping),
+        ])
+        for _ in 0..<3 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        s.bugs[0].activity = .caught(elapsed: 0)
+        s.bugs[1].activity = .caught(elapsed: 0)
+        let report = BiteReport(caught: [.housefly, .gnat], escaped: 0, stingers: [], points: 32, countMultiplier: 2,
+                                chainMultiplier: 1, snapsBack: 0, snapsLost: 0, duration: 0.1, time: 1)
+        scene.show(s, events: [.snapped(report), .bugCaught(id: 1, species: .housefly, position: c1),
+                               .bugCaught(id: 2, species: .gnat, position: c2), .newBest], dt: 1.0 / 120.0)
+        let freeBugs = scene.bugRects
+        #expect(freeBugs.count == 3)
+        var seen = 0
+        for _ in 0..<40 {
+            scene.show(s, events: [], dt: 1.0 / 120.0)
+            for r in scene.popRects {
+                seen += 1
+                for b in freeBugs { #expect(!r.intersects(b), "pop \(r) on bug \(b)") }
+            }
+        }
+        #expect(seen > 0)
+        #expect(scene.popTexts.contains("DOUBLE ×2 · +32"))
+    }
+
+    /// REVIEW-4 #12 (42: a glyph over "Golden!", and "+300 / ×2 held / Golden!" stacked): the lines under a callout
+    /// spread out (no two pops overlap), and the glyphs a bite wins fly round the live pops.
+    @Test func stackedPopsSpreadOutAndGlyphsMissThem() {
+        let scene = BogScene(layout: SceneTests.duo)
+        scene.hudSnapsAnchor = CGPoint(x: 760, y: 40)
+        let g = SceneTests.geometry
+        let p1 = CGPoint(x: g.center.x - 250, y: g.center.y + 20)
+        let p2 = CGPoint(x: g.center.x - 190, y: g.center.y - 10)
+        let p3 = CGPoint(x: g.center.x - 220, y: g.center.y + 60)
+        var s = TrapSnapshot(bugs: [SceneTests.bug(1, .housefly, p1, .sipping),
+                                    SceneTests.bug(2, .housefly, p2, .sipping),
+                                    SceneTests.bug(3, .goldenScarab, p3, .sipping)])
+        s.snapsLeft = 8
+        for _ in 0..<3 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        for i in 0..<3 { s.bugs[i].activity = .caught(elapsed: 0) }
+        s.snapsLeft = 10
+        let report = BiteReport(caught: [.housefly, .housefly, .goldenScarab], escaped: 0, stingers: [], points: 300,
+                                countMultiplier: 3, chainMultiplier: 2, snapsBack: 2, snapsLost: 0, duration: 0.1,
+                                time: 1)
+        scene.show(s, events: [.snapped(report), .bugCaught(id: 1, species: .housefly, position: p1),
+                               .bugCaught(id: 2, species: .housefly, position: p2),
+                               .bugCaught(id: 3, species: .goldenScarab, position: p3),
+                               .luckySnap(species: .goldenScarab), .feast(count: 3, snapsBack: 2)], dt: 1.0 / 120.0)
+        let texts = scene.popTexts
+        #expect(texts.contains("Golden!") && texts.contains("×2 held"))
+        // The glyphs' arcs never cross "Golden!" (its own footprint, without the plate clearance).
+        let live = scene.livePopRects
+        let paths = scene.glyphPaths
+        #expect(paths.count == 2)
+        if let gi = texts.firstIndex(of: "Golden!"), gi < live.count {
+            let golden = live[gi].insetBy(dx: BogPops.clearance + 2, dy: BogPops.clearance + 2)
+            let gs = BogTextures.glyphSize
+            for path in paths {
+                for p in path {
+                    let box = CGRect(x: p.x - gs.width / 2, y: p.y - gs.height / 2, width: gs.width, height: gs.height)
+                    #expect(!box.intersects(golden), "glyph at \(p) over Golden! \(golden)")
+                }
+            }
+        } else {
+            Issue.record("no Golden! pop")
+        }
+        // No two pops overlap at any moment of their rise.
+        var pairs = 0
+        for _ in 0..<60 {
+            scene.show(s, events: [], dt: 1.0 / 120.0)
+            let rects = scene.popRects
+            for i in 0..<rects.count {
+                for j in (i + 1)..<max(rects.count, i + 1) {
+                    pairs += 1
+                    #expect(!rects[i].intersects(rects[j]), "\(rects[i]) overlaps \(rects[j])")
+                }
+            }
+        }
+        #expect(pairs > 0)
+    }
+
+    /// REVIEW-4 #10: a dry snap says so: "Missed!" in a pale puff beside the seam, on the half without the HUD, clear
+    /// of the crease.
+    @Test func aDrySnapSaysMissed() {
+        #expect(BogScene.missedLabel == "Missed!")
+        // Pale and quiet, never the score's gold.
+        #expect(BogScene.missedColor.b > TrapArt.palette.gold.b + 0.3)
+        for hudLeft in [false, true] {
+            let layout = ScreenLayout(hasFold: true, hudOnLeft: hudLeft)
+            let scene = BogScene(layout: layout)
+            let s = TrapSnapshot()
+            scene.show(s, events: [], dt: 1.0 / 120.0)
+            let dry = BiteReport(caught: [], escaped: 0, stingers: [], points: 0, countMultiplier: 0,
+                                 chainMultiplier: 1, snapsBack: 0, snapsLost: 1, duration: 0.1, time: 1)
+            scene.show(s, events: [.snapped(dry), .drySnap, .chainBroken(count: 2)], dt: 1.0 / 120.0)
+            for _ in 0..<6 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+            #expect(scene.activeEffects > 0)
+            let texts = scene.popTexts, rects = scene.popRects
+            if let i = texts.firstIndex(of: BogScene.missedLabel), i < rects.count {
+                let r = rects[i]
+                if hudLeft {
+                    #expect(r.minX >= layout.creaseMaxX + BogScene.creaseClear - CGFloat(0.5))
+                } else {
+                    #expect(r.maxX <= layout.creaseMinX - BogScene.creaseClear + CGFloat(0.5))
+                }
+                #expect(abs(r.midX - layout.midX) < CGFloat(200))
+            } else {
+                Issue.record("no Missed! pop")
+            }
+        }
+    }
+
+    /// REVIEW-4 #9: dusk is peach/rose, not olive-khaki; the warm sky is on the bog only, and the trap's rim light is
+    /// faint (no salmon ring at the margin).
+    @Test func duskIsPeachNotOlive() {
+        let bog = TrapArt.palette.bog
+        let dusk = BogLight.key(at: 2)
+        let top = BogLight.litBog(bog, key: dusk, skyLevel: 1)
+        // Peach at the top: red leads, and the blue holds up (olive is red ≈ green over a sunken blue).
+        #expect(top.r >= top.g && top.b > 0.7 * top.g, "top \(top.r) \(top.g) \(top.b)")
+        // The R4 dusk (12, 16, 37) fails the same check.
+        var r4 = dusk
+        r4.env = RGBA(1.0, 0.7, 0.52)
+        r4.haze = RGBA(1, 0.58, 0.34)
+        r4.hazeAlpha = 0.22
+        r4.lift = RGBA(1, 0.62, 0.38)
+        r4.liftAlpha = 0.14
+        r4.skyAlpha = 0
+        let old = BogLight.litBog(bog, key: r4, skyLevel: 1)
+        #expect(old.b < 0.7 * old.g)
+        // Low down the bog stays a bog (green leads), never pink.
+        let low = BogLight.litBog(bog, key: dusk, skyLevel: 0)
+        #expect(low.g > low.r)
+        // Over the trap: only a faint haze and a faint rim.
+        #expect(dusk.hazeAlpha <= 0.12 && dusk.rimAlpha <= 0.15)
+    }
+
+    /// REVIEW-4 #15 (10: 960,250; 41: 985,780): nothing ever looks as if it rests on the hinge. A bug over the crease
+    /// is drawn 1.1× with its shadow pushed out; away from it, nothing changes.
+    @Test func nothingRestsOnTheHinge() {
+        #expect(BogBugLayer.creaseLift(dx: 0, radius: 20) > CGFloat(0.999))
+        #expect(BogBugLayer.creaseLift(dx: 200, radius: 20) < CGFloat(0.001))
+        #expect(BogBugLayer.creaseLift(dx: .nan, radius: 20) < CGFloat(0.001))
+        let scene = BogScene(layout: SceneTests.duo)
+        let g = SceneTests.geometry
+        let s = TrapSnapshot(bugs: [
+            SceneTests.bug(1, .housefly, CGPoint(x: g.center.x + 4, y: g.center.y + 60), .arriving, height: 0.1),
+            SceneTests.bug(2, .housefly, CGPoint(x: g.center.x - 220, y: g.center.y + 60), .arriving, height: 0.1),
+        ])
+        for _ in 0..<3 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        #expect((scene.creaseCue(ofBug: 1) ?? 0) > CGFloat(0.99))
+        #expect((scene.creaseCue(ofBug: 2) ?? 1) < CGFloat(0.01))
+        let over = scene.drawnScale(ofBug: 1) ?? 0, away = scene.drawnScale(ofBug: 2) ?? 0
+        #expect(over > away * CGFloat(1.09))
+        let shadowOver = scene.shadowOffset(ofBug: 1) ?? .zero, shadowAway = scene.shadowOffset(ofBug: 2) ?? .zero
+        #expect(shadowOver.x >= BogBugLayer.creaseShadow.x - CGFloat(0.01))
+        #expect(shadowOver.y <= BogBugLayer.creaseShadow.y + CGFloat(0.01))
+        #expect(shadowAway.x < CGFloat(5))
     }
 }

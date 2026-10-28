@@ -67,6 +67,9 @@ struct TrapPilot {
     }
 
     let skill: PilotSkill
+    /// R5 (REVIEW-4 P2): false switches off the Tuning.pilotGiveUp rule (the player model, not the game). The balance
+    /// report runs expert and perfect both ways; everything else keeps the default.
+    var givesUp: Bool = true
     private let profile: Profile
     private var rng: SeededRandom
     private var stage: Stage = .idle
@@ -191,12 +194,12 @@ struct TrapPilot {
             want = v.catchable >= 3 || (v.catchable >= 1 && v.value >= Tuning.expertValue)
                 || (v.catchable >= 2 && v.restless >= Tuning.expertRestless)
                 || (v.catchable >= 1 && waited >= Tuning.expertPatience)
-                || (v.landed >= 1 && waited >= Tuning.pilotGiveUp)
+                || (givesUp && v.landed >= 1 && waited >= Tuning.pilotGiveUp)
         case .perfect:
             want = v.catchable >= 5 || (v.catchable >= 3 && v.arriving == 0)
                 || (v.catchable >= 3 && v.restless >= Tuning.perfectRestless) || v.value >= Tuning.perfectValue
                 || (v.catchable >= 1 && waited >= Tuning.perfectPatience)
-                || (v.landed >= 1 && waited >= Tuning.pilotGiveUp)
+                || (givesUp && v.landed >= 1 && waited >= Tuning.pilotGiveUp)
         }
         if !want { return false }
         return !beeBlocks(snap)

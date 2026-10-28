@@ -106,17 +106,20 @@ struct BugBookCard: View {
                 }
                 .frame(width: compact ? 44 : 56, height: compact ? 44 : 56)
                 VStack(alignment: .leading, spacing: 1) {
+                    // R5 (REVIEW-4 #12, 29: "Golden Scarab" wrapped and pushed its count under the fade): one line,
+                    // shrinking to fit.
                     Text(found ? info.name : "???")
                         .font(SnapType.headline(compact))
                         .foregroundStyle(SnapTheme.cream)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.75)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                     if found {
                         Text(Self.countLine(species, data: data))
                             .font(SnapType.caption(compact).monospacedDigit())
                             .foregroundStyle(species.isProtected ? SnapTheme.bee : SnapTheme.gold)
                             .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .layoutPriority(1)
                     }
                 }
                 Spacer(minLength: 0)

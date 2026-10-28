@@ -54,6 +54,13 @@ struct HomeView: View {
 
     // MARK: Title
 
+    /// R5 (REVIEW-4 #12, 03: "Snap it shut a little" was on the subtitle and the clap card): on a Duo the subtitle
+    /// gives the rule and the clap card the move.
+    static let foldSubtitle = "Wait for a crowd, then bite."
+    static let touchSubtitle = "Tap the trap. It bites!"
+
+    static func subtitle(foldInput: Bool) -> String { foldInput ? foldSubtitle : touchSubtitle }
+
     private func titleBlock(_ c: Bool) -> some View {
         let rank = store.rank
         let progress = ProgressRules.rankProgress(lifetime: store.data.lifetimeBugs, rank: rank)
@@ -66,17 +73,24 @@ struct HomeView: View {
                 .minimumScaleFactor(0.6)
                 .shadow(color: SnapTheme.crimsonDeep, radius: 0, x: 0, y: 4)
                 .snapLegible()
-            Text(AppBrand.tagline)
-                .font(SnapType.headline(c))
-                .foregroundStyle(SnapTheme.cream)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .snapLegible()
-            Text(controller.showsFoldInput(info) ? "Snap it shut a little. It bites!" : "Tap the trap. It bites!")
-                .font(SnapType.caption(c))
-                .foregroundStyle(SnapTheme.mist)
-                .snapLegible()
+            // R5 (REVIEW-4 #12, 01–02: the attract fly sat on "bees."): the tagline and the subtitle sit on the rank's
+            // card, so a bug of the live bog passes under them, never across the words.
             VStack(alignment: .leading, spacing: 6) {
+                VStack(spacing: 2) {
+                    Text(AppBrand.tagline)
+                        .font(SnapType.headline(c))
+                        .foregroundStyle(SnapTheme.cream)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    Text(Self.subtitle(foldInput: controller.showsFoldInput(info)))
+                        .font(SnapType.caption(c))
+                        .foregroundStyle(SnapTheme.mist)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                .frame(maxWidth: .infinity)
+                Rectangle().fill(SnapTheme.stroke).frame(height: 1)
+                    .padding(.vertical, c ? 1 : 3)
                 HStack(spacing: 8) {
                     Image(systemName: "leaf.fill")
                         .foregroundStyle(SnapTheme.lime)
@@ -97,9 +111,9 @@ struct HomeView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
-            .frame(maxWidth: 300)
+            .frame(maxWidth: 320)
             .snapCard(padding: c ? 10 : 14, radius: 18)
-            .padding(.top, c ? 4 : 10)
+            .padding(.top, c ? 2 : 6)
             .accessibilityElement(children: .combine)
         }
     }

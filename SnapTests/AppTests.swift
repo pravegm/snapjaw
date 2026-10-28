@@ -360,10 +360,11 @@ struct LessonTests {
     }
 
     @Test func stepNumbersCountOnlyVisibleSteps() {
-        #expect(LessonScript.stepLabel(.firstSnap, touch: false, hasPose: true) == "Step 2 of 6")
+        // R5 (REVIEW-4 #11): the same four numbered steps on the Duo and on phones.
+        #expect(LessonScript.stepLabel(.firstSnap, touch: false, hasPose: true) == "Step 1 of 4")
         #expect(LessonScript.stepLabel(.tooSlow, touch: true, hasPose: false) == "Step 2 of 4")
         #expect(LessonScript.stepLabel(.triple, touch: true, hasPose: false) == "Step 4 of 4")
-        #expect(LessonScript.stepLabel(.bee, touch: true, hasPose: true) == "Step 4 of 5")
+        #expect(LessonScript.stepLabel(.bee, touch: true, hasPose: true) == "Step 3 of 4")
         #expect(LessonScript.next(.firstSnap, touch: true) == .tooSlow)
         #expect(LessonScript.next(.firstSnap, touch: false) == .openAgain)
     }
@@ -605,7 +606,6 @@ struct WordsTests {
         #expect(DuoClapDiagram.shutAngle == 138)
         #expect(DuoClapDiagram.arrows(at: DuoClapDiagram.stillTime) == 1)
         #expect(DuoClapDiagram.arrows(at: 0) == 0)
-        #expect(BookPoseDrawing.theta(at: BookPoseDrawing.stillTime) == DuoClapDiagram.shutAngle)
         for i in 0..<100 {
             let t = Double(i) * 0.05
             let th = DuoClapDiagram.theta(at: t)
@@ -1270,11 +1270,14 @@ struct RoundFourTests {
     /// REVIEW-3 #8: the fold diagrams.
     @Test func foldDiagrams() {
         #expect(HomeView.foldDiagramHeight >= 120)
-        // The hands follow the halves' outer edges in as the Duo claps.
-        let open = HoldingHands.edgeReach(theta: 180, halfWidth: 100)
-        let clap = HoldingHands.edgeReach(theta: 138, halfWidth: 100)
-        #expect(abs(open - 100) < 0.01)
-        #expect(clap < open && clap > 80)
+        // R5: the pose diagram's outer edges come in, and grow, as the Duo snaps.
+        let open = PoseDiagramArt.point(side: 1, u: 1, v: 1, tilt: PoseDiagramArt.tilt(theta: DuoClapDiagram.openAngle))
+        let clap = PoseDiagramArt.point(side: 1, u: 1, v: 1, tilt: PoseDiagramArt.tilt(theta: DuoClapDiagram.shutAngle))
+        #expect(clap.x < open.x)
+        #expect(clap.y > open.y)
+        #expect(open.x > PoseDiagramArt.hingeX)
+        let flat = PoseDiagramArt.tilt(theta: 180)
+        #expect(abs(flat) < 1e-9)
         // The angle reads under the hinge: the label fits the glyph's height.
         for h in [CGFloat(30), 48] {
             #expect(FoldAngleGlyph.labelSize(height: h) + 6 <= h)
@@ -1314,7 +1317,7 @@ struct RoundFourTests {
     @Test func dailyNameIsTheScoreCaption() {
         #expect(ScoreBlock.caption(passedBest: false, best: 3_200, daily: "Daily Bog · 28 Oct") == "DAILY BOG · 28 OCT")
         #expect(ScoreBlock.caption(passedBest: true, best: 3_200, daily: "Daily Bog · 28 Oct") == "NEW BEST")
-        #expect(ScoreBlock.caption(passedBest: false, best: 0, daily: nil) == "PROTEIN")
+        #expect(ScoreBlock.caption(passedBest: false, best: 0, daily: nil) == "SCORE")
         #expect(ScoreBlock.caption(passedBest: false, best: 3_200, daily: nil) == "BEST 3,200")
     }
 
@@ -1334,6 +1337,236 @@ struct RoundFourTests {
         #expect(high.y < low.y)
         #expect(BadgePainter.species(for: Achievements.nobees.id).contains(.bee))
         #expect(BadgePainter.species(for: Achievements.bite5.id) != BadgePainter.species(for: Achievements.feast.id))
+    }
+}
+
+// MARK: - Round 5
+
+@MainActor
+struct RoundFiveTests {
+    /// REVIEW-4 #2: the pose card's diagram and words never overlap, stay in the safe area, keep off the fold band
+    /// and fit, at 874 × 402, 951 × 669 and both portraits (the Duo's tabletop 669 × 951 and a phone's 402 × 874).
+    @Test func poseCardFits() {
+        let cases: [(CGSize, EdgeInsets)] = [
+            (CGSize(width: 874, height: 402), EdgeInsets(top: 0, leading: 62, bottom: 21, trailing: 62)),
+            (CGSize(width: 951, height: 669), EdgeInsets()),
+            (CGSize(width: 402, height: 874), EdgeInsets(top: 62, leading: 0, bottom: 34, trailing: 0)),
+            (CGSize(width: 669, height: 951), EdgeInsets(top: 24, leading: 0, bottom: 20, trailing: 0)),
+        ]
+        for (size, insets) in cases {
+            for duo in [true, false] {
+                let l = PoseCardLayout.make(size: size, insets: insets, isDuo: duo)
+                let side = size.width >= size.height
+                #expect(l.sideBySide == side)
+                #expect(!l.diagram.intersects(l.text))
+                #expect(l.area.insetBy(dx: -0.5, dy: -0.5).contains(l.diagram))
+                #expect(l.text.minX >= l.area.minX - 0.5 && l.text.maxX <= l.area.maxX + 0.5)
+                #expect(l.text.minY >= l.area.minY - 0.5 && l.text.maxY <= l.area.maxY + 0.5)
+                #expect(l.text.height <= l.textRoom.height + 0.5)
+                #expect(l.diagram.width >= PoseCardLayout.diagramMin)
+                let aspect = l.diagram.height / max(l.diagram.width, 1)
+                #expect(abs(aspect - PoseDiagramArt.box.height / PoseDiagramArt.box.width) < 0.01)
+                let half = PoseCard.foldBand / 2 - 0.5
+                let band = side ? CGRect(x: size.width / 2 - half, y: 0, width: half * 2, height: size.height)
+                                : CGRect(x: 0, y: size.height / 2 - half, width: size.width, height: half * 2)
+                #expect(!l.diagram.intersects(band))
+                #expect(!l.text.intersects(band))
+            }
+        }
+        // A short title and one line.
+        for duo in [true, false] {
+            let sentences = PoseCard.detail(isDuo: duo).split(separator: ".").count
+            #expect(sentences == 1)
+            #expect(PoseCard.title(isDuo: duo).split(separator: " ").count <= 6)
+        }
+    }
+
+    /// REVIEW-4 #4: the tired banner never shows while the numeral shows a snap, and waits ≥ 0.45 s after the bite.
+    @Test func tiredBannerWaitsForZero() {
+        #expect(AppRules.tiredBannerDelay >= 0.45)
+        #expect(AppRules.tiredNumeralLimit > AppRules.tiredBannerDelay)
+        #expect(AppRules.tiredFreezeAt > AppRules.tiredNumeralLimit)
+        #expect(AppRules.tiredFreezeAt < Tuning.tiredSeconds)
+        // Never while the shown snaps are above 0, whatever the moment.
+        for i in 0..<45 {
+            let phase = RunPhase.tired(elapsed: Double(i) * 0.05)
+            for shown in 1...3 {
+                let banner = AppRules.showsTiredBanner(phase: phase, shownSnaps: shown)
+                #expect(!banner)
+            }
+        }
+        #expect(!AppRules.showsTiredBanner(phase: .tired(elapsed: 0.2), shownSnaps: 0))
+        #expect(!AppRules.showsTiredBanner(phase: .tired(elapsed: 0.44), shownSnaps: 0))
+        #expect(AppRules.showsTiredBanner(phase: .tired(elapsed: 0.45), shownSnaps: 0))
+        #expect(!AppRules.showsTiredBanner(phase: .playing, shownSnaps: 0))
+        #expect(!AppRules.showsTiredBanner(phase: .finished, shownSnaps: 0))
+        // The numeral reaches 0 in time for the banner, even if the Scene's crack held it up.
+        #expect(AppRules.tiredNumeral(2, phase: .tired(elapsed: 0.3)) == 2)
+        #expect(AppRules.tiredNumeral(2, phase: .tired(elapsed: AppRules.tiredNumeralLimit)) == 0)
+        #expect(AppRules.tiredNumeral(5, phase: .playing) == 5)
+        // A frame-by-frame ending (the 19/40 case): the crack lands at 0.3 s.
+        var bannerAt: Double?
+        for i in 0..<40 {
+            let t = Double(i) / 30
+            let phase = RunPhase.tired(elapsed: t)
+            let shown = AppRules.tiredNumeral(t < 0.3 ? 1 : 0, phase: phase)
+            let banner = AppRules.showsTiredBanner(phase: phase, shownSnaps: shown)
+            if banner {
+                #expect(shown == 0)
+                if bannerAt == nil { bannerAt = t }
+            }
+        }
+        #expect((bannerAt ?? 0) >= AppRules.tiredBannerDelay)
+        // CI's `freezeOn=tired` holds once the banner is up.
+        #expect(!GameController.matches(.tired, TrapSnapshot(phase: .tired(elapsed: 0.1)), events: [.tired]))
+        #expect(GameController.matches(.tired, TrapSnapshot(phase: .tired(elapsed: 1.2)), events: []))
+    }
+
+    /// REVIEW-4 #5 (belt and braces): never "Hungry… bite!" while a halo is inside the zone; "Bee! Wait…" instead.
+    @Test func noHungerBesideABee() {
+        let g = ScreenLayout(hasFold: true).geometry
+        let inside = BugState(id: 1, species: .bee, position: CGPoint(x: g.center.x - 200, y: g.center.y),
+                              heading: 0, activity: .arriving, height: 0.3, inTrap: false, onRim: false)
+        let away = BugState(id: 2, species: .wasp, position: CGPoint(x: 5, y: 660), heading: 0, activity: .leaving,
+                            height: 0.8, inTrap: false, onRim: false)
+        let eaten = BugState(id: 3, species: .bee, position: g.center, heading: 0, activity: .caught(elapsed: 0.1),
+                             height: 0, inTrap: true, onRim: false)
+        let fly = BugState(id: 4, species: .housefly, position: g.center, heading: 0, activity: .sipping, height: 0,
+                           inTrap: true, onRim: false)
+        #expect(AppRules.protectedHaloInTrap(TrapSnapshot(bugs: [inside, fly]), geometry: g))
+        #expect(!AppRules.protectedHaloInTrap(TrapSnapshot(bugs: [away, fly]), geometry: g))
+        #expect(!AppRules.protectedHaloInTrap(TrapSnapshot(bugs: [eaten, fly]), geometry: g))
+        #expect(AppRules.guardedHint(.hungry, haloInTrap: true) == .beeInside)
+        #expect(AppRules.guardedHint(.hungry, haloInTrap: false) == .hungry)
+        #expect(AppRules.guardedHint(.crowd, haloInTrap: true) == .crowd)
+        #expect(AppRules.guardedHint(nil, haloInTrap: true) == nil)
+    }
+
+    /// REVIEW-4 #7: a costly sting says its cost at the row, the mirror of "+1 snap".
+    @Test func stingCostTag() {
+        #expect(AppRules.snapLossText(1) == "\u{2212}1 snap")
+        #expect(AppRules.snapLossText(2) == "\u{2212}2 snaps")
+        #expect(AppRules.snapLossText(0) == "\u{2212}1 snap")
+        #expect(AppRules.snapGainText(1) == "+1 snap")
+    }
+
+    /// REVIEW-4 #13 (founder call): "score" for the score word, "Score on the left", a three-sentence card 09 and a
+    /// bigger snaps numeral.
+    @Test func plainWords() {
+        #expect(AppRules.scoreWord == "score")
+        #expect(ScoreBlock.caption(passedBest: false, best: 0, daily: nil) == "SCORE")
+        #expect(SettingsView.hudSideTitle == "Score on the left")
+        let sentences = LessonFinalCard.rules.split(separator: ".")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
+        #expect(sentences <= LessonFinalCard.maxSentences)
+        #expect(LessonFinalCard.maxSentences == 3)
+        #expect(LessonFinalCard.rules.contains(AppRules.chainLesson))
+        var record = DailyRecord(score: 800, finished: true, practiceBest: 0)
+        let lines = [AppRules.story(makeRun(biggest: 6)), AppRules.story(makeRun(biggest: 3)),
+                     DailyView.status(canPlay: false, record: record)]
+        record.finished = false
+        let early = DailyView.status(canPlay: false, record: record)
+        for line in lines + [early] {
+            #expect(!line.lowercased().contains("protein"))
+        }
+        #expect(HUDLayout.numeralDuo >= 24)
+        #expect(HUDLayout.numeralPhone >= 20)
+        let size = CGSize(width: 951, height: 669)
+        let c = AppCanvas(size: size, insets: EdgeInsets(), layout: ScreenLayout.make(viewSize: size, hasFold: true))
+        let l = HUDLayout.make(c)
+        #expect(l.numeralSize == HUDLayout.numeralDuo)
+        #expect(l.numeral.height >= HUDLayout.numeralHeight(glyph: l.glyph) - 0.01)
+        // The bigger numeral still sits inside the snaps, clear of the glyphs (hudClearsTheCiliaOnTheDuo checks it
+        // against the cilia).
+        #expect(l.snaps.contains(l.numeral))
+    }
+
+    /// REVIEW-4 #12: Home's subtitle no longer repeats the clap card's "Snap it shut a little".
+    @Test func homeSubtitleSaysTheRule() {
+        #expect(!HomeView.subtitle(foldInput: true).contains(HomeView.foldCaption))
+        #expect(HomeView.subtitle(foldInput: false) == "Tap the trap. It bites!")
+    }
+
+    /// ROUND-5: the Daily's one-line share (scored Dailies only).
+    @Test func dailyShare() {
+        #expect(AppRules.dailyShareText(day: 300, score: 4_210, biggestBite: 6, brand: "Snapjaw")
+                == "Snapjaw Daily Bog #301 · 4,210 · biggest bite 6 🪤")
+        let scored = ResultsView.shareText(makeRun(mode: .daily(day: 300, scored: true), score: 4_210, biggest: 6))
+        #expect(scored?.contains("#301 · 4,210 · biggest bite 6") == true)
+        #expect(ResultsView.shareText(makeRun(mode: .daily(day: 300, scored: false))) == nil)
+        #expect(ResultsView.shareText(makeRun(mode: .feed)) == nil)
+    }
+
+    /// REVIEW-4 #11: "Step n of N" is the same on the Duo and on phones.
+    @Test func lessonNumberingMatches() {
+        let steps: [LessonScript.Step] = [.firstSnap, .openAgain, .tooSlow, .bee, .triple, .done]
+        for s in steps {
+            let duo = LessonScript.stepLabel(s, touch: false, hasPose: true)
+            let phone = LessonScript.stepLabel(s, touch: true, hasPose: false)
+            let duoNoPose = LessonScript.stepLabel(s, touch: false, hasPose: false)
+            #expect(duo == phone)
+            #expect(duo == duoNoPose)
+            #expect(duo.hasSuffix("of 4"))
+        }
+        #expect(LessonScript.stepLabel(.pose, touch: false, hasPose: true) == LessonScript.readyLabel)
+        #expect(LessonScript.stepLabel(.bee, touch: false, hasPose: true) == "Step 3 of 4")
+    }
+
+    /// REVIEW-4 #8 (founder call): the Sprout taper's options for Feed runs 1–3, standard from run 4.
+    @Test func sproutTaper() {
+        #expect(AppRules.sproutFeedRun(mode: .feed, feedRuns: 0) == 1)
+        #expect(AppRules.sproutFeedRun(mode: .feed, feedRuns: 1) == 2)
+        #expect(AppRules.sproutFeedRun(mode: .feed, feedRuns: 2) == 3)
+        #expect(AppRules.sproutFeedRun(mode: .feed, feedRuns: 3) == nil)
+        #expect(AppRules.sproutFeedRun(mode: .daily(day: 3, scored: true), feedRuns: 0) == nil)
+        #expect(AppRules.sproutFeedRun(mode: .lesson, feedRuns: 0) == nil)
+        var one = SessionOptions()
+        GameController.applySprout(feedRun: 1, to: &one)
+        #expect(one.sproutRun == 1)
+        #expect(one.firstRun)
+        #expect(!one.hunger)
+        #expect(one.freeFirstSting)
+        var two = SessionOptions()
+        GameController.applySprout(feedRun: 2, to: &two)
+        #expect(two.sproutRun == 2)
+        #expect(!two.firstRun)
+        #expect(two.hunger)
+        #expect(!two.freeFirstSting)
+        var three = SessionOptions()
+        GameController.applySprout(feedRun: 3, to: &three)
+        #expect(three.sproutRun == 3)
+        var four = SessionOptions()
+        GameController.applySprout(feedRun: 4, to: &four)
+        #expect(four == SessionOptions())
+        var none = SessionOptions()
+        GameController.applySprout(feedRun: nil, to: &none)
+        #expect(none == SessionOptions())
+    }
+
+    /// REVIEW-4 #14: three badges draw the hero trap, each fitted inside the disc; none lays a bug on it.
+    @Test func badgesKeepInsideTheDisc() {
+        let heroCount = Achievements.all.filter { BadgePainter.usesHero(id: $0.id) }.count
+        #expect(heroCount == 3)
+        #expect(BadgePainter.usesHero(id: "snap.ach.unknown"))
+        let aspect = TrapArt.threeQuarterAspect
+        let spots: [(CGFloat, CGPoint)] = [(300, CGPoint(x: 256, y: 292)), (300, CGPoint(x: 256, y: 300)),
+                                           (270, CGPoint(x: 226, y: 296)), (340, BadgePainter.center)]
+        for (width, c) in spots {
+            let w = BadgePainter.heroFit(width: width, center: c, aspect: aspect)
+            #expect(w <= width)
+            #expect(w >= 150)
+            let h = w * aspect
+            for corner in [CGPoint(x: c.x - w / 2, y: c.y - h / 2), CGPoint(x: c.x + w / 2, y: c.y + h / 2),
+                           CGPoint(x: c.x - w / 2, y: c.y + h / 2), CGPoint(x: c.x + w / 2, y: c.y - h / 2)] {
+                let d = hypot(corner.x - BadgePainter.center.x, corner.y - BadgePainter.center.y)
+                #expect(d <= BadgePainter.discRadius)
+            }
+        }
+        // The hero badges' bugs fly round the trap; its sipper is the Scene's own.
+        for id in BadgePainter.heroBadges {
+            #expect(BadgePainter.species(for: id).count <= 2)
+        }
+        #expect(BadgePainter.species(for: Achievements.monarch.id).isEmpty)
     }
 }
 

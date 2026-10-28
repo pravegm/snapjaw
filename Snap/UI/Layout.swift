@@ -258,6 +258,8 @@ struct HUDLayout: Equatable {
     /// The glyph rows, top first. The lower one also holds the numeral, on its inner side.
     var snapRowRects: [CGRect]
     var numeral: CGRect
+    /// R5 (REVIEW-4 #13): the numeral's type size (it was 15/17 pt beside a 32/40 pt score).
+    var numeralSize: CGFloat
     /// The glyph's width (its height is `glyphAspect` of that).
     var glyph: CGFloat
     var hint: CGRect
@@ -282,8 +284,13 @@ struct HUDLayout: Equatable {
     static let glyphPhone: CGFloat = 16
     /// Glyphs shrink towards this when a row would touch the cilia.
     static let glyphMin: CGFloat = 12
-    /// The numeral's box (fixed: "14" never clips).
-    static let snapNumeralW: CGFloat = 30
+    /// The numeral's box (fixed: "14" never clips). R5 (REVIEW-4 #13): wider and taller for the bigger numeral.
+    static let snapNumeralW: CGFloat = 36
+    static let numeralDuo: CGFloat = 24
+    static let numeralPhone: CGFloat = 20
+    /// The numeral box's height: the lower row's glyph plus a little (the digits' cap height fits it; the box stays in
+    /// the band the cilia check clears).
+    static func numeralHeight(glyph g: CGFloat) -> CGFloat { g * glyphAspect + 3 }
     /// The trap's face ends at radius 1.
     static let clearRadius: CGFloat = 1.0
     /// The hint plate: three short lines at most. Never narrower than `hintMin`.
@@ -362,8 +369,9 @@ struct HUDLayout: Equatable {
             rects = rowRects(glyph)
         }
         let lower = rects.last ?? box(textOuter, bottomY - 14, 200, 14)
-        let numeral = CGRect(x: right ? lower.minX : lower.maxX - snapNumeralW, y: min(lower.midY - 10, bottomY - 20),
-                             width: snapNumeralW, height: 20)
+        let numeralH = numeralHeight(glyph: glyph)
+        let numeral = CGRect(x: right ? lower.minX : lower.maxX - snapNumeralW,
+                             y: min(lower.midY - numeralH / 2, bottomY - numeralH), width: snapNumeralW, height: numeralH)
         let snaps = rects.reduce(numeral) { $0.union($1) }
 
         // The chain chip: above the snaps.
@@ -395,7 +403,8 @@ struct HUDLayout: Equatable {
         let tiredH: CGFloat = compact ? 76 : 90
         let tired = CGRect(x: page.midX - tiredW / 2, y: c.size.height / 2 - tiredH / 2, width: tiredW, height: tiredH)
         return HUDLayout(pause: pause, back: back, score: score, chain: chain, chainCompact: chainCompact, snaps: snaps,
-                         snapRowRects: rects, numeral: numeral, glyph: glyph, hint: hint, lessonHint: lessonHint,
+                         snapRowRects: rects, numeral: numeral, numeralSize: compact ? numeralPhone : numeralDuo,
+                         glyph: glyph, hint: hint, lessonHint: lessonHint,
                          lesson: lesson, card: card, tired: tired, snapRows: rows, trailing: right)
     }
 

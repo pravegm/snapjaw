@@ -28,26 +28,46 @@ final class BogLight {
         /// R4 (#7): an additive lift over the bog only (under the trap): a whiter, higher-key noon, a peach dusk.
         var lift: RGBA
         var liftAlpha: Double
+        /// R5 (#9): an additive sky glow over the bog only (under the trap), strongest at the top and gone at the
+        /// bottom (the haze ramp): the dusk's peach/rose sky, which never touches the trap.
+        var sky: RGBA
+        var skyAlpha: Double
     }
 
     static let keys: [Key] = [
         Key(env: RGBA(1.0, 0.94, 0.82), haze: RGBA(1.0, 0.8, 0.42), hazeAlpha: 0.08, bug: RGBA(1, 0.82, 0.55),
             bugAmount: 0.08, lobe: RGBA(1.0, 0.8, 0.42), rim: RGBA(1.0, 0.86, 0.55), rimAlpha: 0.05,
-            lift: RGBA(1, 0.9, 0.7), liftAlpha: 0.03),
+            lift: RGBA(1, 0.9, 0.7), liftAlpha: 0.03, sky: RGBA(1, 0.86, 0.6), skyAlpha: 0.04),
         Key(env: RGBA(1, 1, 1), haze: RGBA(1, 1, 0.96), hazeAlpha: 0.08, bug: RGBA(1, 1, 1), bugAmount: 0,
-            lobe: RGBA(1, 1, 0.96), rim: RGBA(1, 1, 0.95), rimAlpha: 0, lift: RGBA(1, 1, 0.97), liftAlpha: 0.1),
-        // R4 (Duo store-08): the dusk's peach goes on the bog (the lift, under the trap) more than over it; the trap
-        // gets a deep warm overlay (it warms, never lightens to salmon) and a thin warm rim (`drawLobeGlow`).
-        Key(env: RGBA(1.0, 0.7, 0.52), haze: RGBA(1, 0.58, 0.34), hazeAlpha: 0.22, bug: RGBA(1, 0.66, 0.5),
-            bugAmount: 0.16, lobe: RGBA(0.85, 0.35, 0.22), rim: RGBA(1, 0.62, 0.36), rimAlpha: 0.48,
-            lift: RGBA(1, 0.62, 0.38), liftAlpha: 0.14),
+            lobe: RGBA(1, 1, 0.96), rim: RGBA(1, 1, 0.95), rimAlpha: 0, lift: RGBA(1, 1, 0.97), liftAlpha: 0.1,
+            sky: RGBA(1, 1, 0.97), skyAlpha: 0),
+        // R5 (#9): a warm peach/rose dusk, never olive-khaki. The R4 multiply (1, 0.7, 0.52) cut the bog's blue more
+        // than its green, which is what made it olive; this one keeps the blue and cuts the green, so the bog goes a
+        // dusky sage, with a rose lift and a peach sky glow from the top on the bog only (under the trap). Over the
+        // trap there is only a faint rose haze, a deep warm overlay and a faint rim (kept off the margin: no salmon
+        // ring).
+        Key(env: RGBA(1.0, 0.74, 0.82), haze: RGBA(1, 0.68, 0.62), hazeAlpha: 0.1, bug: RGBA(1, 0.72, 0.66),
+            bugAmount: 0.14, lobe: RGBA(0.85, 0.35, 0.22), rim: RGBA(1, 0.7, 0.62), rimAlpha: 0.12,
+            lift: RGBA(1, 0.6, 0.62), liftAlpha: 0.12, sky: RGBA(1, 0.62, 0.5), skyAlpha: 0.34),
         Key(env: RGBA(0.42, 0.55, 0.98), haze: RGBA(0.3, 0.42, 0.95), hazeAlpha: 0.08, bug: RGBA(0.3, 0.38, 0.75),
             bugAmount: 0.3, lobe: RGBA(0.05, 0.04, 0.1), rim: RGBA(0.66, 0.76, 1), rimAlpha: 0.3,
-            lift: RGBA(0.4, 0.5, 1), liftAlpha: 0),
+            lift: RGBA(0.4, 0.5, 1), liftAlpha: 0, sky: RGBA(0.4, 0.5, 1), skyAlpha: 0),
         Key(env: RGBA(0.36, 0.46, 0.9), haze: RGBA(0.25, 0.32, 0.85), hazeAlpha: 0.07, bug: RGBA(0.26, 0.32, 0.7),
             bugAmount: 0.36, lobe: RGBA(0.04, 0.03, 0.08), rim: RGBA(0.62, 0.72, 1), rimAlpha: 0.28,
-            lift: RGBA(0.4, 0.5, 1), liftAlpha: 0),
+            lift: RGBA(0.4, 0.5, 1), liftAlpha: 0, sky: RGBA(0.4, 0.5, 1), skyAlpha: 0),
     ]
+
+    /// R5 (#9, tests): the bog colour `c` as lit by `k` at sky level `skyLevel` (0 the bottom of the screen … 1 the
+    /// top): the multiply tint, the lift and the sky glow, then the haze over everything.
+    static func litBog(_ c: RGBA, key k: Key, skyLevel: Double) -> RGBA {
+        let s = min(max(skyLevel, 0), 1)
+        let la = k.liftAlpha, sa = k.skyAlpha * s, ha = k.hazeAlpha * s
+        func ch(_ base: Double, _ env: Double, _ lift: Double, _ sky: Double, _ haze: Double) -> Double {
+            min(base * env + lift * la + sky * sa + haze * ha, 1)
+        }
+        return RGBA(ch(c.r, k.env.r, k.lift.r, k.sky.r, k.haze.r), ch(c.g, k.env.g, k.lift.g, k.sky.g, k.haze.g),
+                    ch(c.b, k.env.b, k.lift.b, k.sky.b, k.haze.b))
+    }
 
     /// The light at `clock` (0…4, clamped), interpolated between the keys.
     static func key(at clock: Double) -> Key {
@@ -59,7 +79,8 @@ final class BogLight {
                    hazeAlpha: a.hazeAlpha + (b.hazeAlpha - a.hazeAlpha) * f, bug: a.bug.mixed(with: b.bug, f),
                    bugAmount: a.bugAmount + (b.bugAmount - a.bugAmount) * f, lobe: a.lobe.mixed(with: b.lobe, f),
                    rim: a.rim.mixed(with: b.rim, f), rimAlpha: a.rimAlpha + (b.rimAlpha - a.rimAlpha) * f,
-                   lift: a.lift.mixed(with: b.lift, f), liftAlpha: a.liftAlpha + (b.liftAlpha - a.liftAlpha) * f)
+                   lift: a.lift.mixed(with: b.lift, f), liftAlpha: a.liftAlpha + (b.liftAlpha - a.liftAlpha) * f,
+                   sky: a.sky.mixed(with: b.sky, f), skyAlpha: a.skyAlpha + (b.skyAlpha - a.skyAlpha) * f)
     }
 
     /// R4 (#7): the light is lit by phase, not by wave index. Core's `dayClock` (0 morning at wave 1, 1 noon at 7,
@@ -107,6 +128,8 @@ final class BogLight {
     let tint: SKSpriteNode
     /// R4 (#7): scene z 6 (additive, over the bog only): the noon's white lift, the dusk's peach.
     let lift: SKSpriteNode
+    /// R5 (#9): scene z 6.5 (additive, over the bog only, a ramp from the top): the dusk's peach/rose sky.
+    let sky: SKSpriteNode
     /// Scene z 21 (additive sky haze).
     let haze: SKSpriteNode
     /// Scene z 21.5: dew twinkles (day) and the bog's fireflies (night).
@@ -133,6 +156,8 @@ final class BogLight {
     /// R4 (#7): the bog lift's alpha now (tests: a whiter noon, a peach dusk).
     private(set) var liftAlpha: CGFloat = 0
     private(set) var liftRGBA = RGBA(1, 1, 1)
+    /// R5 (#9): the sky glow's alpha now (tests: a peach dusk on the bog).
+    private(set) var skyAlpha: CGFloat = 0
     private var pulseLevel: CGFloat = 0
     private var twinkles: [(SKSpriteNode, CGFloat)] = []
     private var flies: [(core: SKSpriteNode, glow: SKSpriteNode, home: CGPoint, phase: CGFloat)] = []
@@ -141,11 +166,13 @@ final class BogLight {
     init() {
         let t = SKSpriteNode(color: .white, size: CGSize(width: 10, height: 10))
         let lf = SKSpriteNode(color: .white, size: CGSize(width: 10, height: 10))
+        let sk = SKSpriteNode(texture: BogTextures.haze, size: CGSize(width: 10, height: 10))
         let h = SKSpriteNode(texture: BogTextures.haze, size: CGSize(width: 10, height: 10))
         let s = SKNode()
         let v = SKSpriteNode(texture: BogTextures.vignette, size: CGSize(width: 10, height: 10))
         tint = t
         lift = lf
+        sky = sk
         haze = h
         sparkleRoot = s
         vignette = v
@@ -155,6 +182,11 @@ final class BogLight {
         lf.zPosition = 6
         lf.alpha = 0
         lf.isHidden = true
+        sk.blendMode = .add
+        sk.colorBlendFactor = 1
+        sk.zPosition = 6.5
+        sk.alpha = 0
+        sk.isHidden = true
         h.blendMode = .add
         h.colorBlendFactor = 1
         h.zPosition = 21
@@ -174,6 +206,9 @@ final class BogLight {
         lift.position = tint.position
         haze.size = CGSize(width: size.width + 2 * pad, height: size.height * 0.9)
         haze.position = CGPoint(x: size.width / 2, y: size.height * 0.6)
+        // The sky glow runs from the top (full) to a little under the middle (none).
+        sky.size = CGSize(width: size.width + 2 * pad, height: size.height * 0.75 + pad)
+        sky.position = CGPoint(x: size.width / 2, y: size.height - (size.height * 0.75 - pad) / 2)
         vignette.size = size
         vignette.position = CGPoint(x: size.width / 2, y: size.height / 2)
 
@@ -256,6 +291,10 @@ final class BogLight {
             lift.color = BogPaint.ui(liftRGBA)
             lift.alpha = liftAlpha
             lift.isHidden = liftAlpha < 0.003
+            skyAlpha = CGFloat(min(max(k.skyAlpha, 0), 0.5))
+            sky.color = BogPaint.ui(RGBA(k.sky.r, k.sky.g, k.sky.b, 1))
+            sky.alpha = skyAlpha
+            sky.isHidden = skyAlpha < 0.003
             haze.color = BogPaint.ui(RGBA(k.haze.r, k.haze.g, k.haze.b, 1))
             haze.alpha = CGFloat(k.hazeAlpha)
             bugTint = BogPaint.ui(RGBA(k.bug.r, k.bug.g, k.bug.b, 1))

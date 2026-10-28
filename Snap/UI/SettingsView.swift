@@ -62,13 +62,17 @@ struct SettingsView: View {
                 row("Respect silent switch", detail: "Quiet when your iPhone is on silent",
                     isOn: $settings.respectSilentSwitch, c)
                 divider
-                row("HUD on the left", detail: "Score and snaps on the other half", isOn: $settings.hudOnLeft, c)
+                // R5 (REVIEW-4 #13, founder call): plain words, not "HUD".
+                row(Self.hudSideTitle, detail: Self.hudSideDetail, isOn: $settings.hudOnLeft, c)
                 divider
                 row("Reduce motion", detail: "Calmer shakes and pops", isOn: $settings.reduceMotion, c)
             }
             .snapCard(padding: c ? 10 : 14, radius: 22)
         }
     }
+
+    static let hudSideTitle = "Score on the left"
+    static let hudSideDetail = "Your score and snaps on the left half"
 
     /// The diagnostics line: TestFlight on a device with a hinge only. Pure; tested.
     static func showsDiagnostics(channel: BuildChannel.Kind, hasHinge: Bool) -> Bool {

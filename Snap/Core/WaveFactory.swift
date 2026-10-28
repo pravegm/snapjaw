@@ -220,6 +220,31 @@ enum WaveFactory {
         return CGPoint(x: xx, y: x < 0.9 ? h + 30 : -30)
     }
 
+    /// R5 (REVIEW-4 #15): a protected bug never enters under a Duo thumb. An entry within Tuning.thumbBandWidth of
+    /// either outer edge (including just off it) whose y lies strictly inside the band (thumbBandLow…thumbBandHigh of
+    /// the height) has its y mirrored across the band's nearer edge: the band's lower half goes below it, its upper
+    /// half above it. Same side, same spread, no draws (the draw order never changes). Pure; tested.
+    static func thumbSafeEntry(_ e: CGPoint, sceneSize: CGSize) -> CGPoint {
+        if !inThumbBand(e, sceneSize: sceneSize) { return e }
+        let h: Double = Double(sceneSize.height)
+        let y: Double = Double(e.y)
+        let lo: Double = h * Tuning.thumbBandLow
+        let hi: Double = h * Tuning.thumbBandHigh
+        let ny: Double = y < (lo + hi) / 2 ? 2 * lo - y : 2 * hi - y
+        return CGPoint(x: Double(e.x), y: ny)
+    }
+
+    /// R5: is `p` in a thumb band (within Tuning.thumbBandWidth of an outer edge, or past it, with y strictly inside
+    /// thumbBandLow…thumbBandHigh of the height)? Pure; tested.
+    static func inThumbBand(_ p: CGPoint, sceneSize: CGSize) -> Bool {
+        let w: Double = Double(sceneSize.width)
+        let h: Double = Double(sceneSize.height)
+        let x: Double = Double(p.x)
+        let y: Double = Double(p.y)
+        let outer: Bool = x < Tuning.thumbBandWidth || x > w - Tuning.thumbBandWidth
+        return outer && y > h * Tuning.thumbBandLow && y < h * Tuning.thumbBandHigh
+    }
+
     private static func clampToRadius(_ g: TrapGeometry, _ p: CGPoint, _ maxR: Double) -> CGPoint {
         let rr: Double = g.normalizedRadius(p)
         if rr <= maxR || rr == 0 { return p }
@@ -335,7 +360,10 @@ enum WaveFactory {
                     let fromLeft: Bool = r.chance(0.5)
                     let y0: Double = r.between(120, h - 120)
                     let y1: Double = r.between(120, h - 120)
-                    bugs.append(SpawnSpec(species: s, entry: CGPoint(x: fromLeft ? -30 : w + 30, y: y0),
+                    let e0 = CGPoint(x: fromLeft ? -30 : w + 30, y: y0)
+                    // R5 (REVIEW-4 #15): never under a thumb.
+                    let ce: CGPoint = prot ? thumbSafeEntry(e0, sceneSize: geometry.sceneSize) : e0
+                    bugs.append(SpawnSpec(species: s, entry: ce,
                                           target: CGPoint(x: fromLeft ? w + 40 : -40, y: y1), linger: 0,
                                           landsInTrap: false, groupOffset: base))
                 } else {
@@ -344,7 +372,8 @@ enum WaveFactory {
                     let tx: Double = cl ? r.between(30, 90) : w - r.between(30, 90)
                     let ty: Double = cb ? r.between(30, 90) : h - r.between(30, 90)
                     let target = CGPoint(x: tx, y: ty)
-                    let entry: CGPoint = edgeEntry(target, geometry, &r)
+                    let e0: CGPoint = edgeEntry(target, geometry, &r)
+                    let entry: CGPoint = prot ? thumbSafeEntry(e0, sceneSize: geometry.sceneSize) : e0
                     let lg: Double = r.between(lmin, lmax) * m.lingerFactor * (prot ? Tuning.beeLingerFactor : 1)
                     bugs.append(SpawnSpec(species: s, entry: entry, target: target, linger: lg, landsInTrap: false,
                                           groupOffset: base))
@@ -367,12 +396,14 @@ enum WaveFactory {
             } else {
                 target = randomSpot(geometry, &r, Tuning.spotRadius)
             }
-            let entry: CGPoint
+            var entry: CGPoint
             if m.style == .walker {
                 entry = CGPoint(x: clamp(Double(target.x) + r.between(-120, 120), 40, w - 40), y: -20)
             } else {
                 entry = edgeEntry(target, geometry, &r)
             }
+            // R5 (REVIEW-4 #15): a bee, bumblebee or wasp never enters under a thumb.
+            if prot { entry = thumbSafeEntry(entry, sceneSize: geometry.sceneSize) }
             var k: Int = 0
             while k < count {
                 var t: CGPoint = target

@@ -12,6 +12,8 @@ import Testing
 // the deterministic pilot (its own clock, PilotRun's fixed steps).
 // Round 4: the hunger clock ticks only with food in the trap and no bee (night 14 s), SessionOptions.firstRun (Feed
 // only), the calm first morning, nothing low over the crease, and the 0.2 late reaction floor.
+// Round 5: a protected bug pauses the clock from its final approach, the Sprout taper (SessionOptions.sprout(feedRun:),
+// SproutPerks), and no bee entry under a Duo thumb.
 
 struct CoreTests {
 
@@ -202,6 +204,11 @@ struct CoreTests {
         #expect(abs(Tuning.creaseAirHeight - 0.5) < 1e-12)
         #expect(Tuning.creaseAirHeight <= 1 - Tuning.approachHeightDrop, "an approach never flies lower than this")
         #expect(Tuning.creaseAirHeight <= Tuning.crossHeight)
+        // R5 (REVIEW-4 #8 and #15, founder calls)
+        #expect(Tuning.sproutRun2Snaps == 13 && Tuning.sproutRun3Snaps == 12 && Tuning.sproutTaperRuns == 3)
+        #expect(Tuning.sproutRun2Snaps <= Tuning.firstRunSnaps && Tuning.sproutRun3Snaps <= Tuning.sproutRun2Snaps)
+        #expect(abs(Tuning.thumbBandWidth - 90) < 1e-12)
+        #expect(abs(Tuning.thumbBandLow - 0.25) < 1e-12 && abs(Tuning.thumbBandHigh - 0.75) < 1e-12)
     }
 
     // MARK: SnapDetector
@@ -999,6 +1006,66 @@ struct CoreTests {
         #expect(q.snapshot.snapsLeft == Tuning.startSnaps)
     }
 
+    @Test func aBeeOnItsFinalApproachPausesTheClock() {
+        // R5 (REVIEW-4 #5, founder call): a protected bug counts as in the trap from its final approach: inside the
+        // zone and below Tuning.creaseAirHeight (its hover down, with the halo drawn). Higher up it doesn't (the deep
+        // night's always-arriving bees), and the hungry hint follows the clock.
+        #expect(TrapSession.protectedCountsAsIn(landed: true, height: 0))
+        #expect(TrapSession.protectedCountsAsIn(landed: false, height: 0.2))
+        #expect(!TrapSession.protectedCountsAsIn(landed: false, height: Tuning.creaseAirHeight))
+        #expect(!TrapSession.protectedCountsAsIn(landed: false, height: 0.9))
+        let s: TrapSession = quiet()
+        landOne(s, .housefly, drop: 0)
+        run(s, 15.1)
+        #expect(s.snapshot.hint == .hungry, "15.1 s of an 18 s morning")
+        let d: NectarDrop = s.snapshot.nectar[3]
+        let beeID: Int = s.spawnScripted(.bee, entry: entry(d.position), target: d.position, linger: .infinity)
+        var highFrames: Int = 0
+        var highTicks: Int = 0
+        var highHungry: Int = 0
+        var lowFrames: Int = 0
+        var lowMoves: Int = 0
+        var lowHungry: Int = 0
+        var prevLow: Bool = false
+        var prevHigh: Bool = false
+        var prevHunger: Double = s.snapshot.hunger
+        var down: Bool = false
+        var f: Int = 0
+        while f < 600 && !down {
+            let ev: [TrapEvent] = s.step(dt: frame, input: TrapInput())
+            #expect(wiltCount(ev) == 0)
+            let shot: TrapSnapshot = s.snapshot
+            guard let bee = shot.bugs.first(where: { (b: BugState) -> Bool in b.id == beeID }) else { break }
+            var arriving: Bool = false
+            if case .arriving = bee.activity { arriving = true }
+            let low: Bool = bee.inTrap && arriving && bee.height < Tuning.creaseAirHeight
+            let high: Bool = bee.inTrap && arriving && bee.height >= Tuning.creaseAirHeight
+            let level: Double = shot.hunger
+            if low && prevLow {
+                lowFrames += 1
+                if abs(level - prevHunger) > 1e-12 { lowMoves += 1 }
+                if shot.hint == .hungry { lowHungry += 1 }
+            }
+            if high && prevHigh {
+                highFrames += 1
+                if level > prevHunger + 1e-9 { highTicks += 1 }
+                if shot.hint == .hungry { highHungry += 1 }
+            }
+            if !arriving && lowFrames > 0 { down = true }
+            prevLow = low
+            prevHigh = high
+            prevHunger = level
+            f += 1
+        }
+        #expect(down, "the bee landed")
+        #expect(highFrames >= 10 && highTicks == highFrames,
+                "high in the zone: the clock ticks (\(highTicks) of \(highFrames) frames)")
+        #expect(highHungry == highFrames, "and the hungry hint stays")
+        #expect(lowFrames >= 10 && lowMoves == 0, "below creaseAirHeight: paused (\(lowMoves) of \(lowFrames) moved)")
+        #expect(lowHungry == 0, "no hungry hint beside a bee on its final approach")
+        #expect(s.snapshot.hint == .beeInside)
+    }
+
     @Test func theHungryHintShowsOnlyWhileTheClockTicks() {
         // R4: "Hungry… bite!" once the clock passes 15 s, gone while the trap is empty, back when food lands again.
         let s: TrapSession = quiet()
@@ -1139,6 +1206,95 @@ struct CoreTests {
             }
             #expect(gentle.phase == plain.phase)
             i += 1
+        }
+    }
+
+    @Test func theSproutPerksTaperOverThreeFeedRuns() {
+        // R5 (REVIEW-4 #8, founder call): run 1 has 14 snaps, no wilt, a free sting and the calm morning; run 2 has 13
+        // snaps, a free sting and the calm morning; run 3 has 12 snaps and the calm morning; from run 4, standard.
+        #expect(SproutPerks.forFeedRun(1) == SproutPerks(run: 1, startSnaps: 14, noWilt: true, freeSting: true,
+                                                         calmMorning: true))
+        #expect(SproutPerks.forFeedRun(2) == SproutPerks(run: 2, startSnaps: 13, noWilt: false, freeSting: true,
+                                                         calmMorning: true))
+        #expect(SproutPerks.forFeedRun(3) == SproutPerks(run: 3, startSnaps: 12, noWilt: false, freeSting: false,
+                                                         calmMorning: true))
+        #expect(SproutPerks.forFeedRun(4) == nil)
+        #expect(SproutPerks.forFeedRun(0) == nil && SproutPerks.forFeedRun(-2) == nil)
+        // The options: sprout(feedRun:) is the Feed options plus sproutRun; R4's firstRun is sproutRun 1.
+        let one: SessionOptions = SessionOptions.sprout(feedRun: 1)
+        let two: SessionOptions = SessionOptions.sprout(feedRun: 2)
+        #expect(one.firstRun && one.sproutRun == 1)
+        #expect(!two.firstRun && two.sproutRun == 2)
+        #expect(SessionOptions.sprout(feedRun: 4) == SessionOptions.for(.feed))
+        #expect(SessionOptions.sprout(feedRun: 0) == SessionOptions())
+        var legacy = SessionOptions()
+        legacy.firstRun = true
+        #expect(legacy == one, "R4's firstRun = true is Sprout run 1")
+        legacy.firstRun = false
+        #expect(legacy == SessionOptions())
+        var keep: SessionOptions = two
+        keep.firstRun = false
+        #expect(keep.sproutRun == 2, "clearing firstRun leaves a run-2 taper alone")
+        #expect(two.sproutPerks(for: .feed)?.run == 2)
+        #expect(two.sproutPerks(for: .daily(day: 3, scored: true)) == nil)
+        #expect(two.sproutPerks(for: .attract) == nil && two.sproutPerks(for: .lesson) == nil)
+        // Sessions, as the App builds them (startSnaps 12 while the rank is Sprout): snaps, the first bee, the wilt.
+        let wantSnaps: [Int] = [14, 13, 12, 12]
+        var feedRun: Int = 1
+        while feedRun <= 4 {
+            var o: SessionOptions = SessionOptions.sprout(feedRun: feedRun)
+            o.waves = false
+            o.startSnaps = 12
+            let s = TrapSession(mode: .feed, seed: 7, best: 0, geometry: geo, options: o)
+            let start: Int = wantSnaps[feedRun - 1]
+            #expect(s.snapshot.snapsLeft == start, "run \(feedRun) starts with \(start)")
+            #expect(s.sproutPerks == SproutPerks.forFeedRun(feedRun))
+            #expect(s.firstRunPerks == (feedRun == 1))
+            sippers(s, [.housefly, .bee])
+            let first: [TrapEvent] = snap(s, 0.1)
+            let lost: Int = feedRun <= 2 ? 0 : Tuning.beeCost
+            #expect(report(first)?.snapsLost == lost, "run \(feedRun): the first bee costs \(lost)")
+            #expect(s.snapshot.snapsLeft == start - 1 - lost)
+            landOne(s, .housefly, drop: 2)
+            let ev: [TrapEvent] = run(s, 18.5)
+            #expect(wiltCount(ev) == (feedRun == 1 ? 0 : 1), "run \(feedRun) wilts: \(feedRun != 1)")
+            feedRun += 1
+        }
+        // The Daily ignores the taper (everyone's bog stays standard).
+        let daily = TrapSession(mode: .daily(day: 3, scored: true), seed: 7, best: 0, geometry: geo, options: two)
+        #expect(daily.sproutPerks == nil && !daily.firstRunPerks)
+        #expect(daily.snapshot.snapsLeft == Tuning.startSnaps)
+    }
+
+    @Test func sproutRunsOneToThreeHaveTheCalmMorning() {
+        // R5 (REVIEW-4 #8): the calm morning (gaps × firstRunWaveGap after waves 1…14) is on for runs 1–3, off from 4.
+        let seed: UInt64 = 1000
+        var feedRun: Int = 1
+        while feedRun <= 4 {
+            var o: SessionOptions = SessionOptions.sprout(feedRun: feedRun)
+            o.hunger = false
+            let s = TrapSession(mode: .feed, seed: seed, best: 0, geometry: geo, options: o)
+            var startedAt: [Int: Double] = [:]
+            var f: Int = 0
+            while f < 60 * 30 && startedAt[3] == nil && !s.isFinished {
+                let ev: [TrapEvent] = s.step(dt: frame, input: TrapInput())
+                for e in ev {
+                    if case .waveStarted(let i, _) = e { startedAt[i] = s.snapshot.time }
+                }
+                f += 1
+            }
+            var k: Int = 1
+            while k <= 2 {
+                if let a = startedAt[k], let b = startedAt[k + 1] {
+                    let base: Double = WaveFactory.delay(seed: seed, index: k + 1)
+                    let want: Double = feedRun <= 3 ? base * Tuning.firstRunWaveGap : base
+                    #expect(abs((b - a) - want) < 0.03, "run \(feedRun), gap after wave \(k): \(b - a), want \(want)")
+                } else {
+                    Issue.record("run \(feedRun): wave \(k) or \(k + 1) never started")
+                }
+                k += 1
+            }
+            feedRun += 1
         }
     }
 
@@ -1496,6 +1652,64 @@ struct CoreTests {
             }
             seed += 1
         }
+    }
+
+    @Test func beeEntriesNeverStartUnderAThumb() {
+        // R5 (REVIEW-4 #15): on the Duo in book pose the thumbs rest on the outer edges at mid-height. No bee, bumblebee
+        // or wasp enters within Tuning.thumbBandWidth (90 pt) of either outer edge in the middle half of the height.
+        let size: CGSize = geo.sceneSize
+        let lo: Double = Double(size.height) * Tuning.thumbBandLow
+        let hi: Double = Double(size.height) * Tuning.thumbBandHigh
+        // The rule, pure: a y in the band is mirrored across its nearer edge; x and everything outside stay put.
+        let left = CGPoint(x: -30, y: 300)
+        #expect(WaveFactory.inThumbBand(left, sceneSize: size))
+        let movedLeft: CGPoint = WaveFactory.thumbSafeEntry(left, sceneSize: size)
+        #expect(abs(Double(movedLeft.x) - Double(left.x)) < 1e-9)
+        #expect(abs(Double(movedLeft.y) - (2 * lo - 300)) < 1e-9, "the band's lower half goes below it")
+        #expect(!WaveFactory.inThumbBand(movedLeft, sceneSize: size))
+        let right = CGPoint(x: 982, y: 400)
+        let movedRight: CGPoint = WaveFactory.thumbSafeEntry(right, sceneSize: size)
+        #expect(abs(Double(movedRight.y) - (2 * hi - 400)) < 1e-9, "the band's upper half goes above it")
+        #expect(!WaveFactory.inThumbBand(movedRight, sceneSize: size))
+        let inner = CGPoint(x: 120, y: 330)
+        #expect(!WaveFactory.inThumbBand(inner, sceneSize: size))
+        #expect(WaveFactory.thumbSafeEntry(inner, sceneSize: size) == inner, "90 pt in: no thumb")
+        let top = CGPoint(x: 40, y: -30)
+        #expect(WaveFactory.thumbSafeEntry(top, sceneSize: size) == top, "a top or bottom entry is off the band")
+        let corner = CGPoint(x: -30, y: 100)
+        #expect(WaveFactory.thumbSafeEntry(corner, sceneSize: size) == corner)
+        // Real waves: 48 seeds × 60 waves, every protected entry (landing, sitting on the bog and crossing alike).
+        var protectedEntries: Int = 0
+        var sideEntries: Int = 0
+        var bad: [String] = []
+        var thumbFlies: Int = 0
+        var seed: UInt64 = 1
+        while seed <= 48 {
+            var index: Int = 1
+            while index <= 60 {
+                let drops: [NectarDrop] = WaveFactory.nectar(
+                    seed: WaveFactory.nectarSeed(seed: seed, block: (index - 1) / Tuning.nectarReseedWaves),
+                    geometry: geo)
+                let w: WaveSpec = WaveFactory.wave(seed: seed, index: index, geometry: geo, nectar: drops)
+                for x in w.bugs {
+                    if !x.species.isProtected {
+                        if WaveFactory.inThumbBand(x.entry, sceneSize: size) { thumbFlies += 1 }
+                        continue
+                    }
+                    protectedEntries += 1
+                    if x.entry.x < 0 || Double(x.entry.x) > Double(size.width) { sideEntries += 1 }
+                    if WaveFactory.inThumbBand(x.entry, sceneSize: size) {
+                        bad.append("seed \(seed) wave \(index) \(x.species) at \(x.entry)")
+                    }
+                }
+                index += 1
+            }
+            seed += 1
+        }
+        #expect(protectedEntries > 500, "protected entries \(protectedEntries)")
+        #expect(sideEntries > 100, "they still come in from the sides: \(sideEntries)")
+        #expect(bad.isEmpty, "\(bad.prefix(5))")
+        #expect(thumbFlies > 0, "only protected bugs are kept out (flies still may enter there)")
     }
 
     @Test func nectarDropsSitInClustersOnTheLobes() {

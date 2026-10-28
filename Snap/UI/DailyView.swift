@@ -11,8 +11,9 @@ struct DailyView: View {
     static func status(canPlay: Bool, record: DailyRecord?) -> String {
         if canPlay { return "One scored try today. Make it a feast." }
         guard let record else { return "Today's try is used. Practise all you like." }
-        if !record.finished { return "Today's try ended early: \(AppRules.formatted(record.score)) protein." }
-        return "Today's score: \(AppRules.formatted(record.score)) protein."
+        // R5 (REVIEW-4 #13): "score", not "protein".
+        if !record.finished { return "Today's try ended early, with a score of \(AppRules.formatted(record.score))." }
+        return "Today's score: \(AppRules.formatted(record.score))."
     }
 
     var body: some View {

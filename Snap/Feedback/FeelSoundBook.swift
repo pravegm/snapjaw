@@ -173,22 +173,43 @@ enum FeelSoundBook {
         return commands
     }
 
-    /// The empty clap (nothing caught): the rims and the teeth, a lighter thwack and thump, a puff of empty air, then
-    /// two soft falling marimba notes ("nothing…"). Smaller and drier than any CHOMP.
+    /// R5 (REVIEW-4 #10): the dry snap's hollow "clop" (the two empty lobes knocking together, like a coconut shell)
+    /// lands this long after the rims meet, at about `clopPitch` Hz.
+    static let clopAt: Float = 0.003
+    static let clopPitch: Float = 480
+    /// Its wooden body rings this long (time constant): ~5 × the teeth clicks', so it reads as hollow, not a tick.
+    static let clopRing: Float = 0.05
+
+    /// The empty clap (nothing caught). R5 (REVIEW-4 #10, the dry snap read as silent): a hollow "clop", with no
+    /// squelch, no wet thwack and no gulp. In order:
+    /// 1. the rims' bright tick;
+    /// 2. the **clop**: a hollow wooden knock (`clopPitch`, ringing `clopRing`), a square-ish (odd-harmonic) body
+    ///    falling 380 → 300 Hz in 30 ms, and a narrow band of air at ~800 Hz (the empty cavity between the lobes);
+    /// 3. the teeth clack, lighter;
+    /// 4. a small dry knock (no deep thump: nothing was squashed);
+    /// 5. two soft falling marimba notes ("nothing…"), under the Scene's "Missed!" puff.
+    /// Smaller than any CHOMP, and drier.
     static func drySnap(dice: inout FeelDice, scale: Float = 1) -> [FeelSynthCommand] {
         let s: Float = scale.isFinite ? min(max(scale, 0), 1.2) : 1
         let k = dice.float(1 - chompPitchJitter, 1 + chompPitchJitter)
         let gap = clackGap + dice.float(-clackJitter, clackJitter)
         var commands: [FeelSynthCommand] = []
+        // 1. The rims meet.
         commands.append(.noise(FeelNoiseSpec(.highPass, cutoff: 3000 * k, q: 0.7, attack: 0.0003, decay: 0.002,
-                                             gain: 0.15 * s)))
-        commands.append(.noise(FeelNoiseSpec(.lowPass, cutoff: 1800 * k, to: 400 * k, sweep: 0.05, q: 1,
-                                             attack: 0.0008, decay: 0.03, gain: 0.2 * s)))
-        commands.append(.tone(FeelToneSpec(start: 110 * k, end: 60 * k, glide: 0.05, duration: 0.16, attack: 0.0015,
-                                           decay: 0.05, gain: 0.2 * s, harmonics: 4)))
-        commands.append(contentsOf: clack(pitch: k, gap: gap, scale: 0.85 * s, dice: &dice))
-        commands.append(.noise(FeelNoiseSpec(.bandPass, cutoff: 900, q: 0.7, attack: 0.004, decay: 0.05,
-                                             gain: 0.07 * s, delay: 0.01)))
+                                             gain: 0.13 * s)))
+        // 2. The clop: a hollow wooden knock, its square-ish body and the empty cavity's air.
+        commands.append(.ring(FeelRingSpec(.wood, fundamental: clopPitch * k, partials: 3, decay: clopRing,
+                                           brightness: 0.35, gain: 0.24 * s, delay: clopAt, seed: dice.seed32())))
+        commands.append(.tone(FeelToneSpec(start: 380 * k, end: 300 * k, glide: 0.03, duration: 0.09, attack: 0.001,
+                                           decay: 0.035, gain: 0.14 * s, harmonics: 5, delay: clopAt, odd: true)))
+        commands.append(.noise(FeelNoiseSpec(.bandPass, cutoff: 800 * k, q: 5, attack: 0.0008, decay: 0.022,
+                                             gain: 0.12 * s, delay: clopAt)))
+        // 3. The teeth.
+        commands.append(contentsOf: clack(pitch: k, gap: gap, scale: 0.6 * s, dice: &dice))
+        // 4. A small dry knock (no thump).
+        commands.append(.tone(FeelToneSpec(start: 150 * k, end: 110 * k, glide: 0.03, duration: 0.07, attack: 0.001,
+                                           decay: 0.025, gain: 0.08 * s, harmonics: 3)))
+        // 5. "Nothing…".
         commands.append(.ring(FeelRingSpec(.marimba, fundamental: 392 * k, partials: 3, decay: 0.12, brightness: 0.3,
                                            gain: 0.05 * s, delay: 0.24, seed: dice.seed32())))
         commands.append(.ring(FeelRingSpec(.marimba, fundamental: 329.63 * k, partials: 3, decay: 0.16,
@@ -453,6 +474,37 @@ enum FeelSoundBook {
     /// The loss blip's two notes, `lostSpacing` apart; the whole blip is over after `lostLength`.
     static let lostSpacing: Float = 0.12
     static let lostLength: Float = 0.32
+
+    /// R5: when a frame's costly-sting loss blip plays (s after the frame): with the numeral's drop on a bite frame,
+    /// the hit-stop earlier on a frame without one. Pure.
+    static func lossAt(biting: Bool) -> Float {
+        biting ? numeralDropAt : numeralDropAt - hitStop
+    }
+
+    /// When the frame's loss blip is over (0 when no sting cost snaps): the chain's "bwoop", the warnings and the yawn
+    /// wait for it. Pure.
+    static func afterLoss(biting: Bool, stingCost: Int) -> Float {
+        stingCost > 0 ? lossAt(biting: biting) + lostLength : 0
+    }
+
+    /// R5 (REVIEW-4 #4): the run's last bite says, in order, the numeral's drop (and a costly sting's blip, at
+    /// `numeralDropAt`), then "Your trap is tired" and its yawn, at least this long after the bite. The App's tired
+    /// banner waits the same beat (`AppRules.tiredBannerDelay`), so the yawn and the banner arrive together.
+    static let tiredAfterBite: Float = 0.45
+    /// The chain-broken "bwoop" is over this long after it starts (its two notes and the knock at +0.2 s).
+    static let chainBrokenLength: Float = 0.25
+
+    /// R5 (REVIEW-4 #4): when the tired yawn plays (s after its frame). On a bite frame `tiredAfterBite` at the
+    /// earliest; after a wilt, once the droop is over (`wiltLength`); otherwise at once. Never before the frame's loss
+    /// blip is over, nor over a chain-broken "bwoop" that starts at `bwoopAt`. Pure; tested.
+    static func tiredDelay(biting: Bool, wilting: Bool, stingCost: Int, bwoopAt: Float? = nil) -> Float {
+        var at: Float = biting ? tiredAfterBite : (wilting ? wiltLength : 0)
+        at = max(at, afterLoss(biting: biting, stingCost: stingCost))
+        if let bwoop = bwoopAt, bwoop.isFinite {
+            at = max(at, max(bwoop, 0) + chainBrokenLength)
+        }
+        return at
+    }
 
     /// R3: a sting that cost snaps says "you lost something": a short descending two-note blip (R4: at `numeralDropAt`).
     /// Hollow square-ish blips (odd harmonics) doubled on the marimba, A5 then a fourth down to E5; a wasp's two

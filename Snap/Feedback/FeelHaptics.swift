@@ -202,8 +202,10 @@ enum FeelHapticBook {
 
     /// A sting: a buzzy wobble (six 35 ms segments alternating strong and weak, keen) after a firm tap. R3: `heavy` (a
     /// sting that cost snaps) hits harder: a firmer tap, a deeper wobble, and a low thud as the snap goes.
-    static func sting(at start: Double = 0, heavy: Bool = false) -> FeelHapticCue {
+    /// R5 (REVIEW-4 #7): `wasp` wobbles heavier (see `waspSting`).
+    static func sting(at start: Double = 0, heavy: Bool = false, wasp: Bool = false) -> FeelHapticCue {
         let begin = start.isFinite ? max(start, 0) : 0
+        if wasp { return waspSting(at: begin, heavy: heavy) }
         var notes: [FeelHapticNote] = [.tap(heavy ? 0.85 : 0.6, heavy ? 0.45 : 0.5, at: begin)]
         for index in 0..<6 {
             let strong = index % 2 == 0
@@ -212,6 +214,34 @@ enum FeelHapticBook {
         }
         if heavy {
             notes.append(.buzz(0.6, 0.1, at: begin + 0.21, duration: 0.08))
+        }
+        return FeelHapticCue(notes: notes)
+    }
+
+    /// R5: the wasp's second zap, this long after its first (FeelSoundBook.sting zaps a wasp twice, 0.14 s apart).
+    static let waspZapGap: Double = 0.14
+    /// R5: a wasp's wobble segments (each `waspSegment` s; four per zap).
+    static let waspSegment: Double = 0.035
+
+    /// R5 (REVIEW-4 #7): a wasp's sting is heavier than a bee's, so the −2 is felt: a firmer, rounder tap on each of
+    /// its two zaps; eight deeper, rounder wobble segments (four per zap) where a bee has six; and, when it cost snaps
+    /// (`heavy`), two low thuds as its two snaps go.
+    static func waspSting(at begin: Double, heavy: Bool) -> FeelHapticCue {
+        var notes: [FeelHapticNote] = []
+        for zap in 0..<2 {
+            let zapStart = begin + waspZapGap * Double(zap)
+            notes.append(.tap(heavy ? 0.95 : 0.75, 0.4, at: zapStart))
+            for index in 0..<4 {
+                let strong = index % 2 == 0
+                let level: Float = strong ? (heavy ? 1.0 : 0.9) : (heavy ? 0.55 : 0.45)
+                notes.append(.buzz(level, heavy ? 0.6 : 0.7, at: zapStart + waspSegment * Double(index),
+                                   duration: waspSegment))
+            }
+        }
+        if heavy {
+            let end = begin + waspZapGap + 4 * waspSegment
+            notes.append(.buzz(0.7, 0.1, at: end, duration: 0.08))
+            notes.append(.buzz(0.55, 0.1, at: end + 0.12, duration: 0.08))
         }
         return FeelHapticCue(notes: notes)
     }

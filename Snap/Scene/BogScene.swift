@@ -11,7 +11,8 @@ import UIKit
 /// Composition (scene space: origin bottom-left, y up; the trap is centred, the extra width on long phones is bog):
 /// - world (camera punch: scaled about the scene centre)
 ///   - shaker (the bite's shake)
-///     - backdrop (z 0: the cached bog with a 24 pt bleed, the trap's shadow) · light tint (z 5, multiply: bog only)
+///     - backdrop (z 0: the cached bog with a 24 pt bleed, the trap's shadow) · light tint (z 5, multiply: bog only) ·
+///       lift (z 6, add) and R5's dusk sky glow (z 6.5, add, a ramp from the top): bog only
 ///     - jaws (z 10: the trap's shadow at 2, two lobes with their thin backs, the day overlay and the rim light, the
 ///       midrib at 13, the teeth at 14, the closed trap at 16.5 (the bite's hold), the fold band at 1)
 ///     - surface (z 15: nectar drops, trigger hairs) · decals (z 16: nectar glistens)
@@ -131,6 +132,21 @@ final class BogScene: SKScene {
     var lightClock: Double { light.shownClock }
     var bogLiftAlpha: CGFloat { light.liftAlpha }
     var bogLiftColor: RGBA { light.liftRGBA }
+    /// R5 (#9): the dusk's sky glow on the bog (under the trap) now.
+    var bogSkyAlpha: CGFloat { light.skyAlpha }
+    /// R5 (#3, tests): how dark the closure shades draw the face (0 = the open-state crimson), how much of that is
+    /// the bite's own, and the open cilia's opacity.
+    var faceShade: CGFloat { jaws.faceShade }
+    var biteShade: CGFloat { jaws.closingLevel }
+    var ciliaAlpha: CGFloat { jaws.teethAlpha }
+    /// R5 (#15, tests): bug `id`'s airborne cue over the crease (0 … 1) and its shadow's offset.
+    func creaseCue(ofBug id: Int) -> CGFloat? { bugs.creaseCue(id) }
+    func shadowOffset(ofBug id: Int) -> CGPoint? { bugs.shadowOffset(id) }
+    /// R5 (#12, tests): the glyph flights' sampled paths (scene space) for the flights still in the air.
+    var glyphPaths: [[CGPoint]] { economy.activePaths }
+    /// R5 (#12, tests): every free (uncaught) bug's footprint now (scene space, unshaken: its art, wings and ring), as
+    /// the pops avoid them.
+    var bugRects: [CGRect] { currentBugRects(snapshot) }
     /// QA-2 #2/#6 (tests): the sting cost the numeral is waiting on, and where the row flash is.
     var pendingCrackCost: Int { economy.pendingCrackCost }
     var rowFlashCenter: CGPoint { economy.rowFlashCenter }
@@ -238,6 +254,7 @@ final class BogScene: SKScene {
         shaker.addChild(backdrop)
         shaker.addChild(light.tint)
         shaker.addChild(light.lift)
+        shaker.addChild(light.sky)
         shaker.addChild(jaws.root)
         shaker.addChild(surface.root)
         shaker.addChild(effects.decalRoot)
@@ -450,6 +467,8 @@ final class BogScene: SKScene {
         var chained = false
         var broken = false
         let tint = light.envTint
+        // R5 (#12): no pop is ever placed over a bug.
+        let obstacles = currentBugRects(s)
 
         for e in events {
             switch e {
@@ -559,29 +578,31 @@ final class BogScene: SKScene {
             let rise: CGFloat = hero ? 30 : 44
             // A clean bite that keeps the chain going without growing it says so ("×1.5 held").
             let held = !stung && !broken && !chained && r.chainMultiplier > 1.001
-            let extra = CGFloat(lucky.count + (held ? 1 : 0)) * 32
+            // R5 (#12): room for each line under the callout, with its own rise (they never stack into one another).
+            let extra = CGFloat(lucky.count + (held ? 1 : 0)) * BogScene.lineStep
             let pt = placePop(label, size: &size, near: CGPoint(x: a.x, y: a.y + 2 * caughtRadius + 20), side: side,
-                              hero: hero, rise: rise, minY: extra, minSize: BogScene.minCatchPop)
+                              hero: hero, rise: rise, minY: extra, minSize: BogScene.minCatchPop, avoid: obstacles)
             pops.pop(label, at: pt, size: size, fill: BogPaint.ui(pal.gold), stroke: BogPaint.ui(pal.ink), rise: rise,
                      life: hero ? 1.5 : 1.2, hero: hero)
             heroSaidStung = stung
-            var y = pt.y - size * 0.55 - 16
+            var y = pt.y - size * 0.6 - 30
             if held {
                 var hs: CGFloat = 28
                 let text = BogScene.heldLabel(r.chainMultiplier)
                 let hp = placePop(text, size: &hs, near: CGPoint(x: pt.x, y: y), side: side, hero: false, rise: 30,
-                                  minSize: 24)
+                                  minSize: 24, avoid: obstacles, downFirst: true)
                 pops.pop(text, at: hp, size: hs, fill: BogPaint.ui(TrapArt.sipRing), stroke: BogPaint.ui(pal.ink),
                          rise: 30, delay: 0.1, life: 1.2)
-                y -= 32
+                y = hp.y - BogScene.lineStep
             }
             for sp in lucky {
                 var ls: CGFloat = 28
                 let text = BogScene.luckyLabel(sp)
-                let lp = placePop(text, size: &ls, near: CGPoint(x: pt.x, y: y), side: side, hero: false, rise: 30)
+                let lp = placePop(text, size: &ls, near: CGPoint(x: pt.x, y: y), side: side, hero: false, rise: 30,
+                                  avoid: obstacles, downFirst: true)
                 pops.pop(text, at: lp, size: ls, fill: BogPaint.ui(TrapArt.sipRing), stroke: BogPaint.ui(pal.ink),
                          rise: 30, delay: 0.12, life: 1.3)
-                y -= 32
+                y = lp.y - BogScene.lineStep
             }
             if hero {
                 effects.sparkBurst(at: a, count: 12, color: BogPaint.ui(TrapArt.sipRing), speed: 240, size: 22)
@@ -589,9 +610,10 @@ final class BogScene: SKScene {
             if r.snapsBack > 0 && showsEconomy {
                 // QA-2 #2/#3: every glyph flies, but only the snaps Core really added hold the numeral back (at the
                 // cap, or in the lesson, the number never dips).
+                // R5 (#12): the glyphs take the arc that crosses the fewest live pops (never over "Golden!").
                 economy.fly(count: r.snapsBack,
                             counted: BogScene.countedFlights(snapsBack: r.snapsBack, before: before, after: s.snapsLeft),
-                            from: a, to: snapsAnchor)
+                            from: a, to: snapsAnchor, avoid: livePopRects)
             }
         }
         // "Bzzt!" above the bee's ring (R3 #14: never over the bee; under the ring when there's no room above), on
@@ -607,13 +629,13 @@ final class BogScene: SKScene {
             let over = 1 + BogPops.overshoot(hero: false)
             var box = BogPops.measure(text, size: size)
             var c = placePop(text, size: &size, near: CGPoint(x: p.x, y: p.y + ring + 8 + box.height * over / 2),
-                             side: sideOf(p.x), hero: false, rise: 36)
+                             side: sideOf(p.x), hero: false, rise: 36, avoid: obstacles)
             box = BogPops.measure(text, size: size)
             let overlaps = c.y - box.height * over / 2 < p.y + ring && abs(c.x - p.x) < box.width * over / 2 + ring
             let yellow = BogPaint.ui(RGBA(hex: 0xFFD23A))
             if overlaps {
                 c = placePop(text, size: &size, near: CGPoint(x: p.x, y: p.y - ring - 14 - box.height * over / 2),
-                             side: sideOf(p.x), hero: false, rise: 8)
+                             side: sideOf(p.x), hero: false, rise: 8, avoid: obstacles, downFirst: true)
                 pops.pop(text, at: c, size: size, fill: yellow, stroke: BogPaint.ui(pal.ink), rise: 8)
             } else {
                 pops.pop(text, at: c, size: size, fill: yellow, stroke: BogPaint.ui(pal.ink), rise: 36)
@@ -627,6 +649,17 @@ final class BogScene: SKScene {
             effects.puff(from: CGPoint(x: g.center.x, y: g.center.y - g.b * 0.6),
                          to: CGPoint(x: g.center.x, y: g.center.y + g.b * 0.6), count: 5,
                          color: UIColor(white: 0.85, alpha: 1), size: 34)
+            // R5 (#10): a dry snap says so. A soft dusty puff at the seam (where the jaws met on nothing) and "Missed!"
+            // beside it, on the half without the HUD, clear of the crease; pale and quiet (no squelch, no juice).
+            let at = CGPoint(x: g.center.x, y: g.center.y + g.b * BogScene.missedHeight)
+            effects.puff(from: CGPoint(x: at.x, y: at.y - 24), to: CGPoint(x: at.x, y: at.y + 24), count: 4,
+                         color: BogPaint.ui(BogScene.missedColor), size: 46)
+            var ms: CGFloat = 32
+            let side = layout.hudOnLeft ? 1 : -1
+            let mp = placePop(BogScene.missedLabel, size: &ms, near: at, side: side, hero: false, rise: 18,
+                              minSize: 24, avoid: obstacles)
+            pops.pop(BogScene.missedLabel, at: mp, size: ms, fill: BogPaint.ui(BogScene.missedColor),
+                     stroke: BogPaint.ui(pal.ink), rise: 18, life: 0.9)
         }
         if wilted && showsEconomy {
             // R3 (#15): "Too slow! −1 snap", a crimson tag just over the snaps row, and the glyph droops off it.
@@ -634,7 +667,8 @@ final class BogScene: SKScene {
             var size: CGFloat = 28
             let text = BogScene.wiltedLabel
             let p = placePop(text, size: &size, near: CGPoint(x: anchor.x + 60, y: anchor.y + 46),
-                             side: sideOf(anchor.x), hero: false, rise: 18, inTrap: false, minSize: 20)
+                             side: sideOf(anchor.x), hero: false, rise: 18, inTrap: false, minSize: 20,
+                             avoid: obstacles)
             pops.pop(text, at: p, size: size, fill: BogPaint.ui(BogScene.wiltColor), stroke: BogPaint.ui(pal.ink),
                      rise: 18, life: 1.6)
             economy.wilt(at: anchor)
@@ -643,7 +677,7 @@ final class BogScene: SKScene {
             var size: CGFloat = 30
             let side = layout.hudOnLeft ? 1 : -1
             let p = placePop("New best!", size: &size, near: CGPoint(x: g.center.x, y: g.center.y + g.b * 0.62),
-                             side: side, hero: false, rise: 24)
+                             side: side, hero: false, rise: 24, avoid: obstacles)
             pops.pop("New best!", at: p, size: size, fill: BogPaint.ui(pal.gold), stroke: BogPaint.ui(pal.ink),
                      rise: 24, delay: 0.3, life: 1.6)
         }
@@ -660,8 +694,14 @@ final class BogScene: SKScene {
     /// Where a pop of `text` goes near `p` (R2 #11): on `side`'s half, its box (with the pop-in overshoot) at least
     /// `creaseClear` from the crease band and inside the trap (or the canvas when `inTrap` is false), with room above
     /// for its rise and below for `minY` of lines under it (QA-1 #23). `size` shrinks if the text can't fit.
+    ///
+    /// R5 (#12): it also keeps its whole footprint (the box at its overshoot, swept up its rise, `popGap` round it) off
+    /// every rect in `avoid` (the bugs on screen) and off every live pop, trying nearby spots in order of distance
+    /// (downward first for the lines under a callout, so a stack spreads out instead of overlapping). If nowhere is
+    /// clear it takes the spot that overlaps least.
     private func placePop(_ text: String, size: inout CGFloat, near p: CGPoint, side: Int, hero: Bool, rise: CGFloat,
-                          minY: CGFloat = 0, inTrap: Bool = true, minSize: CGFloat = 12) -> CGPoint {
+                          minY: CGFloat = 0, inTrap: Bool = true, minSize: CGFloat = 12, avoid: [CGRect] = [],
+                          downFirst: Bool = false) -> CGPoint {
         let g = layout.geometry
         let over = 1 + BogPops.overshoot(hero: hero)
         let w = layout.size.width, h = layout.size.height
@@ -686,11 +726,77 @@ final class BogScene: SKScene {
             box = BogPops.measure(text, size: size)
         }
         let half = box.width * over / 2
-        let x: CGFloat = lo + half <= hi - half ? min(max(p.x, lo + half), hi - half) : (lo + hi) / 2
         let floorY = (inTrap ? g.center.y - g.b + 40 : 40) + minY + box.height / 2
         let ceilY = (inTrap ? min(g.center.y + g.b - 30, h - 24) : h - 24) - rise - box.height / 2
-        let y = floorY <= ceilY ? min(max(p.y, floorY), ceilY) : ceilY
-        return CGPoint(x: x, y: y)
+        func clampX(_ v: CGFloat) -> CGFloat {
+            lo + half <= hi - half ? min(max(v, lo + half), hi - half) : (lo + hi) / 2
+        }
+        func clampY(_ v: CGFloat) -> CGFloat { floorY <= ceilY ? min(max(v, floorY), ceilY) : ceilY }
+        let start = CGPoint(x: clampX(p.x), y: clampY(p.y))
+        let blocks = avoid + pops.liveRects
+        guard !blocks.isEmpty else { return start }
+        let hh = box.height * over / 2
+        func cost(_ c: CGPoint) -> CGFloat {
+            let foot = BogScene.popFootprint(center: c, halfWidth: half, halfHeight: hh, rise: rise)
+            var a: CGFloat = 0
+            for b in blocks {
+                let i = foot.intersection(b)
+                if !i.isNull { a += i.width * i.height + 1 }
+            }
+            return a
+        }
+        var best = start
+        var bestCost = cost(start)
+        if bestCost <= 0 { return best }
+        for o in BogScene.popOffsets(downFirst: downFirst) {
+            let c = CGPoint(x: clampX(start.x + o.x), y: clampY(start.y + o.y))
+            let k = cost(c)
+            if k < bestCost {
+                best = c
+                bestCost = k
+                if k <= 0 { break }
+            }
+        }
+        return best
+    }
+
+    /// R5 (#12): how far a pop keeps from bugs and other pops (points, every side).
+    static let popGap: CGFloat = 4
+
+    /// R5 (#12): a pop's footprint for its whole life: its box at the pop-in overshoot (half extents `halfWidth`,
+    /// `halfHeight`) about `center`, swept up its `rise`, with its drop shadow and `popGap` round it.
+    static func popFootprint(center c: CGPoint, halfWidth: CGFloat, halfHeight: CGFloat, rise: CGFloat) -> CGRect {
+        CGRect(x: c.x - halfWidth, y: c.y - halfHeight - 3, width: 2 * halfWidth + 2,
+               height: 2 * halfHeight + 3 + max(rise, 0)).insetBy(dx: -popGap, dy: -popGap)
+    }
+
+    /// R5 (#12): the spots a pop tries, nearest first (sideways costs a little more than up or down; with
+    /// `downFirst`, going up costs more than going down).
+    static func popOffsets(downFirst: Bool) -> [CGPoint] {
+        var out: [(CGPoint, CGFloat)] = []
+        for dx in [CGFloat(0), 44, -44, 88, -88, 132, -132] {
+            for dy in stride(from: CGFloat(-176), through: 176, by: 22) where dx != 0 || dy != 0 {
+                let up = dy > 0 ? dy * (downFirst ? 1.8 : 1) : -dy
+                out.append((CGPoint(x: dx, y: dy), abs(dx) * 1.25 + up))
+            }
+        }
+        out.sort { $0.1 < $1.1 }
+        return out.map { $0.0 }
+    }
+
+    /// R5 (#12): every free bug's footprint now (shaker space, as the pops are placed): its art and wings (1.25 r), or
+    /// its protected ring. Caught bugs don't count: they leave for the seam within 60 ms (`sinkTime`), before a pop
+    /// has even settled, and the seam is off limits to pops anyway.
+    private func currentBugRects(_ s: TrapSnapshot) -> [CGRect] {
+        var out: [CGRect] = []
+        for b in s.bugs {
+            if case .caught = b.activity { continue }
+            let p = bugs.drawnPoint(b.id) ?? b.position
+            let r = bugs.radius(b.species)
+            let half = b.species.isProtected ? r * TrapArt.protectedRingScale + 4 : r * 1.25
+            out.append(CGRect(x: p.x - half, y: p.y - half, width: 2 * half, height: 2 * half))
+        }
+        return out
     }
 
     // MARK: Words (scene labels; the HUD's words are the UI's)
@@ -727,6 +833,13 @@ final class BogScene: SKScene {
     static let wiltColor = RGBA(hex: 0xFF4D5E)
     /// R3 (#15): the smallest a catch pop is ever drawn (points, before its overshoot).
     static let minCatchPop: CGFloat = 28
+    /// R5 (#12): the room each line under a callout takes ("×2 held", "Golden!").
+    static let lineStep: CGFloat = 56
+    /// R5 (#10): the dry snap's word, its pale dusty colour, and where on the seam it puffs (× the trap's half
+    /// height above the centre: the upper third, clear of a crowd sipping low).
+    static let missedLabel = "Missed!"
+    static let missedColor = RGBA(hex: 0xE9E2D0)
+    static let missedHeight: CGFloat = 0.3
 
     /// R3 (#8): a bite with a stinger in it: "Stung! · +172" (it scored ×1).
     static func stungLabel(points: Int) -> String { "Stung! · +\(number(points))" }

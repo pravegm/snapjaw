@@ -29,12 +29,43 @@ struct SessionOptions: Equatable {
     /// Feed only: a session of any other mode ignores it, so a Daily always plays by the standard rules (if a player's
     /// first ever run is the Daily, it is standard and their first Feed run still gets the perks). The App decides
     /// "first Feed run" on a Feed-only count.
-    var firstRun: Bool = false
+    /// R5: this is now `sproutRun == 1` (setting it true sets sproutRun to 1; false clears only a run-1 taper).
+    var firstRun: Bool {
+        get { return sproutRun == 1 }
+        set {
+            if newValue {
+                sproutRun = 1
+            } else if sproutRun == 1 {
+                sproutRun = 0
+            }
+        }
+    }
+    /// R5 (REVIEW-4 #8, founder call): the Sprout taper's Feed run (1, 2 or 3; 0 = none; anything past
+    /// Tuning.sproutTaperRuns plays standard). See SproutPerks.forFeedRun. Feed only, like `firstRun`: a session of any
+    /// other mode ignores it. Build it with `SessionOptions.sprout(feedRun:)`.
+    var sproutRun: Int = 0
 
     init(snapsRunOut: Bool = true, waves: Bool = true, stingCosts: Bool = true) {
         self.snapsRunOut = snapsRunOut
         self.waves = waves
         self.stingCosts = stingCosts
+    }
+
+    /// R5 (REVIEW-4 #8): Feed options for a Sprout's Feed run number `feedRun` (1-based: 1 is the player's first Feed
+    /// run, so pass the count of finished Feed runs + 1). Runs 1–3 carry the taper (sproutRun); run 4 on, and
+    /// anything ≤ 0, are the standard Feed options. `startSnaps` stays nil: the taper's snaps override it anyway.
+    static func sprout(feedRun: Int) -> SessionOptions {
+        var o: SessionOptions = SessionOptions.for(.feed)
+        o.sproutRun = SproutPerks.forFeedRun(feedRun) == nil ? 0 : feedRun
+        return o
+    }
+
+    /// R5: the taper perks a session of this mode gets (Feed only; nil for the Daily, attract, the lesson and runs 4+).
+    func sproutPerks(for mode: RunMode) -> SproutPerks? {
+        switch mode {
+        case .feed: return SproutPerks.forFeedRun(sproutRun)
+        case .daily, .attract, .lesson: return nil
+        }
     }
 
     static func `for`(_ mode: RunMode) -> SessionOptions {
@@ -54,6 +85,39 @@ struct SessionOptions: Equatable {
         switch mode {
         case .feed: return true
         case .daily, .attract, .lesson: return false
+        }
+    }
+}
+
+// MARK: - R5 (REVIEW-4 #8, founder call): the Sprout taper
+
+/// What a Sprout's first Feed runs get. Run 1: 14 snaps, no wilting, a free first sting and the calm morning. Run 2:
+/// 13 snaps, a free first sting and the calm morning (it wilts). Run 3: 12 snaps and the calm morning. Run 4 on: none
+/// (the standard rules, with whatever `startSnaps` the App passes).
+struct SproutPerks: Equatable {
+    /// 1…Tuning.sproutTaperRuns.
+    var run: Int
+    /// The run starts with this many, whatever SessionOptions.startSnaps says.
+    var startSnaps: Int
+    /// The run never wilts.
+    var noWilt: Bool
+    /// Its first stinger bite costs no extra snap (as SessionOptions.freeFirstSting).
+    var freeSting: Bool
+    /// Waves 1…Tuning.firstRunCalmWaves are crowds, each followed by Tuning.firstRunWaveGap × the usual gap.
+    var calmMorning: Bool
+
+    static func forFeedRun(_ run: Int) -> SproutPerks? {
+        guard run >= 1 && run <= Tuning.sproutTaperRuns else { return nil }
+        switch run {
+        case 1:
+            return SproutPerks(run: 1, startSnaps: Tuning.firstRunSnaps, noWilt: true, freeSting: true,
+                               calmMorning: true)
+        case 2:
+            return SproutPerks(run: 2, startSnaps: Tuning.sproutRun2Snaps, noWilt: false, freeSting: true,
+                               calmMorning: true)
+        default:
+            return SproutPerks(run: run, startSnaps: Tuning.sproutRun3Snaps, noWilt: false, freeSting: false,
+                               calmMorning: true)
         }
     }
 }
@@ -79,6 +143,8 @@ struct SessionOptions: Equatable {
 // protected bug has (night wilt 14 s); SessionOptions.firstRun (Feed only: 14 snaps, no wilting, the first sting free,
 // a calm first morning); ground moves and the hover keep to the bug's own lobe and a walker walks in on its spot's
 // side, so nothing walks, rests or hovers low within creaseHalfWidth + radius of the midrib (Tuning.creaseAirHeight).
+// R5 (design/notes/core-R5.md): a protected bug pauses the hunger clock from its final approach (in the zone and below
+// creaseAirHeight); the Sprout taper (SessionOptions.sproutRun / sprout(feedRun:), SproutPerks: runs 1–3).
 // Mirrored by Session in tools/balance-sim.js (minus events, hints, telemetry and results).
 
 final class TrapSession {
@@ -88,8 +154,10 @@ final class TrapSession {
     let best: Int
     let geometry: TrapGeometry
     let options: SessionOptions
-    /// R4: options.firstRun, for a Feed session (SessionOptions.firstRunApplies).
+    /// R4: options.firstRun, for a Feed session (SessionOptions.firstRunApplies). R5: sproutPerks?.run == 1.
     let firstRunPerks: Bool
+    /// R5 (REVIEW-4 #8): the Sprout taper this session plays (SessionOptions.sproutPerks(for:); nil = standard).
+    let sproutPerks: SproutPerks?
 
     fileprivate enum Mode: Equatable {
         case approach, hover, sip, pause, dash, hop, cross, leave, escape, release, caught
@@ -224,12 +292,14 @@ final class TrapSession {
         self.best = best
         self.geometry = geometry
         self.options = options
-        self.firstRunPerks = options.firstRunApplies(to: mode)
+        let perks: SproutPerks? = options.sproutPerks(for: mode)
+        self.sproutPerks = perks
+        self.firstRunPerks = perks?.run == 1
         let first: Int = max(1, options.firstWave)
         self.wave = first - 1
         self.dayPhase = WaveFactory.phase(forWave: first)
         self.nectarBlock = (first - 1) / Tuning.nectarReseedWaves
-        let start: Int = firstRunPerks ? Tuning.firstRunSnaps : (options.startSnaps ?? Tuning.startSnaps)
+        let start: Int = perks?.startSnaps ?? (options.startSnaps ?? Tuning.startSnaps)
         self.snapsLeft = min(max(start, 1), Tuning.maxSnaps)
         installNectar(block: nectarBlock)
         bugs.reserveCapacity(Tuning.maxBugsOnScreen)
@@ -247,14 +317,20 @@ final class TrapSession {
         return false
     }
 
-    /// R2: does this run wilt (feed and daily; never the lesson or attract)? R4: never a first run either.
+    /// R2: does this run wilt (feed and daily; never the lesson or attract)? R4: never a first run either. R5: never
+    /// a taper run with noWilt (run 1).
     private var wilts: Bool {
-        return options.snapsRunOut && options.hunger && !firstRunPerks
+        return options.snapsRunOut && options.hunger && !(sproutPerks?.noWilt ?? false)
     }
 
-    /// R4: is the first stinger bite free (SessionOptions.freeFirstSting, or a first run)?
+    /// R4: is the first stinger bite free (SessionOptions.freeFirstSting, or a first run)? R5: or Sprout run 2.
     private var freeSting: Bool {
-        return options.freeFirstSting || firstRunPerks
+        return options.freeFirstSting || (sproutPerks?.freeSting ?? false)
+    }
+
+    /// R4/R5: the calm morning (Sprout runs 1–3).
+    private var calmMorning: Bool {
+        return sproutPerks?.calmMorning ?? false
     }
 
     /// R2: seconds without a catching bite before a snap wilts, in this day phase.
@@ -437,14 +513,26 @@ final class TrapSession {
     }
 
     /// R4 (QA-2 #1, REVIEW-3 #12, founder call): at least one catchable bug has landed in the trap (and is still in
-    /// it: not leaving, escaping, released or caught) and no protected bug has.
+    /// it: not leaving, escaping, released or caught) and no protected bug is in it.
+    /// R5 (REVIEW-4 #5, founder call): a protected bug counts as in the trap from its final approach: inside the zone
+    /// and landed, or below Tuning.creaseAirHeight (its hover down, with the halo drawn). Higher arrivals don't count,
+    /// so the deep night's always-arriving bees still leave the clock running.
     private func hungerTicks() -> Bool {
         var food: Bool = false
-        for b in bugs where b.landed && inTrap(b) {
-            if b.species.isProtected { return false }
-            food = true
+        for b in bugs where inTrap(b) {
+            if b.species.isProtected {
+                if TrapSession.protectedCountsAsIn(landed: b.landed, height: b.height) { return false }
+            } else if b.landed {
+                food = true
+            }
         }
         return food
+    }
+
+    /// R5 (REVIEW-4 #5): a protected bug inside the zone pauses the hunger clock once it has landed or is lower than
+    /// Tuning.creaseAirHeight (its final approach). Pure; tested.
+    static func protectedCountsAsIn(landed: Bool, height: Double) -> Bool {
+        return landed || height < Tuning.creaseAirHeight
     }
 
     /// Snaps reached 0: "Your trap is tired." Every bug still about takes off.
@@ -476,7 +564,7 @@ final class TrapSession {
         }
         let recipe: Int = recipeIndex(idx)
         let spec: WaveSpec = WaveFactory.wave(seed: seed, index: recipe, geometry: geometry, nectar: nectar,
-                                              calm: firstRunPerks)
+                                              calm: calmMorning)
         out.append(.waveStarted(index: idx, phase: spec.phase))
         if spec.phase != dayPhase {
             dayPhase = spec.phase
@@ -486,8 +574,8 @@ final class TrapSession {
         for s in spec.bugs { pending.append(PendingSpawn(at: at + s.groupOffset, spec: s)) }
         lastWaveAt = at
         var gap: Double = WaveFactory.delay(seed: seed, index: recipe + 1)
-        // R4 (REVIEW-3 #11): a first run's calm morning.
-        if firstRunPerks && idx <= Tuning.firstRunCalmWaves { gap *= Tuning.firstRunWaveGap }
+        // R4 (REVIEW-3 #11): a first run's calm morning. R5 (REVIEW-4 #8): Sprout runs 1–3.
+        if calmMorning && idx <= Tuning.firstRunCalmWaves { gap *= Tuning.firstRunWaveGap }
         nextWaveAt = at + gap
     }
 

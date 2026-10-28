@@ -121,11 +121,76 @@ final class BogEconomy {
         landedCount = 0
     }
 
+    /// R5 (#12): the arc a glyph takes from `from` to `to` (its start and Bézier control) that crosses the fewest of
+    /// `avoid` (the live pops, scene space): the R4 high arc when it is clear, else a low arc under the pops, a dogleg
+    /// down then across, or a higher arc; the start may move a little off a pop it would begin on.
+    static func route(from: CGPoint, to: CGPoint, avoid: [CGRect]) -> (start: CGPoint, control: CGPoint) {
+        let high = CGPoint(x: (from.x + to.x) / 2, y: max(from.y, to.y) + 140)
+        guard !avoid.isEmpty else { return (from, high) }
+        var best = (start: from, control: high)
+        var bestHits = Int.max
+        // The bite's own spot first, then a little above or below it, then out towards the row (clear of the stack of
+        // lines under the callout).
+        let dir: CGFloat = to.x >= from.x ? 1 : -1
+        let starts = [from, CGPoint(x: from.x, y: from.y + 36), CGPoint(x: from.x, y: from.y - 36),
+                      CGPoint(x: from.x + dir * 90, y: from.y), CGPoint(x: from.x + dir * 150, y: from.y),
+                      CGPoint(x: from.x + dir * 150, y: from.y - 40), CGPoint(x: from.x + dir * 210, y: from.y)]
+        for s in starts {
+            let controls = [CGPoint(x: (s.x + to.x) / 2, y: max(s.y, to.y) + 140),
+                            CGPoint(x: (s.x + to.x) / 2, y: min(s.y, to.y) - 40),
+                            CGPoint(x: s.x, y: to.y),
+                            CGPoint(x: to.x, y: max(s.y, to.y) + 40),
+                            CGPoint(x: (s.x + to.x) / 2, y: max(s.y, to.y) + 260)]
+            for c in controls {
+                let crossed = BogEconomy.hits(start: s, control: c, end: to, avoid: avoid)
+                if crossed < bestHits {
+                    bestHits = crossed
+                    best = (start: s, control: c)
+                }
+                if bestHits == 0 { return best }
+            }
+        }
+        return best
+    }
+
+    /// R5 (#12): how many of 25 points along a glyph's arc put its box (`glyphSize`) on any of `avoid`.
+    static func hits(start: CGPoint, control: CGPoint, end: CGPoint, avoid: [CGRect]) -> Int {
+        var n = 0
+        let gs = BogTextures.glyphSize
+        for p in BogEconomy.arc(start: start, control: control, end: end, samples: 24) {
+            let box = CGRect(x: p.x - gs.width / 2, y: p.y - gs.height / 2, width: gs.width, height: gs.height)
+            if avoid.contains(where: { $0.intersects(box) }) { n += 1 }
+        }
+        return n
+    }
+
+    /// Points along the quadratic arc start → control → end (`samples` + 1 of them).
+    static func arc(start: CGPoint, control: CGPoint, end: CGPoint, samples: Int) -> [CGPoint] {
+        let n = max(samples, 1)
+        var out: [CGPoint] = []
+        for i in 0...n {
+            let e = CGFloat(i) / CGFloat(n)
+            let a = 1 - e
+            out.append(CGPoint(x: a * a * start.x + 2 * a * e * control.x + e * e * end.x,
+                               y: a * a * start.y + 2 * a * e * control.y + e * e * end.y))
+        }
+        return out
+    }
+
+    /// R5 (#12, tests): the arcs of the glyphs still in the air.
+    var activePaths: [[CGPoint]] {
+        flights.filter { $0.active && !$0.landed }.map {
+            BogEconomy.arc(start: $0.start, control: $0.control, end: $0.end, samples: 24)
+        }
+    }
+
     /// `count` snap glyphs fly from `from` to `to`, one after another; only the first `counted` of them hold the
-    /// numeral back (QA-2 #2: the snaps Core really added; nil = all of them).
-    func fly(count: Int, counted: Int? = nil, from: CGPoint, to: CGPoint) {
+    /// numeral back (QA-2 #2: the snaps Core really added; nil = all of them). R5 (#12): their arc keeps off `avoid`
+    /// (the live pops, scene space) where it can.
+    func fly(count: Int, counted: Int? = nil, from: CGPoint, to: CGPoint, avoid: [CGRect] = []) {
         guard count > 0 else { return }
         let real = min(max(counted ?? count, 0), count)
+        let way = BogEconomy.route(from: from, to: to, avoid: avoid)
         for k in 0..<min(count, glyphs.count) {
             var slot = -1
             for j in 0..<flights.count where !flights[(cursor + j) % flights.count].active {
@@ -135,9 +200,9 @@ final class BogEconomy {
             if slot < 0 { slot = cursor }
             cursor = (slot + 1) % flights.count
             let fan = CGFloat(k) - CGFloat(count - 1) / 2
-            let start = CGPoint(x: from.x + fan * 14, y: from.y)
-            // An arc that rises first, then swoops down into the row.
-            let control = CGPoint(x: (start.x + to.x) / 2, y: max(start.y, to.y) + 140)
+            let start = CGPoint(x: way.start.x + fan * 14, y: way.start.y)
+            // An arc that rises first, then swoops down into the row (R5: or the route round the pops).
+            let control = CGPoint(x: way.control.x + fan * 7, y: way.control.y)
             flights[slot] = Flight(start: start, control: control, end: to, delay: Double(k) * BogEconomy.flightGap,
                                    age: 0, active: true, landed: false, counts: k < real)
             let g = glyphs[slot]

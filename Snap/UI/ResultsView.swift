@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Results: the protein as a big counting number, new best, the one sentence naming the best moment (on the other
+/// Results: the score as a big counting number, new best, the one sentence naming the best moment (on the other
 /// page), then bugs caught, best bite, longest chain, bees spared, new Bug Book pages, the rank bar and Again / Home
 /// (on the HUD page, the sharp half).
 struct ResultsView: View {
@@ -64,7 +64,8 @@ struct ResultsView: View {
                                                 endPoint: .bottom))
                 .shadow(color: SnapTheme.crimsonDeep, radius: 0, x: 0, y: 4)
                 .snapLegible()
-            Text("protein")
+            // R5 (REVIEW-4 #13, founder call): "score", not "protein".
+            Text(AppRules.scoreWord)
                 .font(SnapType.headline(c))
                 .foregroundStyle(SnapTheme.mist)
             if o.showsNewBest {
@@ -157,7 +158,21 @@ struct ResultsView: View {
                     Text(summary.againLabel)
                 }
             }
+            if let share = Self.shareText(r) {
+                // R5 (ROUND-5, player 7): the Daily's one line for the group chat (no link until launch).
+                ShareLink(item: share) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(SnapButtonStyle(kind: .secondary, height: SnapTheme.secondaryHeight, compact: c))
+                .accessibilityHint("Share today's Daily Bog score")
+            }
         }
+    }
+
+    /// The Daily share's line: the scored Daily only (a practice run isn't the day's score). Pure; tested.
+    static func shareText(_ r: RunResult) -> String? {
+        guard case let .daily(day, scored) = r.mode, scored else { return nil }
+        return AppRules.dailyShareText(day: day, score: r.score, biggestBite: r.biggestBite)
     }
 
     private func rankCard(_ c: Bool) -> some View {

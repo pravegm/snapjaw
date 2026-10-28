@@ -1922,6 +1922,131 @@ struct FeelTests {
         #expect(director.lossBlips == 1)
     }
 
+    @Test func theTiredYawnWaitsForTheNumeralAndTheBlip() {
+        // R5 (REVIEW-4 #4): the last bite drops the numeral (and plays a costly sting's blip) at 0.20 s; the yawn
+        // comes at least 0.45 s after the bite, after the blip and any chain "bwoop", with the App's tired banner.
+        let plain = FeelSoundBook.tiredDelay(biting: true, wilting: false, stingCost: 0)
+        #expect(abs(plain - FeelSoundBook.tiredAfterBite) < 1e-6)
+        #expect(plain >= 0.45 - 1e-6)
+        #expect(plain > FeelSoundBook.numeralDropAt)
+        #expect(abs(Double(FeelSoundBook.tiredAfterBite) - AppRules.tiredBannerDelay) < 1e-6,
+                "the yawn and the banner share the beat")
+        let costly = FeelSoundBook.tiredDelay(biting: true, wilting: false, stingCost: 2)
+        let blipOver = FeelSoundBook.numeralDropAt + FeelSoundBook.lostLength
+        #expect(costly >= blipOver - 1e-6, "after the loss blip: \(costly)")
+        #expect(costly >= 0.45 - 1e-6)
+        let afterBwoop = FeelSoundBook.tiredDelay(biting: true, wilting: false, stingCost: 0, bwoopAt: 0.45)
+        #expect(afterBwoop >= 0.45 + FeelSoundBook.chainBrokenLength - 1e-6)
+        let wilt = FeelSoundBook.tiredDelay(biting: false, wilting: true, stingCost: 0)
+        #expect(abs(wilt - FeelSoundBook.wiltLength) < 1e-6, "a wilt to zero: after the droop")
+        #expect(FeelSoundBook.tiredDelay(biting: false, wilting: false, stingCost: 0) == 0)
+        #expect(FeelSoundBook.tiredDelay(biting: true, wilting: false, stingCost: 0, bwoopAt: Float.nan).isFinite)
+        // The director, on three last bites.
+        let director = FeedbackDirector()
+        director.soundOn = false
+        director.hapticsOn = false
+        let playing = TrapTelemetry(closure: 0, creeping: false, buzzers: [], chain: 0, dayClock: 1, playing: true)
+        director.handle([.snapped(feelBite(caught: [.housefly])),
+                         .bugCaught(id: 1, species: .housefly, position: CGPoint(x: 300, y: 300)), .tired],
+                        telemetry: playing)
+        #expect(director.yawns == 1)
+        #expect(abs(director.lastYawnAt - FeelSoundBook.tiredAfterBite) < 1e-6)
+        director.handle([.snapped(feelBite(caught: [], stingers: [.wasp])), .stung(id: 2, species: .wasp, cost: 2),
+                         .tired], telemetry: playing)
+        #expect(director.yawns == 2)
+        #expect(director.lossBlips == 1)
+        #expect(director.lastYawnAt >= director.lastLossBlipAt + FeelSoundBook.lostLength - 1e-6,
+                "the yawn \(director.lastYawnAt) after the blip at \(director.lastLossBlipAt)")
+        director.handle([.snapped(feelBite(caught: [])), .chainBroken(count: 3), .drySnap, .tired],
+                        telemetry: playing)
+        #expect(director.yawns == 3)
+        #expect(director.lastYawnAt >= FeedbackDirector.chainBrokenAt + FeelSoundBook.chainBrokenLength - 1e-6)
+    }
+
+    @Test func aDrySnapIsAHollowClopWithNoSquelch() {
+        // R5 (REVIEW-4 #10): the dry snap was silent in frames and thin by ear. Now a hollow "clop": a ringing wooden
+        // knock at clopPitch, a square-ish body and an empty-cavity band, with no squelch, bubbles or gulp.
+        var dice = FeelDice(seed: 51)
+        for _ in 0..<12 {
+            let dry = FeelSoundBook.drySnap(dice: &dice)
+            var clops = 0
+            var hollow = 0
+            var wet = 0
+            var deep = 0
+            for command in dry {
+                switch command {
+                case .ring(let spec):
+                    if spec.kind == .wood && spec.decay >= FeelSoundBook.clopRing - 1e-6
+                        && spec.fundamental > 300 && spec.fundamental < 700 && spec.delay < 0.02 {
+                        clops += 1
+                    }
+                case .tone(let spec):
+                    if spec.odd && spec.delay < 0.02 { hollow += 1 }
+                    if spec.start < 120 { deep += 1 }
+                    if abs(spec.delay - FeelSoundBook.gulpAt) < 1e-6 { wet += 1 }
+                case .squelch, .drop:
+                    wet += 1
+                case .noise, .fm, .bed, .buzz, .stopAll:
+                    break
+                }
+            }
+            #expect(clops == 1, "one hollow knock")
+            #expect(hollow >= 1, "a square-ish body")
+            #expect(wet == 0, "no squelch, bubbles or gulp")
+            #expect(deep == 0, "no deep wet thump")
+        }
+        // Smaller than any CHOMP, and clearly heard.
+        var chompDice = FeelDice(seed: 52)
+        let chompPeak = FeelSoundBook.chomp(caught: 1, dice: &chompDice).map { $0.gain }.max() ?? 0
+        let sample = FeelSoundBook.drySnap(dice: &dice)
+        let samplePeak: Float = sample.map { $0.gain }.max() ?? 1
+        #expect(samplePeak < chompPeak)
+        let synth = FeelSynth(sampleRate: 48_000)
+        synth.send(.bed(FeelSoundBook.idleBed(master: FeelAudioEngine.masterGain, glide: 0.01)))
+        _ = feelRender(synth, seconds: 0.1)
+        for command in sample { synth.send(command) }
+        let heard = feelRender(synth, seconds: 0.6)
+        #expect(heard.finite)
+        #expect(heard.peak > 0.02, "audible: peak \(heard.peak)")
+        #expect(heard.peak < 1.0)
+    }
+
+    @Test func aWaspStingWobblesHeavierThanABee() {
+        // R5 (REVIEW-4 #7): a wasp's −2 is felt: a tap on each of its two zaps, a longer and deeper wobble, two thuds.
+        func energy(_ cue: FeelHapticCue) -> Double {
+            cue.notes.map { Double($0.intensity) * max($0.duration, 0.01) }.reduce(0, +)
+        }
+        let bee = FeelHapticBook.sting(at: 0.06, heavy: true)
+        let wasp = FeelHapticBook.sting(at: 0.06, heavy: true, wasp: true)
+        #expect(energy(wasp) > energy(bee))
+        #expect(wasp.length > bee.length)
+        let beeTaps = bee.notes.filter { $0.kind == .transient }
+        let waspTaps = wasp.notes.filter { $0.kind == .transient }
+        #expect(waspTaps.count == 2, "a tap on each zap")
+        if waspTaps.count == 2 {
+            #expect(abs(waspTaps[0].time - 0.06) < 1e-9)
+            #expect(abs(waspTaps[1].time - waspTaps[0].time - FeelHapticBook.waspZapGap) < 1e-9)
+            #expect(waspTaps[0].intensity >= (beeTaps.first?.intensity ?? 1))
+        }
+        // The haptic's zaps follow the sound's (the wasp's verdict lands one zap gap after a bee's).
+        let gap = FeelSoundBook.stingVerdictAt(.wasp, delay: 0) - FeelSoundBook.stingVerdictAt(.bee, delay: 0)
+        #expect(abs(Double(gap) - FeelHapticBook.waspZapGap) < 1e-6)
+        let wobble = wasp.notes.filter { $0.kind == .continuous }.map { $0.intensity }.max() ?? 0
+        let beeWobble = bee.notes.filter { $0.kind == .continuous }.map { $0.intensity }.max() ?? 1
+        #expect(wobble >= beeWobble)
+        // A free wasp still wobbles harder than a free bee; no note is out of range or before its start.
+        let freeWasp = FeelHapticBook.sting(at: 0, wasp: true)
+        #expect(energy(freeWasp) > energy(FeelHapticBook.sting(at: 0)))
+        for cue in [wasp, freeWasp, FeelHapticBook.sting(at: Double.nan, wasp: true)] {
+            #expect(cue.curve.count <= 16)
+            for note in cue.notes {
+                #expect(note.intensity >= 0 && note.intensity <= 1)
+                #expect(note.sharpness >= 0 && note.sharpness <= 1)
+                #expect(note.time >= 0)
+            }
+        }
+    }
+
     @Test func aRefusedAudioStartIsNotAnEngineFailure() {
         #expect(FeelAudioRules.isBlocked(code: 561_015_905))   // '!pla'
         #expect(FeelAudioRules.isBlocked(code: 561_017_449))   // '!pri'

@@ -35,7 +35,9 @@ import UIKit
 //                                 that cost snaps) 0.2 s; feast, sting, lastSnap, wilted, chain5 (the chain's 5th step),
 //                                 drySnap and held ("×1.5 held") 0.3 s, so their FX are on screen; `hungry` 0.5 s (the
 //                                 next snap glyph drains and "Hungry… bite!" shows). `firstHint`: the opening's fold line
-//                                 ("Snap the halves together" / "Tap to snap") is on its plate.
+//                                 ("Snap the halves together" / "Tap to snap") is on its plate. R5: `tired` holds
+//                                 1.0 s into the tired moment (`AppRules.tiredFreezeAt`: the numeral at 0, the banner
+//                                 up).
 // - `firstRun=0|1`                R4: Sprout run 1's rules (14 snaps, no wilt, a free first sting). Unset: only
 //                                 `progress=fresh` plays them; every other play demo runs the standard rules.
 // - `freezeAfter=<s>`             freeze after s seconds of play (`SNAP-T freeze after`); with `freezeOn`, the moment

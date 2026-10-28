@@ -217,6 +217,15 @@ enum AppRules {
         return feedRuns <= 0
     }
 
+    /// R5 (REVIEW-4 #8, founder call): the Sprout taper's run number for the next Feed run (1, 2 or 3: Core's
+    /// `SessionOptions.sproutRun`), counted on Feed runs only; nil for the Daily (everyone's bog stays standard) and
+    /// from the fourth Feed run. Pure; tested.
+    static func sproutFeedRun(mode: RunMode, feedRuns: Int) -> Int? {
+        guard case .feed = mode else { return nil }
+        let run = max(feedRuns, 0) + 1
+        return run <= Tuning.sproutTaperRuns ? run : nil
+    }
+
     /// Demo play rules (REVIEW-3 #2): standard unless `firstRun=1`, or `progress=fresh` (a true first launch). `nil`:
     /// not a demo, use the store. Pure; tested.
     static func demoFirstRun(firstRun: Bool?, progress: DemoMode.Preset?) -> Bool {
@@ -271,6 +280,68 @@ enum AppRules {
         let k = max(n, 1)
         if full { return "+\(k) (full)" }
         return "+\(k) \(k == 1 ? "snap" : "snaps")"
+    }
+
+    /// R5 (REVIEW-4 #7, founder call): a costly sting's tag at the row, the mirror of "+1 snap": "−1 snap",
+    /// "−2 snaps" (a true minus sign). Pure; tested.
+    static func snapLossText(_ n: Int) -> String {
+        let k = max(n, 1)
+        return "\u{2212}\(k) \(k == 1 ? "snap" : "snaps")"
+    }
+
+    // MARK: R5: the score word, the tired banner, the bee guard, the Daily share
+
+    /// R5 (REVIEW-4 #13, founder call): the score's word in the UI (the leaderboard stays "Best Feast").
+    static let scoreWord = "score"
+
+    /// R5 (REVIEW-4 #4, with Feel's `afterLoss`): the tired banner waits this long after the bite (session s into the
+    /// tired moment), so the numeral has dropped first.
+    static let tiredBannerDelay: Double = 0.45
+    /// If the numeral still hasn't reached 0 this far in (the Scene's crack held up, the scene paused), it is set to 0,
+    /// so the banner can follow.
+    static let tiredNumeralLimit: Double = 0.8
+    /// Demo `freezeOn=tired` holds here: the numeral at 0 and the banner up.
+    static let tiredFreezeAt: Double = 1.0
+
+    /// Seconds into the tired moment (nil while the trap is in play or the run is over). Pure; tested.
+    static func tiredElapsed(_ phase: RunPhase) -> Double? {
+        if case let .tired(elapsed) = phase { return elapsed.isFinite ? max(elapsed, 0) : 0 }
+        return nil
+    }
+
+    /// "Your trap is tired." shows only once the numeral shows 0, and at least `tiredBannerDelay` after the bite
+    /// (REVIEW-4 #4: 19 and 40 showed it over a 1 and a 2). Pure; tested.
+    static func showsTiredBanner(phase: RunPhase, shownSnaps: Int) -> Bool {
+        guard let t = tiredElapsed(phase) else { return false }
+        return shownSnaps <= 0 && t >= tiredBannerDelay
+    }
+
+    /// The numeral in the tired moment: what it would show, or 0 once `tiredNumeralLimit` has passed. Pure; tested.
+    static func tiredNumeral(_ shown: Int, phase: RunPhase) -> Int {
+        guard let t = tiredElapsed(phase), t >= tiredNumeralLimit else { return shown }
+        return 0
+    }
+
+    /// R5 (REVIEW-4 #5, founder call, belt and braces): a protected bug's halo is inside the trap zone (the Scene draws
+    /// the halo on every protected bug that isn't being caught). Pure; tested.
+    static func protectedHaloInTrap(_ s: TrapSnapshot, geometry g: TrapGeometry) -> Bool {
+        s.bugs.contains { b in
+            guard b.species.isProtected else { return false }
+            if case .caught = b.activity { return false }
+            return b.inTrap || g.contains(b.position)
+        }
+    }
+
+    /// The App never shows "Hungry… bite!" while a halo is inside the zone: it says "Bee! Wait…" instead. Pure; tested.
+    static func guardedHint(_ hint: TrapHint?, haloInTrap: Bool) -> TrapHint? {
+        guard haloInTrap, hint == .hungry else { return hint }
+        return .beeInside
+    }
+
+    /// R5 (ROUND-5, player 7's ask): the Daily's one-line share, e.g. "Snapjaw Daily Bog #301 · 4,210 · biggest bite
+    /// 6 🪤" (day 0 is 1 Jan, bog #1; no link until launch). Pure; tested.
+    static func dailyShareText(day: Int, score: Int, biggestBite: Int, brand: String = AppBrand.name) -> String {
+        brand + " Daily Bog #\(max(day, 0) + 1) · " + formatted(max(score, 0)) + " · biggest bite \(max(biggestBite, 0)) 🪤"
     }
 
     /// A Feast's refund ran into the cap: the row was (or became) full. `before`: the snaps before the bite. Pure;
@@ -561,16 +632,17 @@ enum AppRules {
     static func story(_ r: RunResult) -> String {
         let scarabs = r.caughtBySpecies[BugSpecies.goldenScarab.rawValue] ?? 0
         let dragonflies = r.caughtBySpecies[BugSpecies.dragonfly.rawValue] ?? 0
+        // R5 (REVIEW-4 #13): no "protein"; the bite's points are just its number.
         if r.biggestBite >= 5 {
-            return "\(article(r.biggestBite)) \(r.biggestBite)-bug FEAST in one bite: "
-                + "\(formatted(r.bestBitePoints)) protein."
+            return "\(article(r.biggestBite)) \(r.biggestBite)-bug FEAST in one bite, worth "
+                + "\(formatted(r.bestBitePoints))."
         }
         if scarabs > 0 { return "You caught a Golden Scarab. Lucky trap!" }
         if dragonflies > 0 { return "A dragonfly! Only the sharpest snaps catch those." }
         if r.longestChain >= 4 { return "\(r.longestChain) clean snaps in a row. What a chain." }
         if r.beesSpared >= 5 { return "You spared \(r.beesSpared) bees. The meadow thanks you." }
         if r.biggestBite >= 2 {
-            return "Best bite: \(r.biggestBite) bugs for \(formatted(r.bestBitePoints)) protein."
+            return "Best bite: \(r.biggestBite) bugs, worth \(formatted(r.bestBitePoints))."
         }
         if r.bugsCaught > 0 {
             return "\(r.bugsCaught) \(r.bugsCaught == 1 ? "bug" : "bugs") caught. Next time, wait for a crowd."

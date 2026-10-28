@@ -126,6 +126,15 @@ final class BogJaws {
     private(set) var overlayColor: UIColor = .white
     /// The rim light's alpha (R3 #10: dusk shows).
     private(set) var rimLightAlpha: CGFloat = 0
+    /// R5 (#3): how dark the closure shades draw the face now (0 the open-state crimson … ~0.95), and how much of the
+    /// darkness is the bite's own (it darkens only while closing and is gone `releaseFade` into the release).
+    private(set) var faceShade: CGFloat = 0
+    private(set) var closingLevel: CGFloat = 0
+    /// R5 (#3): the open cilia's opacity now (1 out … 0 hidden under the closed trap).
+    private(set) var teethAlpha: CGFloat = 1
+    /// R5 (#3): how far the hinge's own darkening is held off after a bite (1 while the hands reopen; it lets go once
+    /// they close again).
+    private(set) var reopenHold: CGFloat = 0
     var reduceMotion = false
 
     /// R4 (#6): the closed trap's one x scale (1 = the squeezed lobes' width, `TrapArt.slamSqueeze` of the open trap).
@@ -134,8 +143,17 @@ final class BogJaws {
     static let holdEnd: Double = 0.18
     /// QA-2 #8: how fast the hunger droop lets go after a wilt (per second: ~0.6 s from full).
     static let droopRelease: CGFloat = 1 / 0.6
+    /// R5 (#3): the face is back to its open-state crimson this long into the release (session seconds), the cilia
+    /// out and the green rim showing; the closed trap is gone by `closedFade`.
+    static let releaseFade: Double = 0.08
+    static let closedFade: Double = 0.06
+    /// R5 (#3): how far the hands must close again after a bite (closure01) before the hinge darkens the face again.
+    static let reclose: CGFloat = 0.08
 
     private var slamClock: Double = -1
+    /// R5 (#3): a bite happened and the hands haven't closed again since (the face never darkens on the reopen).
+    private var afterBite = false
+    private var reopenMin: CGFloat = 1
     private var springClock: Double = -1
     private var rumbleClock: Double = -1
     private var toothTintNight: CGFloat = -1
@@ -227,6 +245,8 @@ final class BogJaws {
     /// The bite: the lobes squeeze shut about the midrib (60 ms), hold (120 ms) and let go.
     func slam() {
         slamClock = 0
+        afterBite = true
+        reopenMin = 1
     }
 
     /// Re-armed: the lobes and teeth spring back out with a little overshoot (1.08).
@@ -251,6 +271,34 @@ final class BogJaws {
         lobeYScale = 1
         closed.alpha = 0
         closed.isHidden = true
+        afterBite = false
+        reopenMin = 1
+        reopenHold = 0
+        closingLevel = 0
+        faceShade = 0
+        teethAlpha = 1
+    }
+
+    /// R5 (#3): the bite's own darkening `t` session seconds after it: it follows the slam while the jaws close and
+    /// hold, and fades to nothing `releaseFade` into the release (the reopen is never dark).
+    static func biteShade(slam: CGFloat, t: Double) -> CGFloat {
+        guard t >= holdEnd else { return slam }
+        let k = BogMath.smoothstep(0, CGFloat(releaseFade), CGFloat(t - holdEnd))
+        return slam * (1 - k)
+    }
+
+    /// R5 (#3): the lobes' squeeze level (1 shut … 0 open) `t` s into the bite: an ease-out shut in 60 ms, the hold,
+    /// then an ease-out release (≈ 60 % open 80 ms in), so the reopening trap is never a narrow dark shape.
+    static func squeezeLevel(t: Double) -> CGFloat {
+        if t < 0 { return 0 }
+        if t < 0.06 {
+            let u = CGFloat(t / 0.06)
+            return 1 - (1 - u) * (1 - u)
+        }
+        if t < holdEnd { return 1 }
+        let u = BogMath.clamp01(CGFloat((t - holdEnd) / (0.5 - holdEnd)))
+        let o = 1 - (1 - u) * (1 - u) * (1 - u)
+        return 1 - o
     }
 
     /// One frame. `fxDt` runs the moments (it is 0 while the session is frozen); `time` is the wall clock for
@@ -263,6 +311,8 @@ final class BogJaws {
         let dt = max(fxDt, 0)
         drawnClosure = cc
         // The slam envelope: shut in 60 ms (ease out), hold 120 ms, open by 0.5 s.
+        var squeezeK: CGFloat = 0
+        var releaseT: Double = -1
         if slamClock >= 0 {
             slamClock += dt
             let t = CGFloat(slamClock)
@@ -277,7 +327,26 @@ final class BogJaws {
                 slamLevel = 0
                 slamClock = -1
             }
+            if slamClock >= 0 {
+                squeezeK = BogJaws.squeezeLevel(t: slamClock)
+                closingLevel = BogJaws.biteShade(slam: slamLevel, t: slamClock)
+                if slamClock >= BogJaws.holdEnd { releaseT = slamClock - BogJaws.holdEnd }
+            } else {
+                closingLevel = 0
+            }
+        } else {
+            closingLevel = 0
         }
+        // R5 (#3): after a bite the hinge's own darkening is held off while the hands reopen (or stay still); it comes
+        // back only once they close again by `reclose`. Darkness tracks closing, never the reopen.
+        if afterBite && (slamClock < 0 || slamClock >= BogJaws.holdEnd) {
+            reopenMin = min(reopenMin, cc)
+            if cc > reopenMin + BogJaws.reclose || cc < 0.02 { afterBite = false }
+        }
+        reopenHold = afterBite
+            ? BogMath.approach(reopenHold, 1, rate: CGFloat(1 / BogJaws.releaseFade), dt: CGFloat(dt))
+            : BogMath.approach(reopenHold, 0, rate: 1 / 0.15, dt: CGFloat(dt))
+        let hingeK = cc * (1 - reopenHold)
         var spring: CGFloat = 1
         var lobeSpring: CGFloat = 1
         if springClock >= 0 {
@@ -312,23 +381,26 @@ final class BogJaws {
         droop = droopTarget >= droop ? droopTarget
             : BogMath.approach(droop, droopTarget, rate: BogJaws.droopRelease, dt: CGFloat(dt))
 
-        // R3 (#17): hungry teeth lean 20° (and tired ones 40°).
-        let leanDeg = max(Double(cc) * TrapArt.toothMaxLean, TrapArt.slamLean * Double(slamLevel))
-            + 40 * Double(tiredLevel) + 20 * Double(droop) * (1 - Double(slamLevel))
+        // R3 (#17): hungry teeth lean 20° (and tired ones 40°). R5 (#3): the bite leans them in only while it closes
+        // and holds; they are back out `releaseFade` into the release, and the hinge's lean waits for a re-close.
+        let leanDeg = max(Double(hingeK) * TrapArt.toothMaxLean, TrapArt.slamLean * Double(closingLevel))
+            + 40 * Double(tiredLevel) + 20 * Double(droop) * (1 - Double(closingLevel))
         lean = CGFloat(leanDeg * .pi / 180)
         let reach = TrapArt.toothReach(lean: lean) * spring
-        let shut = max(cc, slamLevel)
+        let shut = max(hingeK, closingLevel)
         // Foreshortened by the hinge (up to 15 %), squeezed shut by the bite, springing back past 1 on re-arm.
         let foreshorten = 1 - TrapArt.lobeSquash * cc
-        let squeeze = 1 - (1 - TrapArt.slamSqueeze) * slamLevel
+        let squeeze = 1 - (1 - TrapArt.slamSqueeze) * squeezeK
         slamScale = squeeze
         lobeScale = min(foreshorten, squeeze) * lobeSpring * (1 + wobble) * (1 - 0.02 * droop)
         // R3 (#17): the hungry lobes droop to y 0.95, pinned at the midrib (the node's origin).
         lobeYScale = 1 - 0.05 * droop
-        let shadeK = max(cc, slamLevel, 0.55 * tiredLevel)
+        // R5 (#3): the closure shades darken the face only while closing (the hands or the bite), never on the reopen.
+        let shadeK = max(shut, 0.55 * tiredLevel)
         let narrow = 0.95 * BogMath.smoothstep(0.02, 0.6, shadeK)
         let wide = 0.6 * BogMath.smoothstep(0.45, 1, shadeK)
-        let darkTeeth = min(0.32 * cc * (1 - slamLevel) + 0.25 * tiredLevel + 0.25 * droop + 0.3 * night, 0.7)
+        faceShade = max(narrow, wide)
+        let darkTeeth = min(0.32 * hingeK * (1 - closingLevel) + 0.25 * tiredLevel + 0.25 * droop + 0.3 * night, 0.7)
         let shimmer = CGFloat(0.05 * sin(time * 1.3))
         overlayAlpha = min(max(tintAlpha, 0), 0.25)
         overlayColor = tint
@@ -341,8 +413,9 @@ final class BogJaws {
                                      blue: 0.1 * (1 - night) + 0.2 * night, alpha: 1)
         }
         let toothTint = toothTintColor
-        // The open cilia fold in and hide under the closed trap as it shuts.
-        let teethAlpha = 1 - BogMath.smoothstep(0.25, 0.75, slamLevel)
+        // The open cilia fold in and hide under the closed trap as it shuts; R5 (#3): they are back out early in the
+        // release (the outer fringe frames the reopening trap, so it never reads as a bare round shape).
+        teethAlpha = 1 - BogMath.smoothstep(0.25, 0.75, closingLevel)
         let wiltA = 0.15 * droop + 0.12 * tiredLevel
         for s in sides {
             let sx = CGFloat(s.side)
@@ -371,10 +444,11 @@ final class BogJaws {
             }
         }
         // The closed trap: it fades in over the squeezing lobes and droops with them. R4 (#6): always one width (the
-        // squeezed lobes', `TrapArt.slamSqueeze`), never stretched; on the way out it fades in the first ~70 ms of the
-        // release while the lobes spring open from under it.
-        let releasing = slamClock >= BogJaws.holdEnd
-        let show = releasing ? BogMath.smoothstep(0.72, 0.95, slamLevel) : BogMath.smoothstep(0.3, 0.85, slamLevel)
+        // squeezed lobes', `TrapArt.slamSqueeze`), never stretched. R5 (#3): on the way out it is gone `closedFade`
+        // (60 ms) into the release while the lobes spring open from under it, green rim and cilia showing.
+        let show = releaseT >= 0
+            ? 1 - BogMath.smoothstep(0, CGFloat(BogJaws.closedFade), CGFloat(releaseT))
+            : (slamClock >= 0 ? BogMath.smoothstep(0.3, 0.85, slamLevel) : 0)
         if show > 0.005 {
             closed.isHidden = false
             closed.alpha = show

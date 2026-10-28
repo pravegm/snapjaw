@@ -151,6 +151,9 @@ final class GameController: ObservableObject, SceneDriver {
     private var chainTagUntil: Double = -1
     private var chainTagMultiplier = 1.5
     private var chainHeldUntil: Double = -1
+    /// R5 (REVIEW-4 #7): a costly sting's "−2 snaps" at the row.
+    private var snapLossUntil: Double = -1
+    private var snapLossLabel = ""
 
     init(store: ProgressStore, settings: SettingsStore) {
         self.store = store
@@ -271,6 +274,7 @@ final class GameController: ObservableObject, SceneDriver {
         let live = AppRules.isLive(snapshot.phase)
         feedback.handle(events, telemetry: AppRules.telemetry(snapshot, sceneWidth: width, playing: live))
         var snapped = false
+        var stingCost = 0
         for event in events {
             tally.note(event)
             switch event {
@@ -286,7 +290,10 @@ final class GameController: ObservableObject, SceneDriver {
                 hungryOn = false
             case let .stung(_, _, cost):
                 // QA-2 #5: the crimson "lost" flash only for a sting that cost something.
-                if cost > 0 { stings += 1 }
+                if cost > 0 {
+                    stings += 1
+                    stingCost += cost
+                }
                 // Sprout's free first sting (REVIEW-3 #3): the hint slot says what it would have cost, and the row
                 // flashes green with "free!".
                 if AppRules.isFreeSting(event, mode: session.mode) {
@@ -329,6 +336,12 @@ final class GameController: ObservableObject, SceneDriver {
         }
         if AppRules.chainHeld(events, chain: snapshot.chain) {
             chainHeldUntil = snapshot.time + Self.chainHeldSeconds
+            snapped = true
+        }
+        if stingCost > 0 && session.mode != .lesson {
+            // R5 (REVIEW-4 #7): "−1 snap" / "−2 snaps" at the row (one tag for the bite's whole cost).
+            snapLossUntil = snapshot.time + Self.snapGainSeconds
+            snapLossLabel = AppRules.snapLossText(stingCost)
             snapped = true
         }
         if AppTrace.enabled && now - lastTrapLog >= Self.trapLogInterval {
@@ -921,9 +934,12 @@ final class GameController: ObservableObject, SceneDriver {
         let rules = runRules(for: m)
         // First runs (GAME-DESIGN §5): 12 snaps while the plant rank is Sprout.
         options.startSnaps = rules.startSnaps
-        // R3/R4 (founder calls): the first Feed run starts with 14, never wilts and its first sting is free.
-        Self.applyFirstRun(rules.firstRun, to: &options)
-        if rules.firstRun { AppTrace.t("SNAP-T first run options") }
+        // R3/R4 (founder calls): the first Feed run starts with 14, never wilts and its first sting is free. R5
+        // (REVIEW-4 #8, founder call): the perks taper over Feed runs 1–3 (Core's `SessionOptions.sproutRun`).
+        Self.applySprout(feedRun: rules.sproutRun, to: &options)
+        if let run = rules.sproutRun {
+            AppTrace.t(run == 1 ? "SNAP-T first run options" : "SNAP-T sprout run \(run) options")
+        }
         // REVIEW-3 #19: the lesson shows the row the next run will really start with.
         if m == .lesson { options.startSnaps = lessonSnaps() }
         let newSession = TrapSession(mode: m, seed: runSeed, best: store.best(for: m), geometry: sessionLayout.geometry,
@@ -944,6 +960,8 @@ final class GameController: ObservableObject, SceneDriver {
         chainTagEligible = store.data.longestChain == 0 && m != .lesson
         chainTagUntil = -1
         chainHeldUntil = -1
+        snapLossUntil = -1
+        snapLossLabel = ""
         touch = TouchTrapSource()
         fixedSource.closure = demo?.closure ?? 0
         pilotRun = demo?.pilot.map { PilotRun(skill: $0, seed: runSeed &+ 101) }
@@ -971,27 +989,35 @@ final class GameController: ObservableObject, SceneDriver {
     /// Core's first-run switches (design/notes/core-R3.md): no hunger, and the first stinger bite costs nothing (its
     /// `stung(cost: 0)` shows the toast). R4 (founder call, REVIEW-3 #11): it starts full, at 14. Pure; tested.
     nonisolated static func applyFirstRun(_ on: Bool, to options: inout SessionOptions) {
-        guard on else { return }
-        // Core R4: `firstRun` is the switch (14 snaps, no wilt, the free sting, a calm first morning; Feed only). The
-        // R3 switches stay set too, so the run reads the same either way.
-        options.firstRun = true
-        options.hunger = false
-        options.freeFirstSting = true
-        options.startSnaps = AppRules.firstRunSnaps
+        applySprout(feedRun: on ? 1 : nil, to: &options)
     }
 
-    /// A run's opening rules: its start snaps and whether it is the first Feed run. Demo play runs are standard unless
-    /// `firstRun=1` or `progress=fresh` (REVIEW-3 #2: every CI run was a Sprout run 1, so hunger and the costly
-    /// sting were never seen).
-    private func runRules(for m: RunMode) -> (startSnaps: Int?, firstRun: Bool) {
+    /// R5 (REVIEW-4 #8, founder call; design/notes/core-R5.md): a Sprout's Feed runs 1–3 taper the perks. Run 1: 14
+    /// snaps, no wilt, a free sting, the calm morning; run 2: 13, a free sting, the calm morning; run 3: 12, the calm
+    /// morning. Core's `sproutRun` is the switch; run 1 also keeps its R3/R4 switches, so it reads the same either way.
+    /// Runs 2 and 3 set nothing else (Core's `SproutPerks` decide their wilt and sting). Pure; tested.
+    nonisolated static func applySprout(feedRun: Int?, to options: inout SessionOptions) {
+        guard let run = feedRun, run >= 1, run <= Tuning.sproutTaperRuns else { return }
+        options.sproutRun = run
+        if run == 1 {
+            options.hunger = false
+            options.freeFirstSting = true
+            options.startSnaps = AppRules.firstRunSnaps
+        }
+    }
+
+    /// A run's opening rules: its start snaps and its Sprout taper run (nil: standard). Demo play runs are standard
+    /// unless `firstRun=1` or `progress=fresh` (REVIEW-3 #2: every CI run was a Sprout run 1, so hunger and the costly
+    /// sting were never seen); those play run 1.
+    private func runRules(for m: RunMode) -> (startSnaps: Int?, sproutRun: Int?) {
         let sprout = AppRules.startSnaps(mode: m, lifetimeBugs: store.data.lifetimeBugs)
         guard let demo else {
-            return (sprout, AppRules.isSproutFirstRun(mode: m, feedRuns: store.data.feedRuns))
+            return (sprout, AppRules.sproutFeedRun(mode: m, feedRuns: store.data.feedRuns))
         }
-        guard case .feed = m else { return (nil, false) }
-        if demo.playsFirstRun { return (sprout, true) }
+        guard case .feed = m else { return (nil, nil) }
+        if demo.playsFirstRun { return (sprout, 1) }
         // Unseeded demo progress plays like `progress=mid`: Core's standard start.
-        return (demo.progress == nil ? nil : sprout, false)
+        return (demo.progress == nil ? nil : sprout, nil)
     }
 
     /// The snaps the lesson's row shows: what the next Feed run will start with.
@@ -999,7 +1025,10 @@ final class GameController: ObservableObject, SceneDriver {
         // A demo lesson is a first launch unless `firstRun=0`.
         if let demo, demo.firstRun == nil, demo.effectiveScreen == .lesson { return AppRules.firstRunSnaps }
         let next = runRules(for: .feed)
-        if next.firstRun { return AppRules.firstRunSnaps }
+        if let run = next.sproutRun {
+            if run == 1 { return AppRules.firstRunSnaps }
+            if let perks = SproutPerks.forFeedRun(run) { return min(max(perks.startSnaps, 1), Tuning.maxSnaps) }
+        }
         return next.startSnaps ?? Tuning.startSnaps
     }
 
@@ -1141,7 +1170,9 @@ final class GameController: ObservableObject, SceneDriver {
     // MARK: - HUD
 
     private func publishHUD(_ s: TrapSnapshot, now: TimeInterval, force: Bool, hold: Bool = false) {
-        var core = s.hint
+        // R5 (REVIEW-4 #5, belt and braces): never "Hungry… bite!" while a bee's halo is inside the trap zone.
+        let haloInTrap = AppRules.protectedHaloInTrap(s, geometry: sessionLayout.geometry)
+        var core = AppRules.guardedHint(s.hint, haloInTrap: haloInTrap)
         // The lesson shows only the hints it teaches with ("Bee! Wait…", "Now!" once all three sip).
         if route == .lesson, let h = core, !AppRules.lessonShowsHint(h) { core = nil }
         if let h = core, AppRules.hintText(h, touch: touchWording) == nil { core = nil }
@@ -1166,7 +1197,6 @@ final class GameController: ObservableObject, SceneDriver {
         values.chainHeld = live && s.time < chainHeldUntil && s.chainMultiplier > 1.01
         values.hint = hint
         values.banner = hint == nil && s.time < Self.bannerSeconds && !isPaused ? bannerText : nil
-        values.tired = AppRules.isTired(s.phase)
         values.passedBest = passedBest
         values.dayPhase = s.dayPhase
         values.lesson = route == .lesson
@@ -1177,17 +1207,22 @@ final class GameController: ObservableObject, SceneDriver {
         // crack has shown (`BogScene.snapsShownOffset`). R4 (QA-2 #2–#4): never the wrong way, and held on the frame
         // whose events the Scene hasn't drawn yet.
         let candidate = AppRules.shownSnaps(s.snapsLeft, offset: scene?.snapsShownOffset ?? 0, max: s.snapsMax)
-        let shown = AppRules.truthfulSnaps(previous: shownSnaps, target: s.snapsLeft, candidate: candidate,
-                                           max: s.snapsMax, hold: hold)
+        let truthful = AppRules.truthfulSnaps(previous: shownSnaps, target: s.snapsLeft, candidate: candidate,
+                                              max: s.snapsMax, hold: hold)
+        // R5 (REVIEW-4 #4): in the tired moment the numeral reaches 0 by `tiredNumeralLimit` at the latest, and the
+        // banner shows only once it has (and ≥ 0.45 s after the bite): never "Out of snaps" over a 1 or a 2.
+        let shown = AppRules.tiredNumeral(truthful, phase: s.phase)
         shownSnaps = shown
         values.snapsLeft = shown
+        values.tired = AppRules.showsTiredBanner(phase: s.phase, shownSnaps: shown)
         values.rowFlashing = scene?.snapsRowFlashing ?? false
         values.freeFlash = live && s.time < freeFlashUntil
         // QA-2 #10 (Core R4): keyed on Core's own `hungry` hint, which stays up through a dry snap or a bee bite until a
-        // catch or the wilt, and drops while the clock is paused (an empty or bee-only trap).
-        values.hungry = live && !isPaused && s.hint == .hungry
+        // catch or the wilt, and drops while the clock is paused (an empty or bee-only trap). R5: never beside a halo.
+        values.hungry = live && !isPaused && s.hint == .hungry && !haloInTrap
         if hint != nil || values.banner != nil { values.popRects = SceneHooks.livePopRects(scene) }
         values.snapGain = s.time < snapGainUntil && live ? snapGainLabel : nil
+        values.snapLoss = s.time < snapLossUntil && !isPaused ? snapLossLabel : nil
         if route == .lesson {
             values.lessonSnaps = lessonDisplay?.showsSnaps ?? false
             values.ringSnaps = lessonDisplay?.isFinal ?? false
@@ -1200,6 +1235,7 @@ final class GameController: ObservableObject, SceneDriver {
         let urgent = force || hint != lastHint || values.tired != hud.values.tired
             || values.snapsLeft != hud.values.snapsLeft || values.rowFlashing != hud.values.rowFlashing
             || values.freeFlash != hud.values.freeFlash || values.chainHeld != hud.values.chainHeld
+            || values.snapLoss != hud.values.snapLoss
         guard urgent || now - lastHUD >= Self.hudInterval else { return }
         lastHUD = now
         lastHint = hint
@@ -1370,7 +1406,8 @@ final class GameController: ObservableObject, SceneDriver {
                 return false
             }
         case .tired:
-            return AppRules.isTired(s.phase)
+            // R5 (REVIEW-4 #4): once the numeral is at 0 and the banner is up (19 froze it over a 1).
+            return (AppRules.tiredElapsed(s.phase) ?? -1) >= AppRules.tiredFreezeAt
         case .results:
             return false
         case .firstHint:

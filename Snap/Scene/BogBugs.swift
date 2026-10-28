@@ -46,6 +46,10 @@ final class BogBugNode {
     var seen: Int = 0
     /// The point drawn this frame (scene space).
     var drawnPoint: CGPoint = .zero
+    /// R5 (#15): how much of the airborne cue it shows now (0 … 1 right over the crease), and its shadow's offset from
+    /// the bug's ground point.
+    var creaseCue: CGFloat = 0
+    var shadowOffset: CGPoint = .zero
 
     /// Every sprite under `root` (the streak test checks each one's frame).
     var parts: [SKSpriteNode] { [halo, ring, body, wings, blur, glow, flash] }
@@ -151,6 +155,8 @@ final class BogBugNode {
         sipLevel = 0
         markLevel = 0
         flashFrames = 0
+        creaseCue = 0
+        shadowOffset = .zero
         root.isHidden = false
         shadow.isHidden = false
         mark.isHidden = true
@@ -231,6 +237,20 @@ final class BogBugLayer {
     /// R4 (#6, tests): bug `id`'s global z and drawn scale now (nil when it is not on screen).
     func drawnZ(_ id: Int) -> CGFloat? { live[id].map { layer.zPosition + $0.root.zPosition } }
     func drawnScale(_ id: Int) -> CGFloat? { live[id].map { $0.root.yScale } }
+    /// R5 (#15, tests): bug `id`'s airborne cue (0 … 1) and its shadow's offset from its ground point.
+    func creaseCue(_ id: Int) -> CGFloat? { live[id].map { $0.creaseCue } }
+    func shadowOffset(_ id: Int) -> CGPoint? { live[id].map { $0.shadowOffset } }
+
+    /// R5 (#15): the airborne cue. Nothing ever rests on the hinge: a bug over the crease (its centre within
+    /// `creaseHalfWidth` + 0.6 r of the midrib) is drawn lifted, `creaseScale` × bigger with its shadow pushed out by
+    /// `creaseShadow`, easing off over one more radius.
+    static let creaseScale: CGFloat = 1.1
+    static let creaseShadow = CGPoint(x: 10, y: -8)
+    static func creaseLift(dx: CGFloat, radius r: CGFloat) -> CGFloat {
+        guard dx.isFinite else { return 0 }
+        let band = ScreenLayout.creaseHalfWidth + 0.6 * max(r, 1)
+        return 1 - BogMath.smoothstep(band, band + max(r, 1), abs(dx))
+    }
 
     /// R4 (#6): a caught bug is in the seam this long after the bite (session seconds: the lobes' 60 ms squeeze).
     static let sinkTime: Double = 0.06
@@ -421,8 +441,11 @@ final class BogBugLayer {
         }
         n.lastHeight = h
 
+        // R5 (#15): over the crease it is always airborne (never resting on the hinge): 1.1× and its shadow pushed out.
+        let cue = caughtT >= 0 ? 0 : BogBugLayer.creaseLift(dx: pos.x - g.center.x, radius: r)
+        n.creaseCue = cue
         // Lift: drawn higher and larger the higher it flies.
-        let lift = 1 + 0.32 * h
+        let lift = (1 + 0.32 * h) * (1 + (BogBugLayer.creaseScale - 1) * cue)
         let drawn = CGPoint(x: pos.x, y: pos.y + (10 + 0.35 * r) * h)
         n.drawnPoint = drawn
         n.root.position = drawn
@@ -431,7 +454,7 @@ final class BogBugLayer {
         n.root.yScale = max(sy * lift, 0.01)
         n.root.alpha = alpha
         // Caught: under the closed trap (`caughtZ`), over the lobes and the nectar. Otherwise by height.
-        n.root.zPosition = caughtT >= 0 ? BogBugLayer.caughtZ - layer.zPosition : 6 * h
+        n.root.zPosition = caughtT >= 0 ? BogBugLayer.caughtZ - layer.zPosition : 6 * max(h, 0.5 * cue)
 
         // Wings.
         var spread: CGFloat = st.restSpread
@@ -483,10 +506,14 @@ final class BogBugLayer {
         }
 
         // Shadow: on the ground below, offset down-right as it rises, softer and smaller.
-        n.shadow.position = CGPoint(x: pos.x + 2 + 8 * h, y: pos.y - 2 - 5 * h)
+        // R5 (#15): over the crease the shadow sits out by `creaseShadow` (at least), smaller and softer.
+        let off = CGPoint(x: max(2 + 8 * h, BogBugLayer.creaseShadow.x * cue),
+                          y: min(-2 - 5 * h, BogBugLayer.creaseShadow.y * cue))
+        n.shadowOffset = off
+        n.shadow.position = CGPoint(x: pos.x + off.x, y: pos.y + off.y)
         n.shadow.zRotation = CGFloat(b.heading)
-        n.shadow.setScale(max((1 - 0.35 * h) * (caughtT >= 0 ? 1 - caughtT : 1), 0.01))
-        n.shadow.alpha = 0.4 * (1 - 0.6 * h) * alpha * (1 - sunk)
+        n.shadow.setScale(max((1 - 0.35 * h) * (1 - 0.15 * cue) * (caughtT >= 0 ? 1 - caughtT : 1), 0.01))
+        n.shadow.alpha = 0.4 * (1 - 0.6 * h) * (1 - 0.25 * cue) * alpha * (1 - sunk)
 
         // The cross mark over a released bee.
         n.markLevel = BogMath.approach(n.markLevel, released ? 1 : 0, rate: 6, dt: dt)

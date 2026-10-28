@@ -51,7 +51,8 @@ final class FeedbackDirector: FeedbackSink {
     static let whiffAt: Float = 0.03
     static let chainBrokenAt: Float = 0.45
     static let warnAt: Float = 0.75
-    static let tiredAt: Float = 0.9
+    /// R5 (REVIEW-4 #4): the yawn on the last bite (was 0.9), with the App's tired banner; see FeelSoundBook.tiredDelay.
+    static let tiredAt: Float = FeelSoundBook.tiredAfterBite
     static let newBestAt: Float = 0.6
     /// After a wilt (s): the last-snap knocks or the tired yawn wait for the droop (R3: its two sighs).
     static let afterWiltAt: Float = FeelSoundBook.wiltLength
@@ -160,6 +161,9 @@ final class FeedbackDirector: FeedbackSink {
     private(set) var flares = 0
     /// R4 (QA-2 #9): when the last loss blip was scheduled (s after its frame), for tests.
     private(set) var lastLossBlipAt: Float = -1
+    /// R5 (REVIEW-4 #4): tired yawns played, and when the last one was scheduled (s after its frame), for tests.
+    private(set) var yawns = 0
+    private(set) var lastYawnAt: Float = -1
     /// The multiplier of the last `chainUp` (1 after a break), so the ×5 flare plays once per climb.
     private var lastChainMultiplier: Double = 1
     /// Haptic patterns built (one per frame with cues, after merging), for diagnostics and tests.
@@ -322,6 +326,7 @@ final class FeedbackDirector: FeedbackSink {
         var biting = false
         var stung = false
         var wilting = false
+        var breaking = false
         var stingCost = 0
         for event in events {
             switch event {
@@ -330,6 +335,7 @@ final class FeedbackDirector: FeedbackSink {
                 stung = true
                 stingCost += max(cost, 0)
             case .wilted: wilting = true
+            case .chainBroken: breaking = true
             default: break
             }
         }
@@ -346,9 +352,16 @@ final class FeedbackDirector: FeedbackSink {
             }
         }
         // R4 (QA-2 #9): a costly sting's loss blip lands with the HUD numeral's drop, not after the spit.
-        let lossAt: Float = biting ? FeelSoundBook.numeralDropAt : FeelSoundBook.numeralDropAt - FeelSoundBook.hitStop
+        let lossAt: Float = FeelSoundBook.lossAt(biting: biting)
         // A costly sting's blip must be over before the chain's "bwoop" (and the warnings) speak.
-        let afterLoss: Float = stingCost > 0 ? lossAt + FeelSoundBook.lostLength : 0
+        let afterLoss: Float = FeelSoundBook.afterLoss(biting: biting, stingCost: stingCost)
+        // The chain's "bwoop": after the CHOMP's tail (later still after a sting), and after the loss blip.
+        var bwoopAt: Float = biting ? Self.chainBrokenAt : 0
+        if biting && stung { bwoopAt += 0.3 }
+        bwoopAt = max(bwoopAt, afterLoss)
+        // R5 (REVIEW-4 #4): the yawn after the numeral's drop, the loss blip and the bwoop, with the tired banner.
+        let yawnAt: Float = FeelSoundBook.tiredDelay(biting: biting, wilting: wilting, stingCost: stingCost,
+                                                     bwoopAt: breaking ? bwoopAt : nil)
         frameCues = []
         defer { flushHaptics() }
         var caught = 0
@@ -406,7 +419,8 @@ final class FeedbackDirector: FeedbackSink {
                 if stings < Self.maxStingsPerFrame {
                     let delay: Float = biting ? FeelSoundBook.stingAt + 0.12 * Float(stings) : 0
                     audio.play(FeelSoundBook.sting(species, pan: pan(of: id), delay: delay, dice: &dice))
-                    playHaptic(FeelHapticBook.sting(at: Double(delay), heavy: cost > 0))
+                    // R5 (REVIEW-4 #7): a wasp's sting wobbles heavier than a bee's.
+                    playHaptic(FeelHapticBook.sting(at: Double(delay), heavy: cost > 0, wasp: species == .wasp))
                 }
                 stings += 1
             case .feast(let count, let snapsBack):
@@ -431,10 +445,7 @@ final class FeedbackDirector: FeedbackSink {
                 lastChainMultiplier = value
             case .chainBroken:
                 lastChainMultiplier = 1
-                var delay: Float = biting ? Self.chainBrokenAt : 0
-                if biting && stung { delay += 0.3 }
-                delay = max(delay, afterLoss)
-                audio.play(FeelSoundBook.chainBroken(delay: delay, dice: &dice))
+                audio.play(FeelSoundBook.chainBroken(delay: bwoopAt, dice: &dice))
             case .rearmed:
                 audio.play(FeelSoundBook.rearmPluck(dice: &dice))
                 playHaptic(FeelHapticBook.rearm)
@@ -457,10 +468,10 @@ final class FeedbackDirector: FeedbackSink {
                 audio.play(FeelSoundBook.wilted(dice: &dice))
                 playHaptic(FeelHapticBook.wilted())
             case .tired:
-                var delay: Float = biting ? Self.tiredAt : (wilting ? Self.afterWiltAt : 0)
-                delay = max(delay, afterLoss)
-                audio.play(FeelSoundBook.tired(delay: delay))
-                playHaptic(FeelHapticBook.tired(at: Double(delay)))
+                yawns += 1
+                lastYawnAt = yawnAt
+                audio.play(FeelSoundBook.tired(delay: yawnAt))
+                playHaptic(FeelHapticBook.tired(at: Double(yawnAt)))
             case .newBest:
                 let delay: Float = biting ? Self.newBestAt : 0
                 audio.play(FeelSoundBook.newBest(delay: delay))

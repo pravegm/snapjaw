@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Snapjaw balance simulator (Round 4): a line-by-line Node port of Snap/Core (Tuning, BugCatalog, WaveFactory,
+// Snapjaw balance simulator (Round 5): a line-by-line Node port of Snap/Core (Tuning, BugCatalog, WaveFactory,
 // TrapSession, TrapPilot). KEEP IN SYNC with Snap/Core/*.swift: same constants, same draw order.
 // Used to tune Tuning numerically without a Swift compiler.
 //
@@ -14,6 +14,8 @@
 //                                                  # R4: nothing in the trap is low within 20 + r of it (attract too)
 //   Any Tuning value can be overridden: T.beeChanceDusk=0.5
 //   With novice / casual in the skills, it also runs their Sprout run 1 (SPROUT1) and checks each lasts >= 90 s.
+//   R5: with novice, also its Sprout runs 2 (>= 75 s) and 3 (>= 60 s); with expert / perfect, the same runs without
+//   pilotGiveUp ("nogiveup", reported only; nogiveup=0 skips them).
 //   Seeds are 1000 + 7919*i (the same as SnapTests/BalanceTests.swift); the pilot seed is seed*7+1.
 //
 // Numbers are not bit-identical to Swift (libm sin/cos/pow may differ in the last bit and the runs are chaotic), so
@@ -29,6 +31,9 @@
 // ground moves and the hover keep to their own lobe and walkers enter on their spot's side, so nothing walks or
 // hovers low across the crease; the late reaction floor is 0.2; expert and perfect give up waiting after 12 s
 // (design/notes/core-R4.md).
+// R5: a protected bug pauses the hunger clock from its final approach (in the zone and below creaseAirHeight); the
+// Sprout taper (SessionOptions.sproutRun 1-3: 14 / 13 / 12 snaps); protected entries never start in a Duo thumb band;
+// the pilot's giveUp switch for the report (design/notes/core-R5.md).
 'use strict';
 
 // MARK: Tuning (mirror of Snap/Core/Tuning.swift)
@@ -63,6 +68,12 @@ const T = {
   firstRunSnaps: 14,
   // R4: ... and a calm first morning: waves 1..firstRunCalmWaves are crowds, each gap after them x firstRunWaveGap
   firstRunCalmWaves: 14, firstRunWaveGap: 1.6,
+  // R5 (REVIEW-4 #8, founder call): the Sprout taper. Feed run 2 starts with sproutRun2Snaps (a free sting and the calm
+  // morning, wilting on), run 3 with sproutRun3Snaps (the calm morning only); from run sproutTaperRuns + 1, standard
+  sproutRun2Snaps: 13, sproutRun3Snaps: 12, sproutTaperRuns: 3,
+  // R5 (REVIEW-4 #15): no protected bug's entry lies within thumbBandWidth pt of either outer edge with its y in the
+  // middle thumbBandLow..thumbBandHigh of the height (the Duo's book-pose thumbs); such a y is mirrored out of the band
+  thumbBandWidth: 90, thumbBandLow: 0.25, thumbBandHigh: 0.75,
   // R3 (REVIEW-2 #5): no bug rests within its radius + creaseClearance of the crease band (creaseHalfWidth each side)
   creaseClearance: 16,
   // R4 (REVIEW-3 #14): a bug within creaseHalfWidth + its radius of the midrib line (in the trap) flies at least this high
@@ -312,6 +323,15 @@ function edgeEntry(target, g, r) {
   const xx = clamp(target.x + r.range(-260, 260), 40, W - 40);
   return { x: xx, y: x < 0.9 ? H + 30 : -30 };
 }
+// R5 (REVIEW-4 #15): a protected bug never enters under a Duo thumb. An entry within thumbBandWidth of either outer
+// edge with its y strictly inside the band (thumbBandLow..thumbBandHigh of the height) has its y mirrored across the
+// band's nearer edge (the band's lower half goes below it, its upper half above it): same side, same spread, no draws.
+function thumbSafeEntry(e, g) {
+  if (e.x >= T.thumbBandWidth && e.x <= g.w - T.thumbBandWidth) return e;
+  const lo = g.h * T.thumbBandLow, hi = g.h * T.thumbBandHigh;
+  if (!(e.y > lo && e.y < hi)) return e;
+  return { x: e.x, y: e.y < (lo + hi) / 2 ? 2 * lo - e.y : 2 * hi - e.y };
+}
 function randomSpot(g, r, maxR) {
   const t = r.range(0, 2 * Math.PI);
   const rr = Math.sqrt(r.unit()) * maxR;
@@ -383,13 +403,15 @@ function makeWave(seed, index, g, nectar, calm) {
       if (cross) {
         const fromLeft = r.chance(0.5);
         const y0 = r.range(120, g.h - 120), y1 = r.range(120, g.h - 120);
-        bugs.push({ species: s, entry: { x: fromLeft ? -30 : g.w + 30, y: y0 }, target: { x: fromLeft ? g.w + 40 : -40, y: y1 }, linger: 0, landsInTrap: false, groupOffset: base });
+        const e0 = { x: fromLeft ? -30 : g.w + 30, y: y0 };
+        bugs.push({ species: s, entry: prot ? thumbSafeEntry(e0, g) : e0, target: { x: fromLeft ? g.w + 40 : -40, y: y1 }, linger: 0, landsInTrap: false, groupOffset: base });
       } else {
         const cl = r.chance(0.5), cb = r.chance(0.5);
         const tx = cl ? r.range(30, 90) : g.w - r.range(30, 90);
         const ty = cb ? r.range(30, 90) : g.h - r.range(30, 90);
         const target = { x: tx, y: ty };
-        const entry = edgeEntry(target, g, r);
+        const e0 = edgeEntry(target, g, r);
+        const entry = prot ? thumbSafeEntry(e0, g) : e0;
         const lg = r.range(lmin, lmax) * m.lingerFactor * (prot ? T.beeLingerFactor : 1);
         bugs.push({ species: s, entry, target, linger: lg, landsInTrap: false, groupOffset: base });
       }
@@ -410,6 +432,7 @@ function makeWave(seed, index, g, nectar, calm) {
     let entry;
     if (m.style === WALKER) entry = { x: clamp(target.x + r.range(-120, 120), 40, g.w - 40), y: -20 };
     else entry = edgeEntry(target, g, r);
+    if (prot) entry = thumbSafeEntry(entry, g); // R5 (REVIEW-4 #15)
     for (let k = 0; k < count; k++) {
       let t = target, e = entry;
       if (s === 'gnat') {
@@ -457,6 +480,16 @@ function makeWave(seed, index, g, nectar, calm) {
 const A_ARR = 'arriving', A_WALK = 'walking', A_SIP = 'sipping', A_HOP = 'hopping', A_LEAVE = 'leaving', A_CAUGHT = 'caught', A_ESC = 'escaped', A_REL = 'released';
 const M = { approach: 0, hover: 1, sip: 2, pause: 3, dash: 4, hop: 5, cross: 6, leave: 7, escape: 8, release: 9, caught: 10 };
 
+// R5 (REVIEW-4 #8, founder call): the Sprout taper, by Feed run (SproutPerks.forFeedRun in TrapSession.swift).
+//   run 1: 14 snaps, no wilting, a free first sting, the calm morning; run 2: 13, a free sting, calm; run 3: 12, calm.
+function sproutPerks(run) {
+  if (!(run >= 1 && run <= T.sproutTaperRuns)) return null;
+  if (run === 1) return { run, startSnaps: T.firstRunSnaps, noWilt: true, freeSting: true, calmMorning: true };
+  if (run === 2) return { run, startSnaps: T.sproutRun2Snaps, noWilt: false, freeSting: true, calmMorning: true };
+  return { run, startSnaps: T.sproutRun3Snaps, noWilt: false, freeSting: false, calmMorning: true };
+}
+// SessionOptions.sproutRun (0 = none), with the R4 firstRun flag meaning run 1.
+function sproutRunOf(opts) { return opts.sproutRun ? opts.sproutRun : (opts.firstRun ? 1 : 0); }
 class Session {
   constructor(seed, opts, mode) {
     this.seed = u64(BigInt(seed)); this.opts = opts; this.mode = mode || 'feed';
@@ -468,11 +501,14 @@ class Session {
     this.installNectar(0);
     // R4 (REVIEW-3 #11): SessionOptions.firstRun (Feed only; the Daily stays standard): 14 snaps, no wilting, the first
     // stinger bite free, whatever startSnaps / hunger / freeFirstSting say.
-    this.firstRun = !!opts.firstRun && this.mode === 'feed';
-    const start = this.firstRun ? T.firstRunSnaps : (opts.startSnaps == null ? T.startSnaps : opts.startSnaps);
+    // R5 (REVIEW-4 #8): the Sprout taper (SessionOptions.sproutRun 1-3; firstRun is sproutRun 1). Feed only.
+    this.perks = this.mode === 'feed' ? sproutPerks(sproutRunOf(opts)) : null;
+    this.firstRun = this.perks !== null && this.perks.run === 1;
+    const start = this.perks ? this.perks.startSnaps : (opts.startSnaps == null ? T.startSnaps : opts.startSnaps);
     this.snapsLeft = clamp(start, 1, T.maxSnaps); this.score = 0; this.chain = 0;
-    this.wilts = opts.snapsRunOut && opts.hunger !== false && !this.firstRun;
-    this.freeSting = !!opts.freeFirstSting || this.firstRun;
+    this.wilts = opts.snapsRunOut && opts.hunger !== false && !(this.perks && this.perks.noWilt);
+    this.freeSting = !!opts.freeFirstSting || (this.perks !== null && this.perks.freeSting);
+    this.calm = this.perks !== null && this.perks.calmMorning;
     // R4 (QA-2 #1, REVIEW-3 #12): the hunger clock ticks only while hungerTicks() (see tick).
     this.hunger = 0; this.hungrySent = false; this.hungerLive = false; this.freeStingUsed = false;
     this.prevArmed = true; this.prevClosure = 0;
@@ -546,12 +582,14 @@ class Session {
       if (this.tiredElapsed >= T.tiredSeconds) this.phase = 'finished';
     }
   }
-  // R4 (QA-2 #1, REVIEW-3 #12): food in the trap (a landed catchable bug) and no protected bug landed in it.
+  // R4 (QA-2 #1, REVIEW-3 #12): food in the trap (a landed catchable bug) and no protected bug in it.
+  // R5 (REVIEW-4 #5, founder call): a protected bug is in it from its final approach: in the zone and landed, or below
+  // creaseAirHeight (the hover down, halo drawn).
   hungerTicks() {
     let food = false;
     for (const b of this.bugs) {
       if (!this.inTrap(b)) continue;
-      if (isProtected(b.species)) { if (b.landed) return false; }
+      if (isProtected(b.species)) { if (b.landed || b.height < T.creaseAirHeight) return false; }
       else if (b.landed) food = true;
     }
     return food;
@@ -565,13 +603,13 @@ class Session {
     const idx = this.wave;
     if (idx > 1 && (idx - 1) % T.nectarReseedWaves === 0) this.installNectar(Math.floor((idx - 1) / T.nectarReseedWaves));
     const recipe = this.mode === 'attract' ? ((idx - 1) % (T.nightWave + 5)) + 1 : idx;
-    const spec = makeWave(this.seed, recipe, this.g, this.nectar, this.firstRun);
+    const spec = makeWave(this.seed, recipe, this.g, this.nectar, this.calm);
     this.dayPhase = spec.phase;
     const at = this.nextWaveAt;
     for (const s of spec.bugs) this.pending.push({ at: at + s.groupOffset, spec: s });
     this.lastWaveAt = at;
     let gap = waveDelay(this.seed, recipe + 1);
-    if (this.firstRun && idx <= T.firstRunCalmWaves) gap *= T.firstRunWaveGap; // R4: the calm first morning
+    if (this.calm && idx <= T.firstRunCalmWaves) gap *= T.firstRunWaveGap; // R4/R5: the calm morning (Sprout runs 1-3)
     this.nextWaveAt = at + gap;
   }
   bugSeed(id) { return u64(this.seed ^ u64(BigInt(id) * 0xA24BAED4963EE407n) ^ 0x42554753n); }
@@ -954,8 +992,9 @@ const PROFILE = {
   perfect: { dmin: 0.08, dmax: 0.08, delayMin: 0.1, delayMax: 0.1, beeMiss: 0 },
 };
 class Pilot {
-  constructor(skill, seed) {
-    this.skill = skill; this.p = PROFILE[skill]; this.rng = new SeededRandom(seed);
+  // R5 (REVIEW-4 P2): giveUp false switches off the pilotGiveUp rule (TrapPilot.givesUp), for the SNAP-BAL report only.
+  constructor(skill, seed, giveUp) {
+    this.skill = skill; this.p = PROFILE[skill]; this.rng = new SeededRandom(seed); this.giveUp = giveUp !== false;
     this.stage = 0; // 0 idle, 1 down, 2 hold, 3 up
     this.closure = 0; this.armed = true; this.el = 0; this.d = 0.2; this.creepy = false; this.peak = 0;
     this.t4 = null; this.t6 = null; this.decideAt = null; this.beeSince = null; this.missed = new Map(); this.lastSnap = 0; this.plannedD = this.p.dmin;
@@ -1013,8 +1052,8 @@ class Pilot {
     switch (this.skill) {
       case 'novice': want = v.landed >= 1; break;
       case 'casual': want = v.landed >= 3 || (v.landed >= 2 && v.arriving === 0) || (v.landed >= 1 && v.maxPts >= 20) || (v.landed >= 1 && waited >= T.casualPatience); break;
-      case 'expert': want = v.n >= 3 || (v.n >= 1 && v.value >= T.expertValue) || (v.n >= 2 && v.restless >= T.expertRestless) || (v.n >= 1 && waited >= T.expertPatience) || (v.landed >= 1 && waited >= T.pilotGiveUp); break;
-      default: want = v.n >= 5 || (v.n >= 3 && v.arriving === 0) || (v.n >= 3 && v.restless >= T.perfectRestless) || v.value >= T.perfectValue || (v.n >= 1 && waited >= T.perfectPatience) || (v.landed >= 1 && waited >= T.pilotGiveUp); break;
+      case 'expert': want = v.n >= 3 || (v.n >= 1 && v.value >= T.expertValue) || (v.n >= 2 && v.restless >= T.expertRestless) || (v.n >= 1 && waited >= T.expertPatience) || (this.giveUp && v.landed >= 1 && waited >= T.pilotGiveUp); break;
+      default: want = v.n >= 5 || (v.n >= 3 && v.arriving === 0) || (v.n >= 3 && v.restless >= T.perfectRestless) || v.value >= T.perfectValue || (v.n >= 1 && waited >= T.perfectPatience) || (this.giveUp && v.landed >= 1 && waited >= T.pilotGiveUp); break;
     }
     if (!want) return false;
     return !this.beeBlocks(snap);
@@ -1214,9 +1253,12 @@ function detectorChecks() {
 // R4: SPROUT1 is the App's options for a Sprout's first Feed run (SessionOptions.firstRun: 14 snaps, no wilting, the
 // first stinger bite free; startSnaps 12 is what the App passes for every Sprout Feed run and firstRun overrides it).
 const SPROUT1 = { startSnaps: 12, firstRun: true };
-function runOne(skill, seed, extra, mode) {
+// R5 (REVIEW-4 #8): SessionOptions.sprout(feedRun: 2 / 3) plus the Sprout rank's startSnaps 12 (the taper overrides it).
+const SPROUT2 = { startSnaps: 12, sproutRun: 2 };
+const SPROUT3 = { startSnaps: 12, sproutRun: 3 };
+function runOne(skill, seed, extra, mode, giveUp) {
   const s = new Session(seed, Object.assign({ snapsRunOut: true, waves: true, stingCosts: true }, extra || {}), mode || 'feed');
-  const pilot = new Pilot(skill, u64(BigInt(seed) * 7n + 1n));
+  const pilot = new Pilot(skill, u64(BigInt(seed) * 7n + 1n), giveUp);
   const dt = 1 / 60; let t = 0; let frames = 0;
   while (s.phase !== 'finished' && frames < 60 * 600) {
     const input = pilot.step(dt, t, s.snapshot());
@@ -1250,6 +1292,10 @@ function checks(med) {
   if (med.sprout) out.push([`casual Sprout run 1 seconds >= 90 (${med.sprout.seconds.toFixed(1)})`, med.sprout.seconds >= 90]);
   if (med.sproutNovice) out.push([`novice Sprout run 1 seconds >= 90 (${med.sproutNovice.seconds.toFixed(1)})`, med.sproutNovice.seconds >= 90]);
   if (med.sproutNovice) out.push([`novice Sprout run 1 never wilts (${med.sproutNovice.maxWilts})`, med.sproutNovice.maxWilts === 0]);
+  // R5 (REVIEW-4 #8): the taper keeps a weak hand's runs 2 and 3 long
+  if (med.sprout2Novice) out.push([`novice Sprout run 2 seconds >= 75 (${med.sprout2Novice.seconds.toFixed(1)})`, med.sprout2Novice.seconds >= 75]);
+  if (med.sprout3Novice) out.push([`novice Sprout run 3 seconds >= 60 (${med.sprout3Novice.seconds.toFixed(1)})`, med.sprout3Novice.seconds >= 60]);
+  for (const [tag, m] of [['1', med.sproutNovice], ['2', med.sprout2Novice], ['3', med.sprout3Novice]]) if (m) out.push([`novice Sprout run ${tag} never capped (${m.capped})`, m.capped === 0]);
   if (e) out.push([`expert wilts <= 6 (${e.wilts})`, e.wilts <= 6]);
   if (p) out.push([`perfect seconds 240-480 (${p.seconds.toFixed(1)})`, p.seconds >= 240 && p.seconds <= 480]);
   if (p) out.push([`perfect wilts <= 5 (${p.wilts})`, p.wilts <= 5]);
@@ -1348,7 +1394,11 @@ function main() {
     for (let w = 0; w < nw; w++) {
       const med = {};
       for (const sk of skills) { const runs = []; for (let i = 0; i < seeds; i++) runs.push(runOne(sk, base + (w * seeds + i) * stride)); med[sk] = medians(runs); }
-      if (skills.includes('novice')) { const runs = []; for (let i = 0; i < seeds; i++) runs.push(runOne('novice', base + (w * seeds + i) * stride, SPROUT1)); med.sproutNovice = medians(runs); }
+      if (skills.includes('novice')) {
+        for (const [key, o] of [['sproutNovice', SPROUT1], ['sprout2Novice', SPROUT2], ['sprout3Novice', SPROUT3]]) {
+          const runs = []; for (let i = 0; i < seeds; i++) runs.push(runOne('novice', base + (w * seeds + i) * stride, o)); med[key] = medians(runs);
+        }
+      }
       const bad = checks(med).filter(([, ok]) => !ok);
       if (bad.length) { fails += 1; for (const [name] of bad) { const k = name.replace(/ \(.*\)$/, ''); failNames[k] = (failNames[k] || 0) + 1; } }
       console.log(`window ${w}: ` + skills.map((sk) => `${sk} ${med[sk].score}/${med[sk].seconds.toFixed(0)}s/${med[sk].snaps}sn/${med[sk].stings}st`).join(' | '));
@@ -1376,6 +1426,23 @@ function main() {
     const m = medians(runs);
     if (sk === 'casual') med.sprout = m; else med.sproutNovice = m;
     console.log(`SNAP-BAL sprout1 ${sk} score=${m.score} seconds=${m.seconds.toFixed(1)} p10s=${pct(runs.map((r) => r.seconds), 0.1).toFixed(1)} snaps=${m.snaps} caught=${m.caught} stings=${m.stings} feasts=${m.feasts} chain=${m.chain} wilts=${m.wilts} capped=${m.capped}`);
+  }
+  if (skills.includes('novice')) {
+    // R5 (REVIEW-4 #8): the novice pilot's Sprout runs 2 and 3 (the taper)
+    for (const [tag, key, o] of [['sprout2', 'sprout2Novice', SPROUT2], ['sprout3', 'sprout3Novice', SPROUT3]]) {
+      const runs = [];
+      for (let i = 0; i < seeds; i++) runs.push(runOne('novice', base + i * stride, o));
+      const m = medians(runs); med[key] = m;
+      console.log(`SNAP-BAL ${tag} novice score=${m.score} seconds=${m.seconds.toFixed(1)} p10s=${pct(runs.map((r) => r.seconds), 0.1).toFixed(1)} snaps=${m.snaps} caught=${m.caught} stings=${m.stings} feasts=${m.feasts} chain=${m.chain} wilts=${m.wilts} capped=${m.capped}`);
+    }
+  }
+  for (const sk of ['expert', 'perfect']) {
+    // R5 (REVIEW-4 P2): pilotGiveUp changes the player model, not the game: the same runs without it, reported only
+    if (!skills.includes(sk) || args.nogiveup === '0') continue;
+    const runs = [];
+    for (let i = 0; i < seeds; i++) runs.push(runOne(sk, base + i * stride, null, 'feed', false));
+    const m = medians(runs);
+    console.log(`SNAP-BAL nogiveup ${sk} score=${m.score} seconds=${m.seconds.toFixed(1)} snaps=${m.snaps} caught=${m.caught} stings=${m.stings} waves=${m.waves} wilts=${m.wilts} maxWilts=${m.maxWilts} capped=${m.capped} (with pilotGiveUp: wilts=${med[sk].wilts} capped=${med[sk].capped})`);
   }
   for (const [name, ok] of checks(med)) console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`);
 }

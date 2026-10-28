@@ -70,6 +70,8 @@ struct HUDValues: Equatable {
     var ringSnaps = false
     /// R3 (REVIEW-2 #12): the first Feast's flying glyph is labelled once ("+1 snap").
     var snapGain: String?
+    /// R5 (REVIEW-4 #7): a costly sting's cost at the row ("−1 snap", "−2 snaps"), the mirror of "+1 snap".
+    var snapLoss: String?
     /// R3 (Scene #14): the scene's crimson sting flash is crossing the row (`BogScene.snapsRowFlashing`).
     var rowFlashing = false
     /// R4 (REVIEW-3 #3): the free sting: the row flashes green with "free!".

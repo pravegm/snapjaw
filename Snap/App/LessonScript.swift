@@ -345,11 +345,24 @@ struct LessonScript: Equatable {
         }
     }
 
-    /// "Step 2 of 4", counted over the visible steps only. Pure; tested.
+    /// R5 (REVIEW-4 #11: the phone showed "Step n of 4", the Duo "Step 1 of 5" and "Step 2 of 6"): the four taught
+    /// steps are numbered the same on every iPhone. The Duo's pose step is "Get ready", and its re-arm step is part of
+    /// step 1 (the bite, then open again).
+    static let numberedSteps: [Step] = [.firstSnap, .tooSlow, .bee, .triple]
+    static let readyLabel = "Get ready"
+
+    /// "Step 2 of 4" (the same on the Duo and on phones; `touch` and `hasPose` no longer change it). Pure; tested.
     static func stepLabel(_ s: Step, touch: Bool, hasPose: Bool) -> String {
-        let steps = visibleSteps(touch: touch, hasPose: hasPose)
-        let index = (steps.firstIndex(of: s) ?? 0) + 1
-        return "Step \(min(index, steps.count)) of \(steps.count)"
+        let n = numberedSteps.count
+        let shown: Step
+        switch s {
+        case .pose: return readyLabel
+        case .openAgain: shown = .firstSnap
+        case .done: shown = .triple
+        case .firstSnap, .tooSlow, .bee, .triple: shown = s
+        }
+        let index = (numberedSteps.firstIndex(of: shown) ?? 0) + 1
+        return "Step \(min(index, n)) of \(n)"
     }
 
     /// `hasPose`: the pose step counts (a hinge drives, or a Duo-shaped layout is waiting for one).
