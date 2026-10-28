@@ -276,7 +276,7 @@ enum AppRules {
     /// A Feast's refund ran into the cap: the row was (or became) full. `before`: the snaps before the bite. Pure;
     /// tested.
     static func refundHitTheCap(before: Int, after: Int, back: Int, max m: Int) -> Bool {
-        back > 0 && after >= m && before - 1 + back > m
+        back > 0 && after >= m && before - 1 + back >= m
     }
 
     /// R4 (REVIEW-3 #10, "×1.5 held"): a clean one-bug bite keeps the chain going (no step, no break). Pure; tested.

@@ -413,10 +413,10 @@ struct CoreTests {
         let all: Double = TrapRules.reaction(fly, sipping: true, flying: true, onRim: true, wave: 1)
         #expect(abs(all - 0.24 * 1.35 * 0.55 * 0.6) < 1e-12)
         let late: Double = TrapRules.reaction(fly, sipping: false, flying: false, onRim: false, wave: 32)
-        // R3: × 0.96 per wave after 30, to a 0.25 floor (the late night outruns every hand).
+        // R3/R4: × 0.96 per wave after 30, to the Tuning floor (0.2 since R4; the late night outruns every hand).
         #expect(abs(late - 0.24 * 0.96 * 0.96) < 1e-9)
         let floor: Double = TrapRules.reaction(fly, sipping: false, flying: false, onRim: false, wave: 400)
-        #expect(abs(floor - 0.24 * 0.25) < 1e-9)
+        #expect(abs(floor - 0.24 * Tuning.lateReactionFloor) < 1e-9)
         #expect(TrapRules.isCandidate(.arriving, height: 0.5))
         #expect(!TrapRules.isCandidate(.arriving, height: 0.6))
         #expect(TrapRules.isCandidate(.hopping, height: 0.8))
