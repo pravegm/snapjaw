@@ -31,6 +31,9 @@
 #  5. Frames: open 165, half closed 150, snapped 130, the cover display shut, reopened 165, and the pose card.
 # INFO rows (evidence, never a verdict): CANVAS, CREEP-FAST (the same close over 1.5 s), NO-PAUSE-95 (a hard snap that
 # reaches 95° must never pause: Never put a pause near 90°, CLAUDE.md).
+# Rig rows (design/notes/duo-ci-R3.md): SIMULATOR FAIL when the Duo shut down mid-run (then rebooted before the next
+# launch; that launch's checks are INCONCLUSIVE), HINGE-TOOL FAIL when the hinge CLI keeps failing on a booted Duo, and
+# RIG INFO (failed hinge calls, simulator deaths).
 #
 # Env: UDID (required), OUT (duo-screens), PASSES ("hinge frames ui store"), STRICT (1 = exit 1 when a check FAILs;
 # default 0: the frames and the PASS/FAIL table are the evidence), STORE_LIST / STORE_FILTER / STORE_ANGLE (the store
@@ -99,18 +102,126 @@ log "displays inner=$INNER cover=$COVER"
 
 HAVE_HINGE=0; command -v hinge >/dev/null 2>&1 && HAVE_HINGE=1
 (( HAVE_HINGE )) || log "WARN no hinge tool: the hinge checks will FAIL and every frame stays at the boot angle"
-CUR=180
+CUR=180; WANT=180
+
+# ---- a dead simulator / a dead hinge tool (design/notes/duo-ci-R3.md) ----------------------------------------------
+# Duo run 40615925900: the Duo simulator shut down ~40 s into the hinge pass (`hinge: no booted simulator`, simctl
+# "device is not booted … Bad or unknown session"), and the script went on for 75 minutes against a dead device,
+# reporting FAIL/INCONCLUSIVE as if the app were broken. Now: every hinge failure records the tool's exit code and last
+# message; a device that is no longer booted is reported as a SIMULATOR FAIL row with diagnostics, the checks of that
+# launch become INCONCLUSIVE (a dead device is no evidence about the app), and the next launch reboots the device first.
+# A tool that keeps failing on a booted device is a HINGE-TOOL FAIL row.
+SIM_LOST=0        # the simulator died since the current launch
+SIM_DEATHS=0
+HINGE_RUN=0       # consecutive failed hinge calls
+HINGE_ERRS=0      # failed hinge calls in the whole run
+HINGE_LAST=""     # the last failure: "exit <rc>: <message>"
+HINGE_DEAD_LOGGED=0
+CUR_LOG=""        # the current launch's app log
+CUR_LAUNCH=""
+
+# sim_booted: 0 when CoreSimulator still lists the Duo as Booted.
+sim_booted() { to 20 xcrun simctl list devices 2>/dev/null | grep -F "$UDID" | grep -q "(Booted)"; }
+
+# sim_diag <file>: what the host knows about the device's death (device list, the app's last lines, the device's own
+# system.log, CoreSimulator's log, fresh crash reports).
+sim_diag() {
+  local f="$1" crash="$OUT_ABS/logs/crash-$SIM_DEATHS"
+  {
+    echo "== $(date -u +%FT%TZ) SIM-DEAD during launch '${CUR_LAUNCH:-none}' (hinge ${CUR}°, last hinge failure: ${HINGE_LAST:-none})"
+    echo "== simctl list devices"; to 20 xcrun simctl list devices 2>&1
+    if [[ -n "$CUR_LOG" ]]; then echo "== app log ($CUR_LOG, $(nlines "$CUR_LOG") lines), last 15"; tail -n 15 "$CUR_LOG" 2>&1; fi
+    echo "== device system.log, last 300"; tail -n 300 "$HOME/Library/Logs/CoreSimulator/$UDID/system.log" 2>&1
+    echo "== CoreSimulator.log, last 150"; tail -n 150 "$HOME/Library/Logs/CoreSimulator/CoreSimulator.log" 2>&1
+    echo "== crash reports from the last 15 min (copied to logs/crash-$SIM_DEATHS/)"
+    find "$HOME/Library/Logs/DiagnosticReports" "$HOME/Library/Logs/CoreSimulator/$UDID" -type f -mmin -15 2>/dev/null
+  } > "$f" 2>&1
+  mkdir -p "$crash"
+  find "$HOME/Library/Logs/DiagnosticReports" -type f -mmin -15 -exec cp {} "$crash/" \; 2>/dev/null || true
+}
+
+# sim_lost <why>: mark the current launch's device as dead (once per launch) and collect the diagnostics.
+sim_lost() {
+  (( SIM_LOST )) && return 0
+  SIM_LOST=1; SIM_DEATHS=$((SIM_DEATHS + 1))
+  local f="$OUT_ABS/logs/sim-death-$SIM_DEATHS.txt" at="-"
+  [[ -n "$CUR_LOG" ]] && at="$(nlines "$CUR_LOG")"
+  log "SIM-DEAD: the Duo simulator is no longer booted ($1; launch '${CUR_LAUNCH:-none}', app log line $at); diagnostics in logs/$(basename "$f")"
+  sim_diag "$f"
+  result SIMULATOR FAIL "the Duo simulator shut down during launch '${CUR_LAUNCH:-none}' (app log line $at; $1); diagnostics logs/$(basename "$f"); the checks of that launch are INCONCLUSIVE"
+}
+
+# sim_recover: before a launch, reboot a dead device (boot, bootstatus, re-warm the hinge helper, re-apply the wanted
+# angle). Stops the script when it cannot be rebooted: nothing after that would be evidence.
+sim_recover() {
+  sim_booted && return 0
+  sim_lost "found shut down before launch '$1'"
+  log "SIM: rebooting the Duo"
+  to 120 xcrun simctl boot "$UDID" >>"$RUNLOG" 2>&1 || true
+  if ! to 600 xcrun simctl bootstatus "$UDID" -b >>"$RUNLOG" 2>&1 || ! sim_booted; then
+    result SIMULATOR FAIL "the Duo could not be rebooted after shutting down; stopped before launch '$1'"
+    write_summary; exit 1
+  fi
+  (( HAVE_HINGE )) && { to 120 hinge -d "$UDID" get >>"$RUNLOG" 2>&1 || log "WARN hinge get after the reboot failed"; }
+  log "SIM: rebooted; re-applying ${WANT}°"
+  SIM_LOST=0; HINGE_RUN=0; CUR=180
+  hinge_set "$WANT" || true
+}
+
+# hinge_call <timeout s> <args…>: one hinge invocation (its output → the run log, via a file: a lingering helper can't
+# hold a pipe open). On failure: the exit code (124/137/142 = our timeout) and the tool's last message, then either
+# SIM-DEAD (the device is gone) or, after 5 failures in a row on a booted device, one HINGE-TOOL FAIL row.
+hinge_call() {
+  local s="$1" tmp="$OUT_ABS/raw/_hinge.txt" rc why msg; shift
+  to "$s" hinge -d "$UDID" "$@" > "$tmp" 2>&1; rc=$?
+  cat "$tmp" >> "$RUNLOG" 2>/dev/null
+  if (( rc == 0 )); then HINGE_RUN=0; rm -f "$tmp"; return 0; fi
+  HINGE_ERRS=$((HINGE_ERRS + 1)); HINGE_RUN=$((HINGE_RUN + 1))
+  case "$rc" in 124|137|142) why="timed out after ${s}s (exit $rc)";; *) why="exit $rc";; esac
+  msg=$(grep . "$tmp" 2>/dev/null | tail -1 | tr -d '\r' | tr '\t' ' ' | cut -c1-160); rm -f "$tmp"
+  HINGE_LAST="hinge $*: $why${msg:+: $msg}"
+  if grep -qiE "no booted simulator|not booted|unknown session|current state: Shutdown" <<<"$msg" || ! sim_booted; then
+    sim_lost "$HINGE_LAST"
+  elif (( HINGE_RUN >= 5 && ! HINGE_DEAD_LOGGED )); then
+    HINGE_DEAD_LOGGED=1
+    result HINGE-TOOL FAIL "$HINGE_RUN hinge calls in a row failed on a booted Duo (last: $HINGE_LAST); the app sees no hinge motion"
+  fi
+  return "$rc"
+}
+
 hinge_set() {   # hinge_set <angle>: a confirmed set, 3 tries
+  WANT="$1"
   (( HAVE_HINGE )) || return 1
+  (( SIM_LOST )) && return 1   # the device is gone until the next launch reboots it
   local a
-  for a in 1 2 3; do to 20 hinge -d "$UDID" -t 3 "$1" >>"$RUNLOG" 2>&1 && { CUR="$1"; return 0; }; sleep 1; done
-  log "WARN hinge set $1 failed"; return 1
+  for a in 1 2 3; do
+    hinge_call 20 -t 3 "$1" && { CUR="$1"; return 0; }
+    (( SIM_LOST )) && break
+    sleep 1
+  done
+  log "WARN hinge set $1 failed (${HINGE_LAST:-no message})"; return 1
 }
 hinge_sweep() {   # hinge_sweep <to> <seconds>: continuous 60 Hz stream so the app sees a real motion
+  WANT="$1"
   (( HAVE_HINGE )) || return 1
-  to $(( ${2%.*} + 20 )) hinge -d "$UDID" sweep "$CUR" "$1" "$2" >>"$RUNLOG" 2>&1 || log "WARN sweep $CUR -> $1 exited non-zero"
+  (( SIM_LOST )) && return 1   # CUR keeps the last angle really set
+  hinge_call $(( ${2%.*} + 20 )) sweep "$CUR" "$1" "$2" || log "WARN sweep $CUR -> $1 failed (${HINGE_LAST:-no message})"
   CUR="$1"
 }
+
+# verdict <CHECK> <PASS|FAIL|INCONCLUSIVE> <detail>: result(), except that a FAIL / INCONCLUSIVE while the device was
+# lost since the launch, or right after 3+ failed hinge calls in a row, is INCONCLUSIVE with the reason (a dead
+# simulator or a dead hinge tool says nothing about the app).
+verdict() {
+  (( SIM_LOST )) || sim_booted || sim_lost "found shut down at the $1 verdict"
+  if (( SIM_LOST )) && [[ "$2" != PASS ]]; then
+    result "$1" INCONCLUSIVE "$3 (the Duo simulator died during this launch: no evidence about the app)"
+  elif (( HINGE_RUN >= 3 )) && [[ "$2" != PASS ]]; then
+    result "$1" INCONCLUSIVE "$3 (the hinge tool's last $HINGE_RUN calls failed: $HINGE_LAST)"
+  else result "$1" "$2" "$3"; fi
+}
+# simnote: "; SIMULATOR DEAD" for INFO rows recorded after the device died.
+simnote() { (( SIM_LOST )) && echo "; SIMULATOR DEAD (no evidence)"; return 0; }
 # hinge_wiggle <angle> <n>: n tiny 1° sweeps (angle → angle−1 → angle, 0.4 s each way, ~2.5°/s: far under the 4° snap
 # start, so it never arms a snap) so hinge samples keep flowing through a "hold" before a fast snap.
 hinge_wiggle() {
@@ -178,8 +289,11 @@ after() { tail -n +"$(( $2 + 1 ))" "$1" 2>/dev/null; }     # after <file> <line>
 # between <file> <a> <b>: lines a+1 … b (awk, because BSD head rejects -n 0)
 between() { awk -v a="$2" -v b="$3" 'NR > a + 0 && NR <= b + 0' "$1" 2>/dev/null; }
 # trap_vals <field>: from "SNAP-T trap closure <c> armed <0|1> creep <0|1> angle <θ|-> ref <θ|->" lines on stdin, the
-# <field> values (closure, armed, creep, angle, ref; "-" when the App has no hinge reading).
-trap_vals() { awk -v k="$1" '/SNAP-T trap / { for (i = 1; i < NF; i++) if ($i == k) print $(i + 1) }'; }
+# <field> values (closure, armed, creep, angle, ref; "-" when the App has no hinge reading). The App's 10 Hz line and
+# Feel's 2 Hz "SNAP-T hinge closure …" diagnostic (Input/HingeTrapSource.swift, same fields) are both read, so the
+# checks survive either one going missing or being renamed. TRAP_RE is that match, shared by the helpers below.
+TRAP_RE='SNAP-T (trap|hinge) closure '
+trap_vals() { awk -v k="$1" -v re="$TRAP_RE" '$0 ~ re { for (i = 1; i < NF; i++) if ($i == k) print $(i + 1) }'; }
 max_of() { awk 'BEGIN { m = "" } $1 ~ /^-?[0-9.]+$/ { if (m == "" || $1 + 0 > m + 0) m = $1 } END { print (m == "" ? "none" : m) }'; }
 min_of() { awk 'BEGIN { m = "" } $1 ~ /^-?[0-9.]+$/ { if (m == "" || $1 + 0 < m + 0) m = $1 } END { print (m == "" ? "none" : m) }'; }
 lt() { [[ "$1" =~ ^-?[0-9.]+$ ]] && awk -v a="$1" -v b="$2" 'BEGIN { exit !(a + 0 < b + 0) }'; }   # lt <a> <b>: a < b
@@ -187,14 +301,14 @@ lt() { [[ "$1" =~ ^-?[0-9.]+$ ]] && awk -v a="$1" -v b="$2" 'BEGIN { exit !(a + 
 first_line() { awk -v a="$3" -v re="$2" 'NR > a + 0 && $0 ~ re { print NR; exit }' "$1" 2>/dev/null; }
 # closure_before <file> <line> / closure_after <file> <line>: the closure of the last trap line before <line> / the
 # first one after it, or "none".
-closure_before() { awk -v n="$2" 'NR >= n + 0 { exit } /SNAP-T trap / { for (i = 1; i < NF; i++) if ($i == "closure") c = $(i + 1) } END { print (c == "" ? "none" : c) }' "$1" 2>/dev/null; }
-closure_after() { awk -v n="$2" 'NR > n + 0 && /SNAP-T trap / { for (i = 1; i < NF; i++) if ($i == "closure") { print $(i + 1); exit } }' "$1" 2>/dev/null | grep . || echo none; }
+closure_before() { awk -v n="$2" -v re="$TRAP_RE" 'NR >= n + 0 { exit } $0 ~ re { for (i = 1; i < NF; i++) if ($i == "closure") c = $(i + 1) } END { print (c == "" ? "none" : c) }' "$1" 2>/dev/null; }
+closure_after() { awk -v n="$2" -v re="$TRAP_RE" 'NR > n + 0 && $0 ~ re { for (i = 1; i < NF; i++) if ($i == "closure") { print $(i + 1); exit } }' "$1" 2>/dev/null | grep . || echo none; }
 # angle_before <file> <line>: the last hinge angle logged before line <line> ("SNAP-H <t> <θ>" samples, or the angle
 # field of a "SNAP-T trap …" line), or "none".
 angle_before() {
-  awk -v n="$2" 'NR >= n + 0 { exit }
+  awk -v n="$2" -v re="$TRAP_RE" 'NR >= n + 0 { exit }
     /^SNAP-H / { a = $3 }
-    /SNAP-T trap / { for (i = 1; i < NF; i++) if ($i == "angle" && $(i + 1) ~ /^[0-9.]+$/) a = $(i + 1) }
+    $0 ~ re { for (i = 1; i < NF; i++) if ($i == "angle" && $(i + 1) ~ /^[0-9.]+$/) a = $(i + 1) }
     END { print (a == "" ? "none" : a) }' "$1" 2>/dev/null
 }
 # canvas_line <file>: the latest "SNAP-T canvas <w>x<h> fold=<0|1> hudLeft=<0|1>" line.
@@ -205,6 +319,11 @@ input_of() { grep -oE "SNAP-T input [a-z]+" "$1" 2>/dev/null | tail -1 | awk '{p
 launch() {
   local name="$1" args="$2" f t=0
   f="$OUT_ABS/logs/$name.txt"
+  local was_lost="$SIM_LOST"
+  sim_recover "$name"
+  SIM_LOST=0; CUR_LOG="$f"; CUR_LAUNCH="$name"
+  # Moves skipped while the device was lost: put the hinge where the caller wanted it.
+  (( was_lost )) && [[ "$CUR" != "$WANT" ]] && { hinge_set "$WANT" || true; }
   to 30 xcrun simctl terminate "$UDID" "$BUNDLE" 2>/dev/null || true
   : > "$f"
   to 60 xcrun simctl launch --terminate-running-process --stdout="$f" --stderr="$f" \
@@ -214,8 +333,11 @@ launch() {
         "$UDID" "$BUNDLE" -snapDemo "$args" >/dev/null 2>>"$RUNLOG" || log "WARN launch $name failed twice"
     }
   while (( t < 45 )); do grep -q "SNAP-T frame 120" "$f" 2>/dev/null && break; sleep 1; t=$((t+1)); done
-  (( t >= 45 )) && log "WARN $name: no 'SNAP-T frame 120' after 45 s"
-  log "launched $name ($args) after ${t}s: $(canvas_line "$f"); input $(input_of "$f"); $(count '^SNAP-H' "$f") hinge lines"
+  if (( t >= 45 )); then
+    log "WARN $name: no 'SNAP-T frame 120' after 45 s"
+    sim_booted || sim_lost "found shut down after launching '$name'"
+  fi
+  log "launched $name ($args) after ${t}s: $(canvas_line "$f"); input $(input_of "$f"); $(count '^SNAP-H' "$f") hinge lines, $(count 'SNAP-T trap closure' "$f") trap lines"
   sleep 2
 }
 
@@ -232,7 +354,7 @@ if [[ " $PASSES " == *" hinge "* ]]; then
   hinge_set 160
   launch hinge "screen=play;mode=attract;seed=7"
   HL="$OUT_ABS/logs/hinge.txt"
-  result CANVAS INFO "$(canvas_line "$HL"); input $(input_of "$HL"); hinge lines $(count '^SNAP-H' "$HL")"
+  result CANVAS INFO "$(canvas_line "$HL"); input $(input_of "$HL"); hinge lines $(count '^SNAP-H' "$HL"); trap lines $(count 'SNAP-T trap closure' "$HL"), hinge closure lines $(count 'SNAP-T hinge closure' "$HL")$(simnote)"
 
   # 1. SNAP. Attract waves start at 1.2 s; wait for a bug to sip (the moment a player would bite).
   if wait_for "$HL" "SNAP-T event bugSipping" 40; then sip="a bug was sipping"; else sip="no bugSipping in 40 s (snapped anyway)"; fi
@@ -253,10 +375,10 @@ if [[ " $PASSES " == *" hinge "* ]]; then
   inp=$(input_of "$HL")
   snapline=$( [[ -n "$sl" ]] && sed -n "${sl}p" "$HL" | tr -d '\r' )
   d="attempt $attempt/2; $sip; input=${inp:-none}; ${snapline:-no snapped line}; min angle ${minA}°, max closure ${maxc}°"
-  if [[ -n "$sl" ]]; then result SNAP PASS "$d"
+  if [[ -n "$sl" ]]; then verdict SNAP PASS "$d"
   elif [[ "$minA" == none ]] || ! lt "$minA" 135; then
-    result SNAP INCONCLUSIVE "$d (the app never logged an angle under 135°: the hinge tool under-delivered the sweep, or no trap lines)"
-  else result SNAP FAIL "$d (the app saw the close but did not snap)"; fi
+    verdict SNAP INCONCLUSIVE "$d (the app never logged an angle under 135°: the hinge tool under-delivered the sweep, or no trap lines)"
+  else verdict SNAP FAIL "$d (the app saw the close but did not snap)"; fi
   shoot_now duo-h1-snapped-128
 
   # 3. REARM (ROUND-1 lists it after CREEP; it is the re-open that CREEP starts with). After the snap, back to 160.
@@ -265,9 +387,9 @@ if [[ " $PASSES " == *" hinge "* ]]; then
   if [[ -n "$sl" ]]; then
     rl=$(first_line "$HL" "SNAP-T event rearmed" "$sl")
     d="rearmed@${rl:-none} (snapped@$sl); armed after the re-open: $(after "$HL" "$r0" | trap_vals armed | tail -1)"
-    if [[ -n "$rl" ]]; then result REARM PASS "$d"; else result REARM FAIL "$d"; fi
+    if [[ -n "$rl" ]]; then verdict REARM PASS "$d"; else verdict REARM FAIL "$d"; fi
   else
-    result REARM INCONCLUSIVE "no snap to re-arm from; rearmed lines in the run: $(count 'SNAP-T event rearmed' "$HL")"
+    verdict REARM INCONCLUSIVE "no snap to re-arm from; rearmed lines in the run: $(count 'SNAP-T event rearmed' "$HL")"
   fi
 
   # 2. CREEP: from 160 (the rest reference settles over 0.6 s; the wiggles keep samples flowing), 160 → 128 over 3 s
@@ -288,14 +410,14 @@ if [[ " $PASSES " == *" hinge "* ]]; then
     { [[ "$near" == none ]] || lt "$near" 20; } && early="snapped@$csl at closure ~${near}° (before ${cb}, after ${ca})"
   fi
   d="creep-1 lines=$creeps; max closure ${cmax}°; spooked=$spooked; snapped in the window: ${csl:-none}${early:+; EARLY: $early}"
-  if (( creeps > 0 )) && [[ -z "$early" ]]; then result CREEP PASS "$d"; else result CREEP FAIL "$d"; fi
+  if (( creeps > 0 )) && [[ -z "$early" ]]; then verdict CREEP PASS "$d"; else verdict CREEP FAIL "$d"; fi
   # CREEP-FAST (INFO): the same close over 1.5 s (~21°/s, still under the reference's 25°/s fall), closure ~13°.
   hinge_sweep 160 1.0; sleep 1.5; hinge_wiggle 160 1
   f0=$(nlines "$HL")
   hinge_sweep 128 1.5; sleep 1
   f1=$(nlines "$HL")
   fsl=$(first_line "$HL" "SNAP-T event snapped" "$f0"); [[ -n "$fsl" && "$fsl" -gt "$f1" ]] && fsl=""
-  result CREEP-FAST INFO "160 → 128 over 1.5 s: creep-1 lines=$(between "$HL" "$f0" "$f1" | trap_vals creep | grep -c '^1$'); max closure $(between "$HL" "$f0" "$f1" | trap_vals closure | max_of)°; snapped: ${fsl:-none}"
+  result CREEP-FAST INFO "160 → 128 over 1.5 s: creep-1 lines=$(between "$HL" "$f0" "$f1" | trap_vals creep | grep -c '^1$'); max closure $(between "$HL" "$f0" "$f1" | trap_vals closure | max_of)°; snapped: ${fsl:-none}$(simnote)"
   hinge_sweep 160 1.0; sleep 1
 
   # 4. CLOSE-PAUSE (fresh launch at 150). First NO-PAUSE-95 (INFO): a hard snap often reaches 90–100° on hardware and
@@ -308,7 +430,7 @@ if [[ " $PASSES " == *" hinge "* ]]; then
   hinge_sweep 95 0.4; sleep 1.5
   n1=$(nlines "$CP")
   np=$(first_line "$CP" "SNAP-T paused" "$n0"); [[ -n "$np" && "$np" -gt "$n1" ]] && np=""
-  result NO-PAUSE-95 INFO "held 95° for 1.5 s: $( [[ -n "$np" ]] && echo "PAUSED at line $np: $(sed -n "${np}p" "$CP" | tr -d '\r')" || echo "no pause" ); last angle $(angle_before "$CP" $(( n1 + 1 )))°"
+  result NO-PAUSE-95 INFO "held 95° for 1.5 s: $( [[ -n "$np" ]] && echo "PAUSED at line $np: $(sed -n "${np}p" "$CP" | tr -d '\r')" || echo "no pause" ); last angle $(angle_before "$CP" $(( n1 + 1 )))°$(simnote)"
   hinge_sweep 150 1.0; sleep 1.5
   p0=$(nlines "$CP")
   hinge_sweep 40 1.5; sleep 1.5
@@ -328,7 +450,7 @@ if [[ " $PASSES " == *" hinge "* ]]; then
     r=$(first_line "$CP" "SNAP-T resumed" "$p")
   fi
   d="paused@${p:-none} ($( [[ -n "$p" ]] && angle_before "$CP" "$p" || echo -)°; first pause line: ${other:-none}); reopened to ${went}°; resumed@${r:-none} ($( [[ -n "$r" ]] && angle_before "$CP" "$r" || echo -)°); $(canvas_line "$CP")"
-  if [[ -n "$p" && -n "$r" ]]; then result CLOSE-PAUSE PASS "$d"; else result CLOSE-PAUSE FAIL "$d"; fi
+  if [[ -n "$p" && -n "$r" ]]; then verdict CLOSE-PAUSE PASS "$d"; else verdict CLOSE-PAUSE FAIL "$d"; fi
   shoot "duo-h4-resumed-$went" inner
 fi
 
@@ -353,7 +475,7 @@ if [[ " $PASSES " == *" frames "* ]]; then
   snap_once "$FS" 130
   if wait_for "$FS" "SNAP-T freeze snap" 3; then fz="froze on the snap"; else fz="no 'SNAP-T freeze snap' within 3 s"; fi
   shoot_now duo-03-snapped-130
-  result FRAME-SNAP INFO "$fz; $(grep -m1 -E 'SNAP-T event snapped' "$FS" | tr -d '\r' || echo 'no snapped line')"
+  result FRAME-SNAP INFO "$fz; $(grep -m1 -E 'SNAP-T event snapped' "$FS" | tr -d '\r' || echo 'no snapped line')$(simnote)"
   # Shut (the cover display) and reopened, on a live (unfrozen) run.
   hinge_set 160
   launch frames-cover "screen=play;mode=attract;seed=7"
@@ -361,12 +483,12 @@ if [[ " $PASSES " == *" frames "* ]]; then
   hinge_sweep 60 1.5; hinge_sweep 10 0.6; hinge_set 0; sleep 3; shoot duo-04-cover-shut cover
   o0=$(nlines "$FC")
   hinge_sweep 165 2.5; sleep 3; shoot duo-05-reopened-165 inner
-  result COVER INFO "paused lines=$(count 'SNAP-T paused' "$FC"); resumed after the reopen: $(first_line "$FC" "SNAP-T resumed" "$o0" | grep . || echo none); $(canvas_line "$FC")"
+  result COVER INFO "paused lines=$(count 'SNAP-T paused' "$FC"); resumed after the reopen: $(first_line "$FC" "SNAP-T resumed" "$o0" | grep . || echo none); $(canvas_line "$FC")$(simnote)"
   # The pose card ("Hold it open like a book"). The Duo sim stays in book pose (no CLI rotate), so the card is shown
   # with `screen=pose`; a real portrait frame needs the app's own orientation request (none in R1).
   launch frames-pose "screen=pose"
   sleep 2; shoot duo-06-pose-card inner
-  result POSE-CARD INFO "frame $(png_wh "$OUT_ABS/duo-06-pose-card.png"); $(canvas_line "$OUT_ABS/logs/frames-pose.txt")"
+  result POSE-CARD INFO "frame $(png_wh "$OUT_ABS/duo-06-pose-card.png"); $(canvas_line "$OUT_ABS/logs/frames-pose.txt")$(simnote)"
 fi
 
 # ---- pass: UI frames -----------------------------------------------------------------------------------------------
@@ -420,6 +542,8 @@ if [[ " $PASSES " == *" store "* ]]; then
 fi
 
 ls -la "$OUT_ABS" | tee -a "$RUNLOG" >&2
+(( SIM_LOST )) || sim_booted || sim_lost "found shut down at the end of the run"
+result RIG INFO "hinge calls failed: $HINGE_ERRS (last: ${HINGE_LAST:-none}); simulator deaths: $SIM_DEATHS"
 log "checks: $(awk -F'\t' '$2=="PASS"' "$CHECKS" | wc -l | tr -d ' ') PASS, $(awk -F'\t' '$2=="FAIL"' "$CHECKS" | wc -l | tr -d ' ') FAIL, $(awk -F'\t' '$2=="INCONCLUSIVE"' "$CHECKS" | wc -l | tr -d ' ') INCONCLUSIVE"
 grep -E $'\t(PASS|FAIL|INCONCLUSIVE)\t' "$CHECKS" | awk -F'\t' '{ printf "%s %s (%s)\n", $1, $2, $3 }' || true
 write_summary

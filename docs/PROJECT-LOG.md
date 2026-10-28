@@ -25,3 +25,11 @@
 - CI 40611262935 compiled first time; one test expectation was wrong (the snap's own closure counted). After the fix
   **CI 40612235669: 215 tests green**.
 - Next: the R2 panel with fresh-player testers, Duo sim run 40615925900.
+- R2 panel: juror 6, UX 6, feel 6, Duo 5 (prov.), fresh 6/7/5 ("watermelon", "giant eye" bite, truncated hint).
+- Round 3: the founder's flytrap art direction (two hinged lobes, glands, 76 cilia, stem), the bite inside the
+  outline, stinger bites ×1 with no refunds, wilt 18/16/14/12, Sprout run 1 (no wilt, free first bee), chain ×5,
+  14 snaps, the fold drawn as the input, badges, a new icon. CI fixes: an icon variable shadowing (40621685004), a
+  rethrowing call in #expect (40621872386), two over-strict tests (40622079094).
+  **CI 40623216966: 253 tests green.** The trap now reads as a flytrap; the icon is a 3/4 trap with a fly.
+- Duo sim R2 run 40615925900 was inconclusive: only 6 hinge samples reached the app, and no trap lines. An
+  investigator is on it.
