@@ -6,7 +6,8 @@
 //   store-banner --kind header --hero store-D01-book-hero.png --out header-3840x1646.png [--light right] [--angle 146]
 //   store-banner --kind search --hero store-D01-book-hero.png --out search-3840x2560.png
 //                --caption "Your Duo is a *flytrap* / Hold it open like a book." [--layout top|side]
-//                [--guides guides.png] [--yaw 0] [--tilt 8] [--device-box x0,y0,x1,y1] [--text-box x0,y0,x1,y1]
+//                [--guides guides.png] [--yaw 0] [--tilt 15] [--distance 2.8] [--device-box x0,y0,x1,y1]
+//                [--text-box x0,y0,x1,y1]
 //
 //  • The hero is the iPhone Duo held open like a book, exactly as ci/store-frame.swift draws screenshot frame 1 (the
 //    same model, bezel, hinge spine and shadows): the capture is split at the fold (x = 1428 of 2853) and each half is
@@ -340,13 +341,15 @@ func drawBook(_ shot: CGImage, in boxTL: CGRect) {
     let wl = Double(fold), wr = Double(iw - fold), h = Double(ih)
     let angle = max(100, min(175, number("angle", 140)))
     let theta = (180 - angle) / 2 * Double.pi / 180      // each page turned this far toward the viewer
-    let tilt = max(-30, min(30, number("tilt", 8))) * Double.pi / 180
+    // R7 (SCORE-R6 #6): ci/store-frame.swift's book geometry (tilt 15, camera 2.8 page heights), so the fold reads
+    // in the 365 pt search art: both the top and the bottom edge bow toward the spine.
+    let tilt = max(-30, min(30, number("tilt", 15))) * Double.pi / 180
     // Negative yaw turns the book's face a little toward the left (the text column) when it stands on the right.
     let yaw = max(-30, min(30, number("yaw", layout == "top" ? 0 : -5))) * Double.pi / 180
     let bezel = h * 0.024
     let deviceRadius = h * 0.065
     let screenRadius = max(0, deviceRadius - bezel)
-    let distance = h * 3.4                              // camera distance from the spine: mild perspective
+    let distance = h * max(2.2, min(5, number("distance", 2.8)))   // camera distance from the spine (× page height)
     let eye = h * 0.06
 
     guard let convention = warpConvention() else { fail("Core Image perspective warp unavailable") }

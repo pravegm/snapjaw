@@ -80,8 +80,12 @@ struct HUDValues: Equatable {
     var tag: HUDTag?
     /// R6 (#6): the bugs in the trap (screen-space boxes, coarse), while a plate is up: the plate keeps off them.
     var subjectRects: [CGRect] = []
-    /// R6 Zen: the snaps never run out, so the row shows its full count quietly.
+    /// R6 Zen: the snaps never run out, so the row shows its full count quietly. R7 (#10): and the score wears a
+    /// "Zen Bog" badge.
     var zen = false
+    /// R7 (#5): the toast on the plate has waited `MessageQueue.maxHold` for a spot clear of the bugs: it may now show
+    /// in the slot that covers fewest.
+    var plateMayCover = false
     /// R3 (Scene #14): the scene's crimson sting flash is crossing the row (`BogScene.snapsRowFlashing`).
     var rowFlashing = false
     /// R4 (REVIEW-3 #3): the free sting: the row flashes green with "free!".
@@ -132,7 +136,7 @@ final class HomeTrapState: ObservableObject {
 struct ResultSummary: Equatable {
     var result: RunResult
     var outcome: RecordOutcome
-    /// "Your trap is tired", "Daily Bog · 27 Oct", "Daily practice · 27 Oct".
+    /// "Your trap is tired" ("What a feast!" on a new best), "Daily Bog · 27 Oct", "Daily practice · 27 Oct".
     var title: String
     /// One sentence naming the best moment.
     var story: String

@@ -16,6 +16,8 @@ import Testing
 // SproutPerks), and no bee entry under a Duo thumb.
 // Round 6: the Zen Bog (options, free stings, the looping day, no score feats), the late night's cues and the last
 // light, the halo rule for "Hungry… bite!", goals (pool, scopes, tracker, book, draws, rewards) and the Garden's varieties.
+// Round 7: the ×2 FEAST multiplier, one scoring function in every mode, the night pool (fireflies and crickets), the
+// late decays 0.955 / 0.91, goal tiers, and sessions' keep-out rects (Scene's HUD zones).
 
 struct CoreTests {
 
@@ -200,8 +202,9 @@ struct CoreTests {
         #expect(Tuning.firstRunSnaps == 14 && Tuning.firstRunSnaps <= Tuning.maxSnaps)
         #expect(Tuning.firstRunCalmWaves == 14)
         #expect(abs(Tuning.firstRunWaveGap - 1.6) < 1e-12)
-        #expect(abs(Tuning.lateReactionDecay - 0.96) < 1e-12 && abs(Tuning.lateReactionFloor - 0.2) < 1e-12)
-        #expect(abs(Tuning.lateLingerDecay - 0.92) < 1e-12 && abs(Tuning.lateLingerFloor - 0.2) < 1e-12)
+        // R7 (#14): 0.955 and 0.91 (R3–R6: 0.96 and 0.92).
+        #expect(abs(Tuning.lateReactionDecay - 0.955) < 1e-12 && abs(Tuning.lateReactionFloor - 0.2) < 1e-12)
+        #expect(abs(Tuning.lateLingerDecay - 0.91) < 1e-12 && abs(Tuning.lateLingerFloor - 0.2) < 1e-12)
         #expect(Tuning.extraBeeEvery == 40)
         #expect(abs(Tuning.creaseAirHeight - 0.5) < 1e-12)
         #expect(Tuning.creaseAirHeight <= 1 - Tuning.approachHeightDrop, "an approach never flies lower than this")
@@ -426,8 +429,8 @@ struct CoreTests {
         let all: Double = TrapRules.reaction(fly, sipping: true, flying: true, onRim: true, wave: 1)
         #expect(abs(all - 0.24 * 1.35 * 0.55 * 0.6) < 1e-12)
         let late: Double = TrapRules.reaction(fly, sipping: false, flying: false, onRim: false, wave: 32)
-        // R3/R4: × 0.96 per wave after 30, to the Tuning floor (0.2 since R4; the late night outruns every hand).
-        #expect(abs(late - 0.24 * 0.96 * 0.96) < 1e-9)
+        // R3/R4: × lateReactionDecay (R7: 0.955) per wave after 30, to the Tuning floor (0.2 since R4).
+        #expect(abs(late - 0.24 * 0.955 * 0.955) < 1e-9)
         let floor: Double = TrapRules.reaction(fly, sipping: false, flying: false, onRim: false, wave: 400)
         #expect(abs(floor - 0.24 * Tuning.lateReactionFloor) < 1e-9)
         #expect(TrapRules.isCandidate(.arriving, height: 0.5))
@@ -2150,6 +2153,8 @@ struct CoreTests {
         #expect(got(result(waves: 23)).contains("snap.ach.night"))
         #expect(!got(result(mode: .daily(day: 4, scored: false))).contains("snap.ach.daily"))
         #expect(got(result(mode: .daily(day: 4, scored: true))).contains("snap.ach.daily"))
+        // R7: R6's 10,000, now named Tuning.wellFedScore.
+        #expect(Tuning.wellFedScore == 10_000)
         #expect(!got(result(score: 9_999)).contains("snap.ach.score10k"))
         #expect(got(result(score: 10_000)).contains("snap.ach.score10k"))
         #expect(!got(result(stings: 0, bugs: 29)).contains("snap.ach.nobees"))
@@ -2697,5 +2702,260 @@ struct CoreTests {
             compared += 1
         }
         #expect(compared >= 20)
+    }
+
+    // MARK: R7: the ×2 FEAST (#3), one scoring function (#10), the night pool (#14), goal tiers (#15), keep-out (#4)
+
+    /// Every bug that scores (not the bees, bumblebees and wasps).
+    private var scoringSpecies: [BugSpecies] {
+        return BugSpecies.allCases.filter { (s: BugSpecies) -> Bool in !s.isProtected }
+    }
+
+    @Test func aFeastOutScoresTheFourBugBitesPlayersCompare() {
+        // R7 (SCORE-R6 #3, founder call): a clean bite of 5+ scores × Tuning.feastMultiplier (×2) inside its points.
+        #expect(abs(Tuning.feastMultiplier - 2.0) < 1e-12)
+        #expect(abs(TrapRules.feastBonus(count: 4, stung: false) - 1) < 1e-12)
+        #expect(abs(TrapRules.feastBonus(count: Tuning.bigFeastCount, stung: false) - Tuning.feastMultiplier) < 1e-12)
+        #expect(abs(TrapRules.feastBonus(count: 7, stung: false) - Tuning.feastMultiplier) < 1e-12)
+        #expect(abs(TrapRules.feastBonus(count: 6, stung: true) - 1) < 1e-12, "a stung bite is never a FEAST")
+        let values: [Int] = scoringSpecies.map { (s: BugSpecies) -> Int in BugCatalog.info(s).points }
+        #expect(values.min() == 3 && values.max() == 150, "gnat 3 … Golden Scarab 150")
+        var chain: Int = 0
+        while chain <= 10 {
+            for small in scoringSpecies {
+                let smallPoints: Double = Double(BugCatalog.info(small).points)
+                // 1. The same mean points per bug: 5–7 of a species beat 4 of it.
+                let quadSame: Int = TrapRules.bitePoints([small, small, small, small], chain: chain, stung: false)
+                var n: Int = Tuning.bigFeastCount
+                while n <= 7 {
+                    let many: [BugSpecies] = Array(repeating: small, count: n)
+                    let bite: Int = TrapRules.bitePoints(many, chain: chain, stung: false)
+                    if bite <= quadSame { Issue.record("\(n) × \(small) (\(bite)) ≤ 4 × \(small) (\(quadSame)), chain \(chain)") }
+                    n += 1
+                }
+                // 2. A 4-bug bite whose mean points per bug are up to 2.5× higher still loses to 5.
+                let five: [BugSpecies] = Array(repeating: small, count: 5)
+                let feast: Int = TrapRules.bitePoints(five, chain: chain, stung: false)
+                for big in scoringSpecies where Double(BugCatalog.info(big).points) <= 2.5 * smallPoints {
+                    let quad: Int = TrapRules.bitePoints([big, big, big, big], chain: chain, stung: false)
+                    if feast <= quad { Issue.record("5 × \(small) (\(feast)) ≤ 4 × \(big) (\(quad)), chain \(chain)") }
+                }
+            }
+            chain += 1
+        }
+        // 3. R6's store frames (48 / P02 / D02 "FEAST! ×5 · +180", 14 "QUAD ×4 · +260", 49 "+520" = the QUAD at ×2):
+        // 36 points over 5 bugs (3 houseflies, 2 gnats) against 65 over 4 (bluebottle, grasshopper, 2 houseflies).
+        let feastBite: [BugSpecies] = [.housefly, .housefly, .housefly, .gnat, .gnat]
+        let quadBite: [BugSpecies] = [.bluebottle, .grasshopper, .housefly, .housefly]
+        #expect(TrapRules.bitePoints(quadBite, chain: 0, stung: false) == 260, "R6's QUAD +260")
+        #expect(TrapRules.bitePoints(quadBite, chain: 2, stung: false) == 520, "R6's QUAD +520 (×2)")
+        #expect(TrapRules.bitePoints(feastBite, chain: 0, stung: false) == 360, "R6's +180 FEAST is now +360")
+        #expect(TrapRules.bitePoints(feastBite, chain: 2, stung: false) == 720, "… and +720 at ×2, against +520")
+        // Below 5 nothing changes (R6's numbers), and a stung bite is × 1.
+        #expect(TrapRules.bitePoints([.housefly, .housefly], chain: 2, stung: false) == 80, "20 × 2 × ×2")
+        #expect(TrapRules.bitePoints([.housefly, .housefly, .ladybird, .goldenScarab], chain: 1, stung: true) == 740)
+        // Not a guarantee over the whole range (founder call): four Golden Scarabs still out-score five gnats.
+        let gnats: [BugSpecies] = Array(repeating: .gnat, count: 5)
+        let scarabs: [BugSpecies] = Array(repeating: .goldenScarab, count: 4)
+        #expect(TrapRules.bitePoints(gnats, chain: 0, stung: false) == 150, "3 × 5 × 5 × 2")
+        #expect(TrapRules.bitePoints(scarabs, chain: 0, stung: false) == 2_400, "150 × 4 × 4")
+    }
+
+    @Test func aFeastBiteCarriesItsMultiplierInThePoints() {
+        // R7 (#3, shared contract): the ×2 is inside BiteReport.points (App shows caught.count and the points).
+        let s: TrapSession = quiet()
+        sippers(s, [.housefly, .housefly, .housefly, .housefly, .housefly])
+        let ev: [TrapEvent] = snap(s, 0.1)
+        let r: BiteReport? = report(ev)
+        #expect(r?.caught.count == 5)
+        #expect(r?.points == 500, "10 × 5 × 5 × ×1 × 2")
+        #expect(r?.countMultiplier == 5)
+        #expect(r?.snapsBack == Tuning.bigFeastRefund)
+        #expect(s.snapshot.score == 500)
+        let feasts: Int = count(ev) { (e: TrapEvent) -> Bool in
+            if case .feast(let n, let back) = e { return n == 5 && back == Tuning.bigFeastRefund }
+            return false
+        }
+        #expect(feasts == 1)
+        #expect(s.partialResult().bestBitePoints == 500)
+        // A 5-bug bite with a bee in it: × 1, no FEAST and no ×2 (eating a bee is never the best move).
+        let t: TrapSession = quiet()
+        sippers(t, [.housefly, .housefly, .housefly, .housefly, .housefly, .bee])
+        let te: [TrapEvent] = snap(t, 0.1)
+        let tr: BiteReport? = report(te)
+        #expect(tr?.caught.count == 5)
+        #expect(tr?.stingers == [.bee])
+        #expect(tr?.points == 250, "10 × 5 × 5 × 1, no ×2")
+        let stungFeasts: Int = count(te) { (e: TrapEvent) -> Bool in if case .feast = e { return true }; return false }
+        #expect(stungFeasts == 0)
+    }
+
+    @Test func everyModeScoresWithTheOneFunction() {
+        // R7 (#10): Feed and the Zen Bog score every bite with TrapRules.bitePoints, and the score in play
+        // (snapshot.score), the BiteReports and Results (RunResult.score) are one number.
+        let modes: [RunMode] = [.feed, .zen]
+        for m in modes {
+            let s = TrapSession(mode: m, seed: 1000, best: 1, geometry: geo, options: SessionOptions.for(m))
+            var pilot = TrapPilot(skill: .casual, seed: 7001)
+            var t: Double = 0
+            var f: Int = 0
+            var sum: Int = 0
+            var bites: Int = 0
+            var mismatches: Int = 0
+            while f < 60 * 150 && !s.isFinished {
+                let out: PilotOutput = pilot.step(dt: frame, time: t, snapshot: s.snapshot)
+                for e in s.step(dt: frame, input: out.input) {
+                    guard case .snapped(let r) = e else { continue }
+                    sum += r.points
+                    bites += 1
+                    var base: Int = 0
+                    for sp in r.caught { base += BugCatalog.info(sp).points }
+                    let stung: Bool = !r.stingers.isEmpty
+                    base = base * r.caught.count
+                    let x: Double = TrapRules.feastBonus(count: r.caught.count, stung: stung)
+                    let want: Int = Int((Double(base) * r.chainMultiplier * x).rounded())
+                    if want != r.points { mismatches += 1 }
+                }
+                if s.snapshot.score != sum { mismatches += 1 }
+                t += frame
+                f += 1
+            }
+            let res: RunResult = s.partialResult()
+            #expect(bites >= 8, "\(m): \(bites) bites")
+            #expect(mismatches == 0, "\(m)")
+            #expect(res.score == sum, "\(m): Results \(res.score), bites \(sum)")
+            #expect(s.snapshot.score == res.score, "\(m)")
+        }
+    }
+
+    @Test func nightIsFirefliesAndCrickets() {
+        // R7 (SCORE-R6 #14): over waves 23–90 of the balance seeds the firefly is the commonest bug landing in the
+        // trap, and fireflies and crickets are ≥ 40% of them (tools/balance-sim.js night=1: 45.6%; R6: 13%, gnats first).
+        var counts: [BugSpecies: Int] = [:]
+        var total: Int = 0
+        var i: Int = 0
+        while i < 16 {
+            let seed: UInt64 = UInt64(1000 + i * 7919)
+            var w: Int = Tuning.nightWave
+            while w <= 90 {
+                let block: Int = (w - 1) / Tuning.nectarReseedWaves
+                let nectar: [NectarDrop] = WaveFactory.nectar(seed: WaveFactory.nectarSeed(seed: seed, block: block),
+                                                              geometry: geo)
+                let spec: WaveSpec = WaveFactory.wave(seed: seed, index: w, geometry: geo, nectar: nectar)
+                for b in spec.bugs where b.landsInTrap && !b.species.isProtected {
+                    counts[b.species, default: 0] += 1
+                    total += 1
+                }
+                w += 1
+            }
+            i += 1
+        }
+        let fireflies: Int = counts[.firefly] ?? 0
+        let crickets: Int = counts[.cricket] ?? 0
+        let share: Double = Double(fireflies + crickets) / Double(max(total, 1))
+        var top: BugSpecies = .firefly
+        for (sp, n) in counts where n > (counts[top] ?? 0) { top = sp }
+        #expect(total > 1_000)
+        #expect(share >= 0.4, "fireflies + crickets \(share): \(counts)")
+        #expect(top == .firefly, "\(counts)")
+        // The day pool is R6's: no firefly or cricket before night.
+        let nectar0: [NectarDrop] = WaveFactory.nectar(seed: WaveFactory.nectarSeed(seed: 1000, block: 2), geometry: geo)
+        var d: Int = 1
+        while d < Tuning.nightWave {
+            for b in WaveFactory.wave(seed: 1000, index: d, geometry: geo, nectar: nectar0).bugs {
+                #expect(b.species != .firefly && b.species != .cricket, "wave \(d)")
+            }
+            d += 1
+        }
+    }
+
+    @Test func goalsHaveSensibleTiers() {
+        // R7 (SCORE-R6 #15): every goal is easy, medium or hard; all three are used; a Sprout (rank 0) is never
+        // offered a hard goal and easy goals open by rank 2; within one kind, span and scope a bigger target is
+        // never an easier tier; the variety goals are hard.
+        let pool: [GoalSpec] = GoalBook.pool
+        #expect(GoalTier.allCases.count == 3)
+        #expect(GoalTier.easy.label == "Easy" && GoalTier.medium.label == "Medium" && GoalTier.hard.label == "Hard")
+        #expect(GoalTier.easy < GoalTier.medium && GoalTier.medium < GoalTier.hard)
+        for tier in GoalTier.allCases {
+            let n: Int = pool.filter { (d: GoalSpec) -> Bool in d.tier == tier }.count
+            #expect(n >= 8, "\(tier): \(n)")
+        }
+        for d in pool {
+            if d.tier == .hard { #expect(d.ranks.lowerBound >= 3, "\(d.id) is hard from rank \(d.ranks.lowerBound)") }
+            if d.tier == .easy { #expect(d.ranks.lowerBound <= 2, "\(d.id) is easy from rank \(d.ranks.lowerBound)") }
+            for e in pool where e.kind == d.kind && e.span == d.span && e.scope == d.scope && e.target > d.target {
+                #expect(e.tier >= d.tier, "\(e.id) (\(e.tier)) vs \(d.id) (\(d.tier))")
+            }
+            if d.unlocks != nil { #expect(d.tier == .hard, "\(d.id) unlocks a variety") }
+        }
+        #expect(goal("bite3").tier == .easy && goal("bite5").tier == .medium && goal("bite7").tier == .hard)
+        #expect(goal("daily2k").tier == .easy && goal("daily6k").tier == .hard)
+        // Every rank's draw has an easy or medium goal to offer.
+        var r: Int = 0
+        while r < PlantRanks.count {
+            let open: [GoalSpec] = GoalBook.eligible(rank: r)
+            let gentle: Bool = open.contains { (d: GoalSpec) -> Bool in d.tier != .hard }
+            #expect(gentle, "rank \(r)")
+            r += 1
+        }
+    }
+
+    /// R7 (#4): a 60 s seeded run of waves (no snaps): how many still, resting bug-frames there were, and how many of
+    /// them had a centre within keepOutClearance (less 3.5 pt: a walker ends its dash up to its 3 pt wobble off its
+    /// spot) of `zone`. `guarded` sets the session's keepOut to [zone].
+    private func keepOutRests(_ zone: CGRect, guarded: Bool) -> (rests: Int, inside: Int) {
+        let o = SessionOptions(snapsRunOut: false, waves: true, stingCosts: true)
+        let s = TrapSession(mode: .feed, seed: 1000, best: 0, geometry: geo, options: o)
+        if guarded { s.keepOut = [zone] }
+        var last: [Int: CGPoint] = [:]
+        var rests: Int = 0
+        var inside: Int = 0
+        var f: Int = 0
+        while f < 60 * 60 {
+            _ = s.step(dt: frame, input: TrapInput())
+            for bug in s.snapshot.bugs {
+                let prev: CGPoint? = last[bug.id]
+                last[bug.id] = bug.position
+                guard let p = prev else { continue }
+                let still: Bool = abs(p.x - bug.position.x) < CGFloat(1e-9) && abs(p.y - bug.position.y) < CGFloat(1e-9)
+                var resting: Bool = false
+                switch bug.activity {
+                case .sipping, .walking, .arriving: resting = still
+                case .hopping, .leaving, .caught, .escaped, .released: resting = false
+                }
+                if !resting { continue }
+                rests += 1
+                let c: Double = TrapRules.keepOutClearance(radius: BugCatalog.info(bug.species).radius,
+                                                           protected: bug.species.isProtected)
+                if TrapRules.touchesKeepOut([zone], Double(bug.position.x), Double(bug.position.y), clearance: c - 3.5) {
+                    inside += 1
+                }
+            }
+            f += 1
+        }
+        return (rests: rests, inside: inside)
+    }
+
+    @Test func noBugRestsInAKeepOutRect() {
+        // R7 (SCORE-R6 #4): Core is the source of truth for the HUD's clear zones. With a corner keep-out (the top-right
+        // corner of the 952 × 670 scene, over the right lobe's upper half), no resting bug (sipping, or still on the
+        // ground, a perch or a dart hover) comes within its clearance over 60 s. The same seed without keepOut does
+        // rest there, so it is the rule that moves them.
+        let zone = CGRect(x: 560, y: 360, width: 392, height: 310)
+        let free = keepOutRests(zone, guarded: false)
+        let held = keepOutRests(zone, guarded: true)
+        #expect(free.inside > 0, "without keepOut bugs rest in the corner: \(free)")
+        #expect(held.rests > 100, "bugs still rest elsewhere: \(held)")
+        #expect(held.inside == 0, "\(held)")
+        // The clearance: radius + 8 pt; a protected bug's halo (radius × 1.6 + 4) + 8 pt.
+        let fly: CGFloat = BugCatalog.info(.housefly).radius
+        let bee: CGFloat = BugCatalog.info(.bee).radius
+        #expect(abs(TrapRules.keepOutClearance(radius: fly, protected: false) - (Double(fly) + 8)) < 1e-9)
+        #expect(abs(TrapRules.keepOutClearance(radius: bee, protected: true) - (Double(bee) * 1.6 + 12)) < 1e-9)
+        #expect(TrapRules.touchesKeepOut([zone], 550, 400, clearance: 11))
+        #expect(!TrapRules.touchesKeepOut([zone], 550, 400, clearance: 10))
+        #expect(!TrapRules.touchesKeepOut([], 700, 500, clearance: 50))
+        #expect(TrapRules.touchesKeepOut([zone], 700, 500, clearance: 0.5), "inside the rect")
     }
 }

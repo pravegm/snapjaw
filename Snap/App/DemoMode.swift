@@ -33,10 +33,11 @@ import UIKit
 // - `seed=<n>`                    the run seed (default 7 for feed/attract, so frames are stable; daily = today's).
 // - `pilot=novice|casual|expert|perfect`   Core's TrapPilot drives the trap. Without it `screen=play` takes the real
 //                                 hinge (Duo CI) or touch.
-// - `progress=fresh|mid|late`     seeded in-memory progress (fresh: nothing; mid: rank 4, 9 species, best 3,200;
-//                                 late: rank 10, 16 species, best 14,800). Demo runs never write UserDefaults.
+// - `progress=fresh|mid|late|story`   seeded in-memory progress (fresh: nothing; mid: rank 4, 9 species, best 3,200;
+//                                 late: rank 10, 16 species, best 14,800; R7 story: rank 7, 13 species, best 9,400,
+//                                 the Garden 5/8). Demo runs never write UserDefaults.
 // - `freezeOn=landed|crowd|bee|snap|feast|sting|dusk|night|lastSnap|hungry|wilted|tired|results|firstHint|chain5|
-//             costlySting|drySnap|held|feastOpen|bigFeast|goalDone`
+//             costlySting|drySnap|held|feastOpen|bigFeast|goalDone|feastGulp`
 //                                 stop stepping the session (the scene keeps drawing) at the first such moment, and
 //                                 print `SNAP-T freeze <tag>`. `snap` holds 0.12 s after the bite; `costlySting` (a sting
 //                                 that cost snaps) 0.2 s; feast, sting, lastSnap, wilted, chain5 (the chain's 5th step),
@@ -46,7 +47,9 @@ import UIKit
 //                                 1.0 s into the tired moment (`AppRules.tiredFreezeAt`: the numeral at 0, the banner
 //                                 up). R6: `bigFeast` (a FEAST event: 5+ bugs, or a Feast at ×4+) holds 0.45 s, so the
 //                                 hit-stop is over and the "FEAST!" banner and the gulp are up; `goalDone` freezes the
-//                                 moment a goal's toast ("Goal done! …") is on its plate.
+//                                 moment a goal's toast ("Goal done! …") is on its plate. R7: `feastGulp` (a clean bite
+//                                 of 5+ bugs) holds 0.15 s and pauses the scene at once: mid-gulp, the crowd still in
+//                                 the jaws (P02/D02). `tired` now holds 1.6 s (the bite's pops gone, the banner up).
 // - `variety=<raw>`               R6: draw this trap variety (`redDragon`, `b52`, …) whatever the progress has
 //                                 grown (CI frames of every variety).
 // - `firstRun=0|1`                R4: Sprout run 1's rules (14 snaps, no wilt, a free first sting). Unset: only
@@ -69,7 +72,8 @@ import UIKit
 // `SNAP-T run score=<n> bugs=<n> snaps=<n> seconds=<s>`, `SNAP-T icon ok|failed`, `SNAP-ICON <path>`.
 // R6: `SNAP-T goal done <id>`, `SNAP-T night cue nightGetsFast|lastLight`, `SNAP-T zen end bugs=<n> seconds=<s>`,
 // `SNAP-T results goals <n> growth=<n>`, `SNAP-T variety <raw>` (picked), `SNAP-T variety grown <raw,…>`,
-// `SNAP-T screen garden`.
+// `SNAP-T screen garden`. R7: `SNAP-T too-flat on|off angle=<deg>` (play on a hinge held at ≥ 174°: the plate says
+// "Fold it a little").
 //
 // R6 CI frames (ROUND-6 App list):
 //   garden            `screen=garden;progress=mid` (and `progress=late`: two goal-grown cultivars, two still locked)
@@ -98,14 +102,28 @@ struct DemoMode: Equatable {
         case feastOpen
         /// R6: a FEAST event (5+ bugs, or ×4+), and a goal's live toast on its plate.
         case bigFeast, goalDone
+        /// R7 (CI ask, ci-R7.md #6: P02/D02 mid-gulp): a clean bite of 5+ bugs, held 0.15 s after it with the scene
+        /// paused at once, so the first gulps are going into the midrib and the rest of the crowd is still in the jaws.
+        case feastGulp
 
         /// Event moments hold a beat after the event; state moments freeze at once.
         var isEvent: Bool {
             switch self {
             case .snap, .feast, .sting, .lastSnap, .hungry, .wilted, .chain5, .costlySting, .drySnap, .held, .feastOpen,
-                 .bigFeast:
+                 .bigFeast, .feastGulp:
                 return true
             case .landed, .crowd, .bee, .dusk, .night, .tired, .results, .firstHint, .goalDone: return false
+            }
+        }
+
+        /// R7: the scene is paused the moment the session freezes (not `GameController.sceneHoldDelay` later), so a
+        /// moment that moves on its own scene clock (the gulps) stays as it was.
+        var holdsSceneAtOnce: Bool {
+            switch self {
+            case .feastGulp: return true
+            case .landed, .crowd, .bee, .snap, .feast, .sting, .dusk, .night, .lastSnap, .hungry, .wilted, .tired,
+                 .results, .firstHint, .chain5, .costlySting, .drySnap, .held, .feastOpen, .bigFeast, .goalDone:
+                return false
             }
         }
 
@@ -120,13 +138,25 @@ struct DemoMode: Equatable {
             case .hungry: return 0.5
             case .feastOpen: return 0.75
             case .bigFeast: return 0.45
+            case .feastGulp: return 0.15
             case .landed, .crowd, .bee, .dusk, .night, .tired, .results, .firstHint, .goalDone: return 0
             }
         }
     }
-    enum Preset: String, Equatable { case fresh, mid, late }
+    /// R7 (CI ask, ci-R7.md #9): `story` sits between `mid` and `late` (rank 7, 13 species, the Garden 5 of 8), so a
+    /// store set can show one player with pages still to find.
+    enum Preset: String, Equatable { case fresh, mid, late, story }
 
     static let defaultSeed: UInt64 = 7
+    /// R7 (#10): `screen=results;mode=zen` without `seed=` plays this seed (frame 47 showed the Feed demo's best bite
+    /// and chain: seed 7's first 150 s are Feed's best moments too).
+    static let zenResultsSeed: UInt64 = 23
+
+    /// The seed a demo run plays without `seed=`: 7, or the Zen Results seed. Pure; tested.
+    static func seed(for mode: RunMode, screen: Screen?) -> UInt64 {
+        if mode == .zen && screen == .results { return zenResultsSeed }
+        return defaultSeed
+    }
 
     var raw: String
     var screen: Screen?
@@ -260,11 +290,18 @@ enum DemoPresets {
                               goalsDone: ["bite4", "chain3", GoalBook.sawtoothGoal, "dragonfly3",
                                           GoalBook.sharkToothGoal, "scarab"])
 
+    /// R7: rank 7, 13 species, best 9,400; Sawtooth and Shark Tooth grown by goal, so the Garden is 5 of 8 (Classic,
+    /// Red Dragon and B52 by rank).
+    static let story = Profile(runs: 48, rank: 7, species: 13, best: 9_400, biggestBite: 6, longestChain: 5,
+                               dailies: [7_300, 6_120, 8_050], goalsDone: ["bite4", GoalBook.sawtoothGoal, "chain3",
+                                                                          GoalBook.sharkToothGoal])
+
     static func progress(_ preset: DemoMode.Preset?, today: Int) -> ProgressData {
         switch preset ?? .fresh {
         case .fresh: return ProgressData()
         case .mid: return make(mid, today: today)
         case .late: return make(late, today: today)
+        case .story: return make(story, today: today)
         }
     }
 

@@ -26,9 +26,21 @@ import UIKit
 /// CI freeze holds them at that instant; ambient life (flaps, bobs, twinkles, fireflies) runs on the wall clock, so a
 /// still frame still breathes. **The bite's hit-stop** (50 ms of session time) freezes the bugs, FX and pops while the
 /// jaws slam and the caught bugs flash white.
+/// R7 (#4): Core judges where bugs may rest (`TrapSession.keepOut`); the Scene knows the HUD's plates and Home's
+/// buttons. A driver that conforms is sent `BogScene.coreKeepOut` (scene space, the sessions' own space) whenever it
+/// changes, when it is set as the driver and on every `reset()`; it sets it on its play and Home sessions. (A session
+/// made later can take it at once with `BogScene.applyKeepOut(to:)`.)
+@MainActor
+protocol SceneKeepOutReceiver: AnyObject {
+    func sceneKeepOutChanged(_ rects: [CGRect])
+}
+
 @MainActor
 final class BogScene: SKScene {
-    weak var driver: SceneDriver?
+    /// R7 (#4): a driver that is also a `SceneKeepOutReceiver` is sent `coreKeepOut` when it is set.
+    weak var driver: SceneDriver? {
+        didSet { publishKeepOut() }
+    }
 
     /// Reduce Motion: no shake or camera punch, gentler bobs, fewer particles.
     var reduceMotion: Bool = false {
@@ -63,7 +75,20 @@ final class BogScene: SKScene {
 
     /// QA-2 #7: false on Home (no snaps row there): no Feast glyph flights, no sting crack or row flash, no wilt glyph
     /// or "Too slow!" pop. The bite, its pops and "Bzzt!" still show. Default true (play, the lesson).
-    var showsEconomy = true
+    /// R7 (#4): with no `hudKeepOut` from the App, false also means Home (`isHome`), so the bugs keep clear of Home's
+    /// buttons (`homeButtonFrames`, else the `BogScene.homeKeepOut` estimate).
+    var showsEconomy = true {
+        didSet {
+            if showsEconomy != oldValue { keepOutChanged() }
+        }
+    }
+
+    /// R7 (#4): Home's button frames in scene space, when the App knows them (exact; nil = `homeKeepOut`'s estimate).
+    var homeButtonFrames: [CGRect]? {
+        didSet {
+            if homeButtonFrames != oldValue { keepOutChanged() }
+        }
+    }
 
     /// R6 (the Garden): the trap variety to draw (the play lobes, cilia, closed trap and the economy's glyphs). Cosmetic
     /// only. Setting it builds that variety's textures once (do it before play, e.g. with the layout).
@@ -79,10 +104,44 @@ final class BogScene: SKScene {
     /// R6 (#7): the HUD's plates in scene space (origin bottom-left, y up), when the App knows them: the score with
     /// the pause button, and the snaps row with the chain chip. Bugs outside the trap are drawn clear of them (and of
     /// the canvas edge). nil = `BogScene.defaultKeepOut(_:)`, the HUD's two outer corners.
+    /// R7 (#4): on Home leave it nil and use `homeButtonFrames`.
     var hudKeepOut: [CGRect]? {
         didSet {
-            if hudKeepOut != oldValue { bugs.keepOut = hudKeepOut ?? BogScene.defaultKeepOut(layout) }
+            if hudKeepOut != oldValue { keepOutChanged() }
         }
+    }
+
+    /// R7 (#4): Home (no economy, no HUD plates): its bog is decoration.
+    var isHome: Bool { !showsEconomy && hudKeepOut == nil }
+
+    /// R7 (#4): the plates the bugs keep clear of now: the App's HUD rects, else the HUD's default corners in play,
+    /// else (Home) Home's buttons.
+    var effectiveKeepOut: [CGRect] {
+        if let rects = hudKeepOut { return rects }
+        if showsEconomy { return BogScene.defaultKeepOut(layout) }
+        return homeButtonFrames ?? BogScene.homeKeepOut(layout)
+    }
+
+    /// R7 (#4): the keep-out Core judges resting spots by (`TrapSession.keepOut`, scene space = the session's space):
+    /// `effectiveKeepOut`, the midrib band and the edge margins (`BogScene.coreKeepOut(_:layout:)`).
+    var coreKeepOut: [CGRect] { BogScene.coreKeepOut(effectiveKeepOut, layout: layout) }
+
+    /// R7 (#4): gives `session` the scene's keep-out now (call it when a session is made, before its first wave).
+    func applyKeepOut(to session: TrapSession) {
+        session.keepOut = coreKeepOut
+    }
+
+    /// R7 (#4): the keep-out changed (plates, Home, layout or a new session): the bug layer's visual easing follows,
+    /// and the driver's sessions are told.
+    private func keepOutChanged() {
+        bugs.keepOut = effectiveKeepOut
+        bugs.decorative = isHome
+        publishKeepOut()
+    }
+
+    private func publishKeepOut() {
+        guard let receiver = driver as? SceneKeepOutReceiver else { return }
+        receiver.sceneKeepOutChanged(coreKeepOut)
     }
 
     // MARK: Read-outs (tests, the App, demo frames)
@@ -174,6 +233,10 @@ final class BogScene: SKScene {
     func gulped(ofBug id: Int) -> Bool { bugs.gulpDone(id) }
     /// R6 (#7, tests): what the bugs keep clear of now.
     var bugKeepOut: [CGRect] { bugs.keepOut }
+    /// R7 (#4, tests, the CI probe): every sitting bug's drawn footprint now (halo included, scene space, unshaken).
+    var sittingBugRects: [CGRect] { bugs.sittingRects }
+    /// R7 (#4, tests): bug `id`'s visual-only offset from its Core position (always zero for a catchable bug).
+    func drawnNudge(ofBug id: Int) -> CGPoint? { bugs.nudge(id) }
     /// R5 (#3, tests): how dark the closure shades draw the face (0 = the open-state crimson), how much of that is
     /// the bite's own, and the open cilia's opacity.
     var faceShade: CGFloat { jaws.faceShade }
@@ -208,6 +271,9 @@ final class BogScene: SKScene {
     var shakeOffset: CGPoint { shaker.position }
     var foldBandShowing: Bool { !jaws.foldBand.isHidden }
     var visibleFireflies: Int { light.visibleFireflies }
+    /// R7 (#14, tests): the bog's fireflies glowing at least `BogLight.fireflyFloor` now, and the vignette's colour.
+    var glowingFireflies: Int { light.glowingFireflies }
+    var vignetteColor: RGBA { light.vignetteRGBA }
     /// The light tint's z (tests: below the trap, so it multiplies the bog only).
     var tintZ: CGFloat { light.tint.zPosition }
     /// Where bug `id` is drawn (nil when it is not on screen).
@@ -239,12 +305,16 @@ final class BogScene: SKScene {
     /// The banner and its size.
     static let feastBanner = "FEAST!"
     static let feastBannerSize: CGFloat = 68
+    /// R7 (#3): a QUAD's callout size (any 3+ hero bite), and the FEAST's callout at 1.6× it, centred over the trap.
+    static let quadCalloutSize: CGFloat = 48
+    static let feastCalloutScale: CGFloat = 1.6
+    static var feastCalloutSize: CGFloat { quadCalloutSize * feastCalloutScale }
 
     /// Whether a bite is a FEAST event (`FeastEvent.isBig`).
     static func isBigFeast(_ r: BiteReport) -> Bool { FeastEvent.isBig(r) }
 
-    /// The FEAST's callout under the banner: "×6 · +540".
-    static func bigFeastLabel(count n: Int, points: Int) -> String { "×\(n) · +\(number(points))" }
+    /// The FEAST's callout under the banner. R7 (#3): "6 bugs · +1,080" (`AppRules.biteCallout`; "×" is the chain's).
+    static func bigFeastLabel(count n: Int, points: Int) -> String { AppRules.biteCallout(count: n, points: points) }
 
     /// The delay before each of `count` caught bugs is gulped (`FeastEvent.gulpDelays`).
     static func gulpDelays(count n: Int) -> [Double] { FeastEvent.gulpDelays(count: n) }
@@ -256,6 +326,62 @@ final class BogScene: SKScene {
         let topW: CGFloat = 214, topH: CGFloat = 134, lowW: CGFloat = 252, lowH: CGFloat = 98
         return [CGRect(x: l.hudOnLeft ? 0 : w - topW, y: h - topH, width: topW, height: topH),
                 CGRect(x: l.hudOnLeft ? 0 : w - lowW, y: 0, width: lowW, height: lowH)]
+    }
+
+    /// R7 (#5): where a sting's word goes when there is no room above its bee's ring (the top of the screen): beside
+    /// the ring (outward if it fits, else inward), on the bee's own half (off the crease band) and on the screen.
+    static func besideRing(_ p: CGPoint, ring: CGFloat, halfWidth hw: CGFloat, layout l: ScreenLayout) -> CGPoint {
+        let w = l.size.width
+        let gap = ring + hw + 10
+        let onLeft = p.x < l.midX
+        let lo = onLeft ? 12 + hw : l.creaseMaxX + BogScene.creaseClear + hw
+        let hi = onLeft ? l.creaseMinX - BogScene.creaseClear - hw : w - 12 - hw
+        let outward = onLeft ? p.x - gap : p.x + gap
+        let inward = onLeft ? p.x + gap : p.x - gap
+        let x: CGFloat
+        if outward >= lo && outward <= hi {
+            x = outward
+        } else if inward >= lo && inward <= hi {
+            x = inward
+        } else {
+            x = min(max(outward, lo), hi)
+        }
+        return CGPoint(x: x, y: min(p.y, l.size.height - 44))
+    }
+
+    /// R7 (#4): how far in from each canvas edge the Core keep-out's edge strips reach (pt). Core keeps a resting
+    /// centre its radius + 8 beyond a strip, so the drawn footprint (≤ 1.25 r, r ≤ 44) stays `BogBugLayer.edgeGap`
+    /// inside the screen.
+    static let edgeStrip: CGFloat = 10
+
+    /// R7 (#4): the keep-out for Core (`TrapSession.keepOut`): the `plates` (the HUD's, or Home's buttons), the midrib
+    /// band (the crease's half width each side of the trap's centre line, the full height) and four strips along the
+    /// canvas edges, all in scene space. Core keeps each resting bug's centre its clearance (radius + 8, or its halo
+    /// + 8) from every rect, so the bug and its halo sit clear of the plates, off the midrib and inside the edge.
+    static func coreKeepOut(_ plates: [CGRect], layout l: ScreenLayout) -> [CGRect] {
+        let w = l.size.width, h = l.size.height
+        let far: CGFloat = 400
+        let e = edgeStrip
+        let cx = l.geometry.center.x
+        let crease = ScreenLayout.creaseHalfWidth
+        var out = plates.filter { !$0.isNull && $0.width > 0 && $0.height > 0 }
+        out.append(CGRect(x: cx - crease, y: -far, width: 2 * crease, height: h + 2 * far))
+        out.append(CGRect(x: -far, y: -far, width: far + e, height: h + 2 * far))
+        out.append(CGRect(x: w - e, y: -far, width: far + e, height: h + 2 * far))
+        out.append(CGRect(x: -far, y: -far, width: w + 2 * far, height: far + e))
+        out.append(CGRect(x: -far, y: h - e, width: w + 2 * far, height: far + e))
+        return out
+    }
+
+    /// R7 (#4): Home's button column in scene space (on the HUD page, centred, the clap card and four rows on a fold
+    /// screen, three rows elsewhere), for when the App doesn't pass the buttons' frames as `hudKeepOut`. An estimate
+    /// of `HomeView`'s stack: the App's real frames are exact.
+    static func homeKeepOut(_ l: ScreenLayout) -> [CGRect] {
+        let page = l.hudRect
+        let w = min(max(page.width - 48, 0), 344)
+        let h = l.size.height * (l.hasFold ? 0.7 : 0.48)
+        let cy = l.size.height / 2 - 10
+        return [CGRect(x: page.midX - w / 2, y: cy - h / 2, width: w, height: h)]
     }
 
     private let world: SKNode
@@ -365,7 +491,7 @@ final class BogScene: SKScene {
         surface.layout(g)
         light.layout(size: layout.size, geometry: g)
         bugs.canvas = layout.size
-        bugs.keepOut = hudKeepOut ?? BogScene.defaultKeepOut(layout)
+        keepOutChanged()
         placeCamera()
     }
 
@@ -395,6 +521,8 @@ final class BogScene: SKScene {
         placeCamera()
         hasSnapshot = false
         lastSnapsLeft = nil
+        // R7 (#4): a new session takes the keep-out too.
+        publishKeepOut()
     }
 
     // MARK: Frame loop
@@ -659,29 +787,34 @@ final class BogScene: SKScene {
             var label = stung ? BogScene.stungLabel(points: r.points) : BogScene.heroLabel(count: n, points: r.points)
             if big { label = BogScene.bigFeastLabel(count: n, points: r.points) }
             // R3 (#15): every catch pop is big (≥ 28 pt even when it must shrink to fit) and pops with an overshoot.
-            var size: CGFloat = hero ? 48 : (n >= 2 ? 40 : 36)
-            if big { size = 42 }
+            var size: CGFloat = hero ? BogScene.quadCalloutSize : (n >= 2 ? 40 : 36)
+            // R7 (#3): the FEAST's callout is 1.6× a QUAD's, centred over the trap (side 0: across the whole trap).
+            if big { size = BogScene.feastCalloutSize }
+            let popSide = big ? 0 : side
             let rise: CGFloat = hero ? 30 : 44
-            // A clean bite that keeps the chain going without growing it says so ("×1.5 held").
-            let held = !stung && !broken && !chained && r.chainMultiplier > 1.001
+            // A clean bite that keeps the chain going without growing it says so ("×1.5 held"). R7 (#5): not when a
+            // lucky line shows (never three pops stacked).
+            let held = !stung && !broken && !chained && r.chainMultiplier > 1.001 && lucky.isEmpty
             // R5 (#12): room for each line under the callout, with its own rise (they never stack into one another).
             let extra = CGFloat(lucky.count + (held ? 1 : 0)) * BogScene.lineStep
-            var near = CGPoint(x: a.x, y: a.y + 2 * caughtRadius + 20)
+            var near = CGPoint(x: big ? g.center.x : a.x, y: a.y + 2 * caughtRadius + 20)
             if big {
-                // R6: the FEAST banner, big, springing in with an overshoot and sparkles, above the callout.
+                // R6: the FEAST banner, big, springing in with an overshoot and sparkles, above the callout. R7 (#3):
+                // centred over the trap, not on the crowd's side.
                 var bs = BogScene.feastBannerSize
-                let bp = placePop(BogScene.feastBanner, size: &bs, near: CGPoint(x: a.x, y: near.y + 56), side: side,
-                                  hero: true, rise: 18, minY: extra + BogScene.lineStep + 24, minSize: 44,
-                                  avoid: obstacles, banner: true)
+                let top = g.center.y + g.b * 0.18
+                let bp = placePop(BogScene.feastBanner, size: &bs, near: CGPoint(x: g.center.x, y: top), side: 0,
+                                  hero: true, rise: 18, minY: extra + BogScene.lineStep + size * 1.2,
+                                  minSize: 44, avoid: obstacles, banner: true)
                 pops.pop(BogScene.feastBanner, at: bp, size: bs, fill: BogPaint.ui(pal.gold),
                          stroke: BogPaint.ui(pal.ink), rise: 18, life: 1.7, hero: true, banner: true)
                 let bb = BogPops.measure(BogScene.feastBanner, size: bs)
                 effects.bannerSparkles(around: CGRect(x: bp.x - bb.width / 2, y: bp.y - bb.height / 2,
                                                       width: bb.width, height: bb.height))
                 effects.feastBurst(at: a, tint: tint)
-                near = CGPoint(x: bp.x, y: bp.y - bs * 0.62 - 30)
+                near = CGPoint(x: bp.x, y: bp.y - bs * 0.62 - size * 0.62 - 12)
             }
-            let pt = placePop(label, size: &size, near: near, side: side, hero: hero, rise: rise, minY: extra,
+            let pt = placePop(label, size: &size, near: near, side: popSide, hero: hero, rise: rise, minY: extra,
                               minSize: BogScene.minCatchPop, avoid: obstacles, downFirst: big)
             pops.pop(label, at: pt, size: size, fill: BogPaint.ui(pal.gold), stroke: BogPaint.ui(pal.ink), rise: rise,
                      life: hero ? 1.5 : 1.2, hero: hero)
@@ -690,7 +823,7 @@ final class BogScene: SKScene {
             if held {
                 var hs: CGFloat = 28
                 let text = BogScene.heldLabel(r.chainMultiplier)
-                let hp = placePop(text, size: &hs, near: CGPoint(x: pt.x, y: y), side: side, hero: false, rise: 30,
+                let hp = placePop(text, size: &hs, near: CGPoint(x: pt.x, y: y), side: popSide, hero: false, rise: 30,
                                   minSize: 24, avoid: obstacles, downFirst: true)
                 pops.pop(text, at: hp, size: hs, fill: BogPaint.ui(TrapArt.sipRing), stroke: BogPaint.ui(pal.ink),
                          rise: 30, delay: 0.1, life: 1.2)
@@ -698,8 +831,8 @@ final class BogScene: SKScene {
             }
             for sp in lucky {
                 var ls: CGFloat = 28
-                let text = BogScene.luckyLabel(sp)
-                let lp = placePop(text, size: &ls, near: CGPoint(x: pt.x, y: y), side: side, hero: false, rise: 30,
+                let text = BogScene.luckyLabel(sp, snaps: showsEconomy)
+                let lp = placePop(text, size: &ls, near: CGPoint(x: pt.x, y: y), side: popSide, hero: false, rise: 30,
                                   avoid: obstacles, downFirst: true)
                 pops.pop(text, at: lp, size: ls, fill: BogPaint.ui(TrapArt.sipRing), stroke: BogPaint.ui(pal.ink),
                          rise: 30, delay: 0.12, life: 1.3)
@@ -746,15 +879,20 @@ final class BogScene: SKScene {
             var c = placePop(text, size: &size, near: CGPoint(x: p.x, y: p.y + ring + 8 + box.height * over / 2),
                              side: sideOf(p.x), hero: false, rise: 36, avoid: obstacles)
             box = BogPops.measure(text, size: size)
-            let overlaps = c.y - box.height * over / 2 < p.y + ring && abs(c.x - p.x) < box.width * over / 2 + ring
+            let hw = box.width * over / 2, hh = box.height * over / 2
             let yellow = BogPaint.ui(RGBA(hex: 0xFFD23A))
-            if overlaps {
-                c = placePop(text, size: &size, near: CGPoint(x: p.x, y: p.y - ring - 14 - box.height * over / 2),
-                             side: sideOf(p.x), hero: false, rise: 8, avoid: obstacles, downFirst: true)
-                pops.pop(text, at: c, size: size, fill: yellow, stroke: BogPaint.ui(pal.ink), rise: 8)
-            } else {
-                pops.pop(text, at: c, size: size, fill: yellow, stroke: BogPaint.ui(pal.ink), rise: 36)
+            // R7 (#5): "Stung!" / "Bzzt!" goes above the ring, never under it or over the stinger. If dodging the
+            // other pops pulled it down onto the ring, it is lifted straight back above it (other pops give way to
+            // the stinger); only a bee at the very top of the screen gets its word beside the ring instead.
+            if c.y - hh < p.y + ring + 4 && abs(c.x - p.x) < hw + ring {
+                let lifted = CGPoint(x: c.x, y: p.y + ring + 8 + hh)
+                if lifted.y + hh + 36 <= layout.size.height - 4 {
+                    c = lifted
+                } else {
+                    c = BogScene.besideRing(p, ring: ring, halfWidth: hw, layout: layout)
+                }
             }
+            pops.pop(text, at: c, size: size, fill: yellow, stroke: BogPaint.ui(pal.ink), rise: 36)
         }
         let lost = BogScene.shownStingCost(costs: stingCosts, before: before, after: s.snapsLeft)
         if lost > 0 && showsEconomy {
@@ -823,7 +961,11 @@ final class BogScene: SKScene {
         let leftEdge = inTrap ? max(g.center.x - g.a - TrapArt.exteriorWidth, 12) : 12
         let rightEdge = inTrap ? min(g.center.x + g.a + TrapArt.exteriorWidth, w - 12) : w - 12
         let lo: CGFloat, hi: CGFloat
-        if side < 0 {
+        if side == 0 {
+            // R7 (#3): the FEAST's banner and callout, centred over the whole trap.
+            lo = leftEdge
+            hi = rightEdge
+        } else if side < 0 {
             lo = leftEdge
             hi = layout.creaseMinX - BogScene.creaseClear
         } else {
@@ -916,31 +1058,22 @@ final class BogScene: SKScene {
 
     // MARK: Words (scene labels; the HUD's words are the UI's)
 
-    /// "DOUBLE ×2", "TRIPLE ×3", "QUAD ×4", "FEAST ×5"… (nil for a single bug).
-    static func countLabel(_ n: Int) -> String? {
-        switch n {
-        case ..<2: return nil
-        case 2: return "DOUBLE ×2"
-        case 3: return "TRIPLE ×3"
-        case 4: return "QUAD ×4"
-        default: return "FEAST ×\(n)"
-        }
-    }
+    /// "Double", "Triple", "Quad", "FEAST" (nil for a single bug). R7 (#3): never "×" for a bug count ("×" is only
+    /// the chain): `AppRules.biteName`.
+    static func countLabel(_ n: Int) -> String? { AppRules.biteName(n) }
 
-    /// The bite's one callout: "FEAST ×5 · +255", "DOUBLE ×2 · +40", or "+12" for one bug.
-    static func heroLabel(count n: Int, points: Int) -> String {
-        if let c = countLabel(n) { return "\(c) · +\(number(points))" }
-        return "+\(number(points))"
-    }
+    /// The bite's one callout. R7 (#3): the bug count in words, "5 bugs · +540", or "+12" for one bug
+    /// (`AppRules.biteCallout`). The points are Core's (`BiteReport.points`, the FEAST's ×2 inside).
+    static func heroLabel(count n: Int, points: Int) -> String { AppRules.biteCallout(count: n, points: points) }
 
     static func feastLabel(_ snapsBack: Int) -> String {
         snapsBack > 0 ? "Feast! +\(snapsBack) snap\(snapsBack == 1 ? "" : "s")" : "Feast!"
     }
 
-    /// The lucky bug's line under the hero callout (the snaps it won fly to the HUD as glyphs).
-    static func luckyLabel(_ s: BugSpecies) -> String {
-        s == .goldenScarab ? "Golden!" : "Lucky!"
-    }
+    /// The lucky bug's line under the hero callout (the snaps it won fly to the HUD as glyphs). R7 (#5): in plain words,
+    /// "Golden scarab! +2 snaps", "Ladybird! +1 snap"; with no snaps row (Home, the Zen Bog) just "Golden scarab!"
+    /// (`AppRules.luckyText`).
+    static func luckyLabel(_ s: BugSpecies, snaps: Bool = true) -> String { AppRules.luckyText(s, snaps: snaps) }
 
     /// The hunger wilt's pop (R3 #15: says what happened and what it cost).
     static let wiltedLabel = "Too slow! −1 snap"

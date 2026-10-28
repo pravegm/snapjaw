@@ -25,6 +25,16 @@ final class BogSceneFakeDriver: SceneDriver {
     func sceneTapped(at point: CGPoint, time: TimeInterval) { taps.append(point) }
 }
 
+/// R7 (#4): a driver that takes the scene's Core keep-out (records every one it is sent).
+@MainActor
+final class SceneKeepOutSink: SceneDriver, SceneKeepOutReceiver {
+    var received: [[CGRect]] = []
+
+    func advance(dt: TimeInterval, now: TimeInterval) -> (TrapSnapshot, [TrapEvent]) { (TrapSnapshot(), []) }
+    func sceneTapped(at point: CGPoint, time: TimeInterval) {}
+    func sceneKeepOutChanged(_ rects: [CGRect]) { received.append(rects) }
+}
+
 /// Scene module tests: trap geometry (lobes, teeth, rim), every species' art, the palette, the closure mapping, the
 /// day light, and a smoke run of `BogScene` through landing, sipping, a bite, a sting, the night and a reset.
 @MainActor
@@ -226,16 +236,23 @@ struct SceneTests {
     }
 
     @Test func calloutWords() {
+        // R7 (#3): the bug count in words; "×" is only ever the chain.
         #expect(BogScene.countLabel(1) == nil)
-        #expect(BogScene.countLabel(2) == "DOUBLE ×2")
-        #expect(BogScene.countLabel(3) == "TRIPLE ×3")
-        #expect(BogScene.countLabel(4) == "QUAD ×4")
-        #expect(BogScene.countLabel(6) == "FEAST ×6")
+        #expect(BogScene.countLabel(2) == "Double")
+        #expect(BogScene.countLabel(4) == "Quad")
+        #expect(BogScene.countLabel(6) == "FEAST")
         #expect(BogScene.feastLabel(1) == "Feast! +1 snap")
         #expect(BogScene.feastLabel(2) == "Feast! +2 snaps")
-        #expect(BogScene.heroLabel(count: 5, points: 255) == "FEAST ×5 · +255")
+        #expect(BogScene.heroLabel(count: 5, points: 540) == "5 bugs · +540")
         #expect(BogScene.heroLabel(count: 1, points: 12) == "+12")
-        #expect(BogScene.luckyLabel(.goldenScarab) == "Golden!")
+        #expect(BogScene.bigFeastLabel(count: 6, points: 1_080) == "6 bugs · +1,080")
+        #expect(!BogScene.heroLabel(count: 7, points: 900).contains("×"))
+        #expect(abs(BogScene.feastCalloutSize - BogScene.quadCalloutSize * CGFloat(1.6)) < CGFloat(0.001))
+        // R7 (#5): lucky bugs in plain words (no snaps row: no snaps named).
+        let golden = BogScene.luckyLabel(.goldenScarab)
+        #expect(golden == AppRules.luckyText(.goldenScarab, snaps: true))
+        #expect(golden != "Golden!" && golden.contains("snap"))
+        #expect(!BogScene.luckyLabel(.ladybird, snaps: false).contains("snap"))
         #expect(BogScene.multiplier(1.5) == "×1.5")
         #expect(BogScene.multiplier(2) == "×2")
         // R3 (#8, #15).
@@ -322,7 +339,7 @@ struct SceneTests {
         for _ in 0..<9 { scene.show(s, events: [], dt: 1.0 / 120.0) }
         #expect(scene.jawSlam > CGFloat(0.95))
         #expect(scene.toothReach < CGFloat(-0.8))
-        #expect(scene.popTexts.contains("DOUBLE ×2 · +26"))
+        #expect(scene.popTexts.contains("2 bugs · +26"), "\(scene.popTexts)")
         // One hero callout: the chain step is the HUD chip's, never a line on the lobe.
         let chainLine = scene.popTexts.contains { $0.hasPrefix("chain") }
         #expect(!chainLine)
@@ -373,7 +390,8 @@ struct SceneTests {
         // R3 (#8): a bite with a stinger scores ×1 and says so; the wasp's own pop doesn't repeat "Stung!".
         #expect(scene.popTexts.contains("Stung! · +900"))
         #expect(scene.popTexts.contains("Bzzt!"))
-        #expect(scene.popTexts.contains("Golden!"))
+        let goldenLine = AppRules.luckyText(.goldenScarab, snaps: true)
+        #expect(scene.popTexts.contains(goldenLine), "\(scene.popTexts)")
         #expect(scene.popTexts.contains(BogScene.wiltedLabel))
         #expect(scene.popTexts.contains("New best!"))
         #expect(scene.drawnFrames == 31)
@@ -579,9 +597,17 @@ struct SceneTests {
         scene.show(s, events: [.snapped(report), .bugCaught(id: 0, species: .housefly, position: s.bugs[0].position),
                                .feast(count: 5, snapsBack: 2), .luckySnap(species: .ladybird)], dt: 1.0 / 120.0)
         #expect(scene.glyphFlights == 3)
-        // R6: a 5-bug bite is a FEAST event: the "FEAST!" banner, with the count and points under it.
+        // R6: a 5-bug bite is a FEAST event: the "FEAST!" banner, with the count and points under it. R7 (#3): "5 bugs
+        // · +255" (Core's points, the ×2 inside), centred over the trap at 1.6× a QUAD's size.
         let texts = scene.popTexts
-        #expect(texts.contains(BogScene.feastBanner) && texts.contains("×5 · +255"))
+        #expect(texts.contains(BogScene.feastBanner) && texts.contains("5 bugs · +255"), "\(texts)")
+        let g = SceneTests.geometry
+        if let ci = texts.firstIndex(of: "5 bugs · +255"), ci < scene.popRects.count {
+            let cr = scene.popRects[ci]
+            #expect(cr.minX < g.center.x && cr.maxX > g.center.x, "callout \(cr) not centred over the trap")
+            let quad = BogPops.measure("5 bugs · +255", size: BogScene.quadCalloutSize)
+            #expect(cr.height > quad.height * CGFloat(1.4), "callout \(cr) not 1.6× a QUAD's \(quad)")
+        }
         for _ in 0..<150 { scene.show(s, events: [], dt: 1.0 / 120.0) }
         #expect(scene.glyphsLanded == 3)
         #expect(scene.glyphFlights == 0)
@@ -830,7 +856,7 @@ struct SceneTests {
     }
 
     /// REVIEW-2 #14: the HUD's numeral can follow the glyphs (−1 per Feast glyph in the air, +cost while a sting's
-    /// glyph cracks), the row flashes crimson on a sting, and "Bzzt!" sits above the bee's ring, not over the bee.
+    /// glyph cracks), the row flashes crimson on a sting, and "Bzzt!" sits above the bee's ring, never over or under it.
     @Test func theEconomyIsShownTruthfully() {
         let scene = BogScene(layout: SceneTests.duo)
         scene.hudSnapsAnchor = CGPoint(x: 760, y: 40)
@@ -863,8 +889,8 @@ struct SceneTests {
         let ring = BogBugLayer().radius(.bee) * TrapArt.protectedRingScale
         if let i = texts.firstIndex(of: "Bzzt!"), i < rects.count {
             let r = rects[i]
-            let clear = r.minY >= bee.y + ring - CGFloat(0.5) || r.maxY <= bee.y - ring + CGFloat(0.5)
-            #expect(clear)
+            // R7 (#5): above the ring, never under it (the bee bobs ±1.6 pt as it flies off).
+            #expect(r.minY >= bee.y + ring - CGFloat(2.5), "Bzzt! \(r) under the ring of the bee at \(bee)")
         } else {
             Issue.record("no Bzzt! pop")
         }
@@ -1404,7 +1430,7 @@ struct SceneTests {
             }
         }
         #expect(seen > 0)
-        #expect(scene.popTexts.contains("DOUBLE ×2 · +32"))
+        #expect(scene.popTexts.contains("2 bugs · +32"), "\(scene.popTexts)")
     }
 
     /// REVIEW-4 #12 (42: a glyph over "Golden!", and "+300 / ×2 held / Golden!" stacked): the lines under a callout
@@ -1431,12 +1457,14 @@ struct SceneTests {
                                .bugCaught(id: 3, species: .goldenScarab, position: p3),
                                .luckySnap(species: .goldenScarab), .feast(count: 3, snapsBack: 2)], dt: 1.0 / 120.0)
         let texts = scene.popTexts
-        #expect(texts.contains("Golden!") && texts.contains("×2 held"))
-        // The glyphs' arcs never cross "Golden!" (its own footprint, without the plate clearance).
+        // R7 (#5): the lucky line in plain words, and no "×2 held" under it (never three pops stacked).
+        let goldenLine = AppRules.luckyText(.goldenScarab, snaps: true)
+        #expect(texts.contains(goldenLine) && !texts.contains("×2 held"), "\(texts)")
+        // The glyphs' arcs never cross the lucky line (its own footprint, without the plate clearance).
         let live = scene.livePopRects
         let paths = scene.glyphPaths
         #expect(paths.count == 2)
-        if let gi = texts.firstIndex(of: "Golden!"), gi < live.count {
+        if let gi = texts.firstIndex(of: goldenLine), gi < live.count {
             let golden = live[gi].insetBy(dx: BogPops.clearance + 2, dy: BogPops.clearance + 2)
             let gs = BogTextures.glyphSize
             for path in paths {
@@ -1569,7 +1597,7 @@ struct SceneTests {
             }
             let back = TrapPose.backCilia(v)
             let front = TrapPose.frontCilia(v)
-            #expect(back.count == 13 && front.count == 8)
+            #expect(back.count == vl.heroTeeth && front.count == 8)
             var hairs = CGRect.null
             for h in back + front { hairs = hairs.union(h.path.boundingBoxOfPath) }
             #expect(!hairs.isNull && hairs.width > CGFloat(100), "\(v) hero cilia")
@@ -1797,31 +1825,52 @@ struct SceneTests {
                                           resting: true, keepOut: keep, canvas: size, geometry: g)
         let clearOfMidrib = abs(g.center.x + 5 + mid.x - g.center.x)
         #expect(clearOfMidrib >= ScreenLayout.creaseHalfWidth + fr + CGFloat(15.9))
-        // In the trap, under the HUD's inflated corner: never moved by it.
+        // In the trap, by the HUD's corner: R7 (#4) its footprint is drawn just clear of the plate itself (never by
+        // the outside gap), so its halo never sits under the HUD.
         let inTrap = CGPoint(x: g.center.x + 330, y: g.center.y + 180)
         #expect(g.contains(inTrap))
-        let none = BogBugLayer.clearOffset(at: inTrap, half: fh, radius: fr, resting: false, keepOut: keep,
+        let near = BogBugLayer.clearOffset(at: inTrap, half: fh, radius: fr, resting: false, keepOut: keep,
+                                           canvas: size, geometry: g)
+        let nq = CGPoint(x: inTrap.x + near.x, y: inTrap.y + near.y)
+        let nearFoot = CGRect(x: nq.x - fh, y: nq.y - fh, width: 2 * fh, height: 2 * fh).insetBy(dx: 0.5, dy: 0.5)
+        var nearHits = 0
+        for k in keep where k.intersects(nearFoot) { nearHits += 1 }
+        #expect(nearHits == 0)
+        #expect(abs(near.x) + abs(near.y) < fh + CGFloat(1), "moved \(near)")
+        // Deep in the trap, far from the HUD: never moved.
+        let deep = CGPoint(x: g.center.x + 200, y: g.center.y + 40)
+        let none = BogBugLayer.clearOffset(at: deep, half: fh, radius: fr, resting: false, keepOut: keep,
                                            canvas: size, geometry: g)
         #expect(abs(none.x) < CGFloat(0.01) && abs(none.y) < CGFloat(0.01))
 
-        // In the scene: a bee at the left edge, a fly by SCORE and a bumblebee by the pause button are all drawn whole
-        // and clear of the HUD's corners.
+        // In the scene, R7 (#4, the founder's follow-up): Core keeps resting bugs clear (`TrapSession.keepOut`), so a
+        // resting bug is drawn exactly where Core has it, and a catchable one is never moved. Only a flyer that can't
+        // be caught (a bumblebee flying in outside the trap, by the pause button) is still eased clear of the HUD.
         let scene = BogScene(layout: l)
         #expect(scene.bugKeepOut == keep)
+        let flyerAt = CGPoint(x: size.width - 80, y: size.height - 170)
+        let inTrapAt = CGPoint(x: g.center.x + 200, y: g.center.y + 40)
         let s = TrapSnapshot(bugs: [
             SceneTests.bug(1, .bee, CGPoint(x: 14, y: 320), .walking),
             SceneTests.bug(2, .housefly, corner, .walking),
-            SceneTests.bug(3, .bumblebee, CGPoint(x: size.width - 80, y: size.height - 170), .arriving, height: 0.1),
+            SceneTests.bug(3, .bumblebee, flyerAt, .arriving, height: 0.1),
+            SceneTests.bug(4, .housefly, inTrapAt, .sipping),
         ])
         for _ in 0..<3 { scene.show(s, events: [], dt: 1.0 / 60.0) }
+        for id in [1, 2, 4] {
+            let nd = scene.drawnNudge(ofBug: id) ?? CGPoint(x: 99, y: 99)
+            #expect(abs(nd.x) < CGFloat(0.01) && abs(nd.y) < CGFloat(0.01), "bug \(id) drawn off its Core spot \(nd)")
+        }
+        #expect(BogBugLayer.isCatchable(s.bugs[3]))
+        #expect(!BogBugLayer.isCatchable(s.bugs[2]))
         let rects = scene.bugRects
-        #expect(rects.count == 3)
-        for r in rects {
-            #expect(r.minX >= CGFloat(-0.5) && r.maxX <= size.width + CGFloat(0.5), "cut \(r)")
-            #expect(r.minY >= CGFloat(-0.5) && r.maxY <= size.height + CGFloat(0.5), "cut \(r)")
+        #expect(rects.count == 4)
+        if rects.count == 4 {
+            // (bugRects follows the snapshot's order.)
+            let r = rects[2]
             var inHUD = 0
             for k in keep where k.intersects(r) { inHUD += 1 }
-            #expect(inHUD == 0, "in the HUD \(r)")
+            #expect(inHUD == 0, "flyer in the HUD \(r)")
         }
         // The App's own plates replace the corners.
         let plate = CGRect(x: 300, y: 20, width: 40, height: 40)
@@ -1886,5 +1935,258 @@ struct SceneTests {
         } else {
             Issue.record("the splat did not draw")
         }
+    }
+
+    // MARK: R7
+
+    /// R7 (#1): the floor every pair of variety glyphs must differ by (mean absolute RGB difference, 0 … 1, at 120 pt).
+    /// The R6 near-copies (Classic against Cupped or Sawtooth) measured about 0.01 by estimate; R7's weakest pair is
+    /// about 0.03 by estimate, so 0.015 catches a real copy without being flaky (the drawing is deterministic).
+    static let varietyFloor: Double = 0.015
+
+    /// R7 (#1): variety `v`'s Garden glyph (the hero 3/4 trap, as the Garden, Results and the pose card draw it),
+    /// fitted into a 120 pt square on the Garden card's green, at 1×.
+    static func varietyGlyph(_ v: TrapVariety) -> CGImage? {
+        BogPainter.image(width: 120, height: 120, scale: 1) { ctx, sz in
+            BogPainter.fill(ctx, CGPath(rect: CGRect(origin: .zero, size: sz), transform: nil), RGBA(hex: 0x1E4A2A))
+            TrapArt.drawThreeQuarterTrap(ctx, size: sz, variety: v)
+        }
+    }
+
+    /// R7 (#1): the mean absolute RGB difference (0 … 1) of two opaque bitmaps of one size (0 if they can't be read).
+    static func meanDifference(_ a: CGImage, _ b: CGImage) -> Double {
+        guard a.width == b.width, a.height == b.height, a.bitsPerPixel == 32, b.bitsPerPixel == 32,
+              let da = a.dataProvider?.data, let db = b.dataProvider?.data,
+              let pa = CFDataGetBytePtr(da), let pb = CFDataGetBytePtr(db) else { return 0 }
+        var sum = 0.0
+        for y in 0..<a.height {
+            for x in 0..<a.width {
+                let ia = y * a.bytesPerRow + x * 4
+                let ib = y * b.bytesPerRow + x * 4
+                for c in 0..<3 { sum += abs(Double(pa[ia + c]) - Double(pb[ib + c])) }
+            }
+        }
+        return sum / (Double(a.width * a.height) * 3 * 255)
+    }
+
+    /// R7 (#1, P0): the 8 varieties read apart at a 120 pt thumbnail. Every pair of Garden glyphs differs by at least
+    /// `varietyFloor`, Classic's hero is the R6 drawing, and the cut is cosmetic: every variety keeps the same trap
+    /// zone and the same number of cilia in play.
+    @Test func theEightVarietiesReadApartAtAThumbnail() {
+        var glyphs: [(TrapVariety, CGImage)] = []
+        for v in TrapVariety.allCases {
+            if let im = SceneTests.varietyGlyph(v) {
+                glyphs.append((v, im))
+            } else {
+                Issue.record("\(v): the glyph did not draw")
+            }
+        }
+        #expect(glyphs.count == TrapVariety.allCases.count)
+        var weakest = Double.greatestFiniteMagnitude
+        var weakestPair = ""
+        var report: [String] = []
+        for i in 0..<glyphs.count {
+            for j in (i + 1)..<glyphs.count {
+                let d = SceneTests.meanDifference(glyphs[i].1, glyphs[j].1)
+                report.append("\(glyphs[i].0)/\(glyphs[j].0) \(String(format: "%.4f", d))")
+                #expect(d >= SceneTests.varietyFloor, "\(glyphs[i].0) vs \(glyphs[j].0): \(d)")
+                if d < weakest {
+                    weakest = d
+                    weakestPair = "\(glyphs[i].0) vs \(glyphs[j].0)"
+                }
+            }
+        }
+        print("SNAP-VARIETY-DIFF weakest \(weakestPair) \(weakest); " + report.joined(separator: ", "))
+        #expect(weakest >= SceneTests.varietyFloor, "weakest \(weakestPair): \(weakest)")
+
+        // Classic is the R6 hero (no scale, no drop); B52 is bigger and Cupped deeper, cosmetically.
+        let classic = TrapArt.look(.classic)
+        #expect(abs(classic.heroLobes.width - CGFloat(1)) < CGFloat(0.0001))
+        #expect(abs(classic.heroLobes.height - CGFloat(1)) < CGFloat(0.0001))
+        #expect(classic.heroTeeth == 13)
+        #expect(abs(TrapPose.stemDrop(.classic)) < CGFloat(0.0001))
+        let cb = TrapPose.bounds(.classic), r6 = TrapPose.bounds()
+        #expect(abs(cb.minX - r6.minX) < CGFloat(0.001) && abs(cb.maxY - r6.maxY) < CGFloat(0.001))
+        #expect(abs(cb.width - r6.width) < CGFloat(0.001) && abs(cb.height - r6.height) < CGFloat(0.001))
+        let b52 = TrapArt.look(.b52)
+        #expect(b52.heroLobes.width > CGFloat(1.12) && b52.heroLobes.height > CGFloat(1.12))
+        #expect(b52.heroToothWidth > CGFloat(2) && b52.heroToothLength > CGFloat(1.3))
+        #expect(TrapArt.look(.cupped).heroLobes.height > CGFloat(1.15))
+        #expect(TrapArt.look(.cupped).heroRimLine != nil)
+        #expect(TrapArt.look(.fusedTooth).heroFrill != nil)
+        #expect(!TrapPose.frillPath(.fusedTooth).isEmpty)
+        #expect(TrapArt.look(.sawtooth).heroTeeth > classic.heroTeeth + 6)
+        #expect(TrapArt.look(.sharkTooth).heroTeeth < classic.heroTeeth)
+        // Golden Glow is gold inside: its hero face and its play face at the margin.
+        let gold = TrapArt.look(.goldenGlow)
+        #expect(gold.heroFace.r > 0.8 && gold.heroFace.g > 0.6 && gold.heroFace.b < 0.4)
+        let gm = gold.face(at: 0.9)
+        #expect(gm.r > 0.7 && gm.g > 0.5 && gm.b < 0.3, "gold face \(gm.r) \(gm.g) \(gm.b)")
+        // Cosmetic only: the zone and the cilia count are every variety's.
+        let g = SceneTests.geometry
+        for v in TrapVariety.allCases {
+            #expect(TrapArt.teeth(side: 1, geometry: g, variety: v).count == TrapArt.teethPerSide)
+            #expect(TrapArt.look(v).spread <= CGFloat(1.0301), "\(v) play spread")
+        }
+    }
+
+    /// R7 (#4, the founder's follow-up: truthful clear zones). Core owns the rule (`TrapSession.keepOut`), fed by the
+    /// Scene (`BogScene.coreKeepOut`: the HUD's plates or Home's buttons, the midrib band and the edge strips). A
+    /// seeded Zen bog runs 30 s under the play HUD's corners: no still, resting bug's **Core position** (sipping, or
+    /// walking and not moving) comes within Core's clearance of any of those rects (3.5 pt slack, as Core's own test,
+    /// for an ant's wobble), and every catchable bug is drawn exactly at its Core position. As Home (decoration) the
+    /// session takes Home's keep-out too; there catchable bugs are still drawn true and no sitting bug is ever hidden.
+    @Test func sittingBugsKeepTheClearZones() {
+        let l = SceneTests.duo
+        let g = l.geometry
+        let size = l.size
+        let tol = CGFloat(0.5)
+        let slack = 3.5
+        for home in [false, true] {
+            let scene = BogScene(layout: l)
+            scene.showsEconomy = !home
+            #expect(scene.isHome == home)
+            let keep = scene.bugKeepOut
+            #expect(keep == (home ? BogScene.homeKeepOut(l) : BogScene.defaultKeepOut(l)))
+            let rules = scene.coreKeepOut
+            #expect(rules.count == keep.count + 5)
+            let session = TrapSession(mode: .zen, seed: home ? 0x5EED7 : 0x5EED4, best: 1, geometry: g,
+                                      options: SessionOptions.for(.zen))
+            scene.applyKeepOut(to: session)
+            #expect(session.keepOut == rules)
+            let dt = 1.0 / 60.0
+            var still = 0
+            var catchable = 0
+            var bad: [String] = []
+            var last: [Int: CGPoint] = [:]
+            for frame in 0..<(30 * 60) {
+                let events = session.step(dt: dt, input: TrapInput())
+                let snap = session.snapshot
+                scene.show(snap, events: events, dt: dt)
+                var sittingOnCanvas = 0
+                for b in snap.bugs {
+                    let p = b.position
+                    var moved = CGFloat(99)
+                    if let q = last[b.id] {
+                        let dx = q.x - p.x, dy = q.y - p.y
+                        moved = (dx * dx + dy * dy).squareRoot()
+                    }
+                    last[b.id] = p
+                    var resting = false
+                    switch b.activity {
+                    case .sipping: resting = true
+                    case .walking: resting = moved < CGFloat(0.25)
+                    case .arriving, .leaving, .hopping, .escaped, .released, .caught: resting = false
+                    }
+                    var walkingOrSipping = false
+                    if case .walking = b.activity { walkingOrSipping = true }
+                    if case .sipping = b.activity { walkingOrSipping = true }
+                    if walkingOrSipping && p.x >= 0 && p.x <= size.width && p.y >= 0 && p.y <= size.height {
+                        sittingOnCanvas += 1
+                    }
+                    if BogBugLayer.isCatchable(b) {
+                        catchable += 1
+                        let nd = scene.drawnNudge(ofBug: b.id) ?? .zero
+                        if abs(nd.x) > CGFloat(0.01) || abs(nd.y) > CGFloat(0.01), bad.count < 6 {
+                            bad.append("\(frame) catchable \(b.species) drawn \(nd) off its Core spot")
+                        }
+                    }
+                    guard resting && !home else { continue }
+                    still += 1
+                    let c = TrapRules.keepOutClearance(radius: BugCatalog.info(b.species).radius,
+                                                       protected: b.species.isProtected)
+                    let hit = TrapRules.touchesKeepOut(rules, Double(p.x), Double(p.y), clearance: c - slack)
+                    if hit && bad.count < 6 { bad.append("\(frame) \(b.species) rests at \(p) in a keep-out") }
+                }
+                // Never hidden: every sitting bug on the canvas is drawn.
+                let drawn = scene.sittingBugRects.count
+                if drawn != sittingOnCanvas && bad.count < 6 {
+                    bad.append("\(frame) \(sittingOnCanvas) sitting, \(drawn) drawn")
+                }
+            }
+            #expect(bad.isEmpty, "\(home ? "home" : "play"): \(bad)")
+            #expect(catchable > 100, "\(home ? "home" : "play"): only \(catchable) catchable bug-frames")
+            if !home { #expect(still > 100, "only \(still) still, resting bug-frames") }
+        }
+        // The Core keep-out: the plates, then the midrib band and the four edge strips.
+        let rules = BogScene.coreKeepOut(BogScene.defaultKeepOut(l), layout: l)
+        let flyClear = TrapRules.keepOutClearance(radius: BugCatalog.info(.housefly).radius, protected: false)
+        #expect(TrapRules.touchesKeepOut(rules, Double(g.center.x), Double(g.center.y), clearance: flyClear))
+        #expect(TrapRules.touchesKeepOut(rules, 20, Double(g.center.y), clearance: flyClear))
+        #expect(!TrapRules.touchesKeepOut(rules, Double(g.center.x) + 200, Double(g.center.y), clearance: flyClear))
+        // A scene's driver that takes the keep-out is sent it (and again on a reset).
+        let sink = SceneKeepOutSink()
+        let fed = BogScene(layout: l)
+        fed.driver = sink
+        #expect(sink.received.last == fed.coreKeepOut)
+        fed.hudKeepOut = [CGRect(x: 700, y: 560, width: 200, height: 80)]
+        #expect(sink.received.last == fed.coreKeepOut)
+        let before = sink.received.count
+        fed.reset()
+        #expect(sink.received.count == before + 1)
+
+        // Home's column (visual easing only): a bumblebee's halo has no clear spot in it; a fly is moved out of it.
+        let col = BogScene.homeKeepOut(l)
+        #expect(col.count == 1)
+        if let c = col.first {
+            #expect(c.minX > l.creaseMaxX && c.maxX < l.size.width)
+            let mid = CGPoint(x: c.midX, y: c.midY)
+            let bbR = CGFloat(39.6)
+            let bbHalf = BogBugLayer.footprintHalf(.bumblebee, radius: bbR)
+            let bb = BogBugLayer.clearance(at: mid, half: bbHalf, radius: bbR, resting: true, keepOut: col,
+                                           canvas: size, geometry: g, hudGap: 0)
+            #expect(!bb.clear)
+            let fr = CGFloat(25)
+            let fh = BogBugLayer.footprintHalf(.housefly, radius: fr)
+            let fly = BogBugLayer.clearance(at: mid, half: fh, radius: fr, resting: true, keepOut: col, canvas: size,
+                                            geometry: g, hudGap: 0)
+            #expect(fly.clear)
+            let q = CGPoint(x: mid.x + fly.offset.x, y: mid.y + fly.offset.y)
+            let flyFoot = CGRect(x: q.x - fh, y: q.y - fh, width: 2 * fh, height: 2 * fh).insetBy(dx: tol, dy: tol)
+            #expect(!c.intersects(flyFoot))
+        }
+        // The App's own rects still win on Home.
+        let scene = BogScene(layout: l)
+        scene.showsEconomy = false
+        let plate = CGRect(x: 600, y: 200, width: 120, height: 60)
+        scene.hudKeepOut = [plate]
+        #expect(scene.bugKeepOut == [plate])
+        scene.hudKeepOut = nil
+        #expect(scene.bugKeepOut == BogScene.homeKeepOut(l))
+        scene.showsEconomy = true
+        #expect(scene.bugKeepOut == BogScene.defaultKeepOut(l))
+        // A resting bee's halo keeps off the crease band (Core's r + 16 is not enough for it).
+        let beeR = CGFloat(28.8)
+        let beeHalf = BogBugLayer.footprintHalf(.bee, radius: beeR)
+        #expect(BogBugLayer.midribClearance(half: beeHalf, radius: beeR) >= ScreenLayout.creaseHalfWidth + beeHalf)
+    }
+
+    /// R7 (#14): night reads as night: a deeper blue grade than R6 (bluer against its green, darker than noon by more
+    /// than half), a navy vignette, and the bog's fireflies glowing on a still frame.
+    @Test func nightIsADeepBlueWithGlowingFireflies() {
+        let bog = TrapArt.palette.bog
+        func lum(_ c: RGBA) -> Double { 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b }
+        let noon = BogLight.litBog(bog, key: BogLight.key(at: 1), skyLevel: 0.5)
+        for clock in [3.0, 3.5, 4.0] {
+            let n = BogLight.litBog(bog, key: BogLight.key(at: clock), skyLevel: 0.5)
+            #expect(n.b > 2 * n.g && n.b > 3 * n.r, "night \(clock): \(n.r) \(n.g) \(n.b)")
+            #expect(lum(n) < 0.45 * lum(noon), "night \(clock) luminance \(lum(n)) against noon \(lum(noon))")
+        }
+        let scene = BogScene(layout: SceneTests.duo)
+        var s = SceneTests.crowd()
+        s.dayClock = 0.5
+        scene.show(s, events: [], dt: 1.0 / 60.0)
+        let day = scene.vignetteColor
+        #expect(day.g > day.b)
+        #expect(scene.glowingFireflies == 0)
+        s.dayClock = 3.4
+        for _ in 0..<60 { scene.show(s, events: [], dt: 1.0 / 60.0) }
+        #expect(scene.nightLevel > CGFloat(0.99))
+        let v = scene.vignetteColor
+        #expect(v.b > 3 * v.g && v.b > 0.1, "vignette \(v.r) \(v.g) \(v.b)")
+        // A still frame: every firefly glows at least `fireflyFloor`, and there are plenty.
+        #expect(scene.visibleFireflies >= 12, "fireflies \(scene.visibleFireflies)")
+        #expect(scene.glowingFireflies == scene.visibleFireflies)
+        #expect(BogLight.fireflyFloor > CGFloat(0.4) && BogLight.fireflyGlow > CGFloat(70))
     }
 }

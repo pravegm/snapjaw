@@ -20,6 +20,8 @@ struct GoalLine: Equatable, Identifiable {
     var spoiled = false
     /// "2/3", "1,250/2,000" (Core's label).
     var countText = ""
+    /// R7 (#15): Core's difficulty tier (Home's dot; Results' next goal).
+    var tier: GoalTier? = nil
 
     /// 0…1 for the little bar.
     var fraction: Double {
@@ -31,8 +33,17 @@ struct GoalLine: Equatable, Identifiable {
     static func make(_ g: GoalSpec, progress: Int, done: Bool, inPlay: Bool = true, spoiled: Bool = false) -> GoalLine {
         let p = done ? g.target : min(max(progress, 0), g.target)
         return GoalLine(id: g.id, title: g.title, progress: p, target: max(g.target, 1), done: done, inPlay: inPlay,
-                        spoiled: spoiled, countText: g.progressLabel(p))
+                        spoiled: spoiled, countText: g.progressLabel(p), tier: g.tier)
     }
+
+    /// R7 (#15): a goal by its id, fresh (no progress): Results' "Next goal" for a goal just drawn.
+    static func fresh(_ id: String) -> GoalLine? {
+        guard let g = GoalBook.def(id) else { return nil }
+        return make(g, progress: 0, done: false)
+    }
+
+    /// R7 (#15): the tier's word (Core's label), "" without one.
+    var tierLabel: String { tier.map { $0.label } ?? "" }
 }
 
 /// What a run did to its goals, as the App keeps it (a run killed in the background is filed from it): each tracked
@@ -117,6 +128,13 @@ struct GoalRun {
 enum VarietyBridge {
     static func name(_ v: TrapVariety) -> String { Varieties.info(v).name }
     static func blurb(_ v: TrapVariety) -> String { Varieties.info(v).blurb }
-    /// How a locked one grows ("Reach Nibbler", "Goal: Spare 12 bees in one run").
-    static func rule(_ v: TrapVariety) -> String { Varieties.ruleText(v) }
+    /// How a locked one grows. R7 (#19, frame 44: "Goal: A 6-bug bite" beside "Reach Gnat Gobbler"): one style,
+    /// "Rank: Gnat Gobbler" and "Goal: A 6-bug bite". Pure; tested.
+    static func rule(_ v: TrapVariety) -> String {
+        switch Varieties.info(v).unlock {
+        case .start: return Varieties.ruleText(v)
+        case .rank(let r): return "Rank: " + PlantRanks.title(r)
+        case .goal(let id): return "Goal: " + (GoalBook.def(id)?.title ?? id)
+        }
+    }
 }

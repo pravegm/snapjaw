@@ -87,7 +87,7 @@ struct GardenCard: View {
     let compact: Bool
     let onPick: () -> Void
 
-    /// What the card says under the name. Pure; tested.
+    /// What the card says under the name ("Rank: …" or "Goal: …" while locked: R7 #19). Pure; tested.
     static func line(_ v: TrapVariety, grown: Bool) -> String {
         grown ? VarietyBridge.blurb(v) : VarietyBridge.rule(v)
     }
@@ -151,8 +151,12 @@ struct GardenTrapImage: View {
     let variety: TrapVariety
     let grown: Bool
 
+    /// R7 (#19, frame 44: the locked outlines mixed spiky and smooth): every locked card is the same silhouette (the
+    /// Classic's), so a lock never gives away a look; a grown one is drawn as itself. Pure; tested.
+    static func drawn(_ v: TrapVariety, grown: Bool) -> TrapVariety { grown ? v : .classic }
+
     var body: some View {
-        if let cg = TrapImageCache.heroImage(bug: false, variety: variety) {
+        if let cg = TrapImageCache.heroImage(bug: false, variety: Self.drawn(variety, grown: grown)) {
             Image(decorative: cg, scale: TrapImageCache.scale)
                 .renderingMode(grown ? .original : .template)
                 .resizable()

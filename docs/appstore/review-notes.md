@@ -51,7 +51,7 @@ A cartoon Venus flytrap catching cartoon bugs, the way a frog catches flies. No 
 No third-party SDKs, analytics, ads, accounts or tracking. Progress and settings stay on the device; Share sends nothing itself. App Privacy: Data Not Collected.
 
 7. GAME CENTER
-Optional. 2 leaderboards (Best Feast, Daily Bog; Zen submits none), 12 achievements (575 points), none hidden.
+Optional. 2 leaderboards (Best Score, Daily Bog; Zen submits none), 12 achievements (575 points), none hidden.
 
 8. OTHER
 - No notifications. Debug and demo modes are disabled in Release builds.

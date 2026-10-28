@@ -9,6 +9,10 @@ struct GoalsCard: View {
     /// Under the lines ("+60 growth", "New goals are on Home").
     var footer: String?
     var footerColor: Color = SnapTheme.limeLight
+    /// R7 (#15): each goal's tier as a word beside its dot (Home: one easy, one medium, one hard, labelled).
+    var tierLabels = false
+    /// R7 (#7): the bars under goals under way (Results' tightest fit drops them).
+    var bars = true
 
     static let homeTitle = "Goals"
 
@@ -16,7 +20,7 @@ struct GoalsCard: View {
         VStack(alignment: .leading, spacing: compact ? 4 : 7) {
             SnapOverline(text: title, compact: compact, color: SnapTheme.gold)
             ForEach(lines) { line in
-                GoalRow(line: line, compact: compact)
+                GoalRow(line: line, compact: compact, tierLabel: tierLabels, bar: bars)
             }
             if let footer {
                 Text(footer)
@@ -36,6 +40,18 @@ struct GoalsCard: View {
 struct GoalRow: View {
     let line: GoalLine
     let compact: Bool
+    /// R7 (#15): the tier's word beside its dot.
+    var tierLabel = false
+    var bar = true
+
+    /// R7 (#15): a tier's colour: easy lime, medium gold, hard pink. Exhaustive over Core's tiers.
+    static func tierColor(_ t: GoalTier) -> Color {
+        switch t {
+        case .easy: return SnapTheme.limeLight
+        case .medium: return SnapTheme.gold
+        case .hard: return SnapTheme.pink
+        }
+    }
 
     var body: some View {
         HStack(spacing: compact ? 6 : 8) {
@@ -49,11 +65,14 @@ struct GoalRow: View {
                     .foregroundStyle(line.done ? SnapTheme.limeLight : SnapTheme.cream)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                if !line.done && line.target > 1 {
+                if bar && !line.done && line.target > 1 {
                     SnapProgressBar(value: line.fraction, height: compact ? 3 : 4)
                 }
             }
             Spacer(minLength: 4)
+            if let t = line.tier {
+                TierDot(tier: t, compact: compact, label: tierLabel)
+            }
             Text(line.countText)
                 .font(SnapType.caption(compact).monospacedDigit())
                 .foregroundStyle(line.done ? SnapTheme.lime : SnapTheme.mist)
@@ -63,6 +82,30 @@ struct GoalRow: View {
         // A goal this run doesn't count (or can't meet any more) is drawn dimmed.
         .opacity(line.inPlay && !line.spoiled ? 1 : 0.45)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(line.title + (line.done ? ", done" : ", " + line.countText))
+        .accessibilityLabel(line.title + (line.tier == nil ? "" : ", " + line.tierLabel)
+                            + (line.done ? ", done" : ", " + line.countText))
+    }
+}
+
+/// R7 (#15): a goal's tier: a coloured dot, with its word ("Easy") where there's room.
+struct TierDot: View {
+    let tier: GoalTier
+    let compact: Bool
+    var label = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Circle()
+                .fill(GoalRow.tierColor(tier))
+                .frame(width: compact ? 7 : 8, height: compact ? 7 : 8)
+            if label {
+                Text(tier.label)
+                    .font(.system(size: compact ? 9 : 10, weight: .heavy, design: .rounded))
+                    .foregroundStyle(GoalRow.tierColor(tier))
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+        }
+        .accessibilityHidden(true)
     }
 }

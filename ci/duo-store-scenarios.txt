@@ -22,16 +22,21 @@
 #  - Same glossary and truthfulness notes as ci/store-scenarios.txt. "Snap it a little shut" is fine; "shut" on its
 #    own is flagged.
 
+# R7 (SCORE-R6 #6, #9; design/notes/ci-R7.md): the same progress state (`late`), P02's gulp, P04's sub-line and
+# P08's calm Zen as ci/store-scenarios.txt. D01 is shot with the real hinge at 140° (`ciHinge=140`: ci/duo.sh moves
+# the hinge there after the launch; the pilot drives the trap, so the angle changes nothing in play), so the book
+# composite's angle is the logged hinge angle (~140°, store-set.sh book_angle) and P01, D01 and the search art read as
+# a fold, not a flat page. D02 no longer uses ciShootOn: the gulp is a freeze, the same on every device.
 # ---- iPhone Duo inner display (2853 x 2007): ten frames -------------------------------------------------------------
-D01-book-hero|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd|60|Your Duo is a *flytrap* / Hold it open like a book.|SNAP-T freeze crowd|book
-D02-feast|screen=play;mode=feed;pilot=expert;progress=mid;freezeOn=bigFeast|240|Wait for a crowd. *FEAST!* / Snap it a little shut. Open again.|SNAP-T freeze bigFeast
+D01-book-hero|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd;ciHinge=140|60|Your Duo is a *flytrap* / Hold it open like a book.|SNAP-T freeze crowd|book
+D02-feast|screen=play;mode=feed;pilot=expert;progress=late;freezeOn=snap;freezeAfter=10.5|240|Wait for a crowd. *FEAST!* / Snap it a little shut. Open again.|SNAP-T event snapped caught=[5-9] escaped
 D03-bee|screen=play;seed=7;wave=15;pilot=perfect;freezeOn=bee|60|Never eat a *bee* / Bees cost snaps. Wait them out.|SNAP-T freeze bee
-D04-garden|screen=garden;progress=late|8|Grow *8 flytraps* / Real cultivars, from Red Dragon to B52.|SNAP-T screen garden
+D04-garden|screen=garden;progress=late|8|Grow *8 flytraps* / From Red Dragon to B52, and one of gold.|SNAP-T screen garden
 D05-night|screen=play;seed=7;wave=24;pilot=expert;freezeOn=crowd;freezeAfter=3|60|Fireflies light the *night* / New bugs as the day goes on.|SNAP-T start wave 24
-D06-goals|screen=home;progress=mid|8|Three *goals* every run / And a Daily Bog with a streak.|SNAP-T canvas
-D07-bug-book|screen=book;progress=mid|6|Fill the *Bug Book* / 16 species, each with a joke.|SNAP-T screen book
-D08-zen|screen=play;mode=zen;pilot=casual;progress=mid;freezeAfter=40|60|Or just *relax* / Zen Bog: no rush, no end.|SNAP-T freeze
-D09-results|screen=results;pilot=casual;progress=mid|240|One more *go*? / Goals, growth and a best to beat.|SNAP-T canvas
+D06-goals|screen=home;progress=late|8|Three *goals* every run / And a Daily Bog with a streak.|SNAP-T canvas
+D07-bug-book|screen=book;progress=late|6|Fill the *Bug Book* / 16 species, each with a joke.|SNAP-T screen book
+D08-zen|screen=play;mode=zen;pilot=casual;progress=late;freezeOn=crowd;freezeAfter=25|60|Or just *relax* / Zen Bog: no rush, no end.|SNAP-T freeze crowd
+D09-results|screen=results;pilot=casual;progress=late|240|One more *go*? / Goals, growth and a best to beat.|SNAP-T results goals [1-3] growth=
 # D10: the lesson's Duo wording. Duo run 40603497021 logged step 2 as "tap to snap!" on the Duo: eyeball D10's hint.
 D10-first-bite|screen=lesson;lessonStep=6|8|Learn it in one *First Bite* / A short lesson on your first go.|SNAP-T lesson step 6
 

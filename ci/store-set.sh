@@ -37,7 +37,7 @@
 # Env: STORE_RADIUS (flat capture corner radius, a fraction of its shorter side; default 0.06), STORE_LAYOUT
 #      (auto|top|side, default auto), REQUIRE_LOG, BOOK_DIR, BOOK_PREFIX (default store-), BOOK_SOURCE_SIZE (default
 #      2853x2007), BOOK_REQUIRE, BOOK_ANGLE (degrees, or auto = the real hinge angle in the source log's last
-#      "SNAP-H <t> <θ>" or "SNAP-T hinge … angle <θ>" line if 120–170, else 140; never the "SNAP-T trap … angle" line,
+#      "SNAP-H <t> <θ>" or "SNAP-T hinge … angle <θ>" line if 130–150 (R7: D01 is shot at ciHinge=140), else 140; never the "SNAP-T trap … angle" line,
 #      which reads a fixed 160 while a pilot plays), STORE_ROTATE (90|270: rotate a capture whose size is a slot size
 #      turned sideways before framing; default off = FLAGGED), STORE_FRAME_BIN (compiled compositor cache).
 set -uo pipefail
@@ -195,7 +195,7 @@ book_angle() {
     a=$(sed -nE 's/^SNAP-H [0-9.]+ ([0-9]+)(\.[0-9]+)?.*/\1/p' "$1" | tail -1)
     [[ -z "$a" ]] && a=$(sed -nE 's/.*SNAP-T hinge .*angle ([0-9]+)(\.[0-9]+)?.*/\1/p' "$1" | tail -1)
   fi
-  if [[ -n "$a" ]] && (( a >= 120 && a <= 170 )); then echo "$a"; else echo 140; fi
+  if [[ -n "$a" ]] && (( a >= 130 && a <= 150 )); then echo "$a"; else echo 140; fi   # R7: the store book is ~140° (130–150 kept)
 }
 
 device="(see the capture log)"

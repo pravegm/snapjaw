@@ -6,7 +6,7 @@
 //   store-frame --in raw.png --out frame.png --size 2868x1320 --caption "Never eat a *bee* / Bees cost snaps. Wait them out."
 //               [--radius 0.06] [--layout auto|top|side]
 //   store-frame --in duo-inner.png --out frame.png --size 2622x1206 --caption "…" --book [--angle 140] [--fold 1428]
-//               [--tilt 8] [--yaw 0]
+//               [--tilt 15] [--yaw 0 (top) | -5 (side)] [--distance 2.8]
 //
 // Layout (Snapjaw is landscape: every slot is wider than tall).
 //  • top (the default for flat frames): the caption band runs across the top (3.5–21.5 % of the height) and the capture
@@ -31,8 +31,8 @@
 //   "SNAP-T fold active 456,0 40x669" at 3x). It is split at the fold (--fold px, default 1428 at 2853 wide) and each
 //   half is mapped, by a true perspective transform (Core Image CIPerspectiveTransform; the corner order is self-tested
 //   at start-up), onto one page of a stylised iPhone Duo standing open like a book at --angle degrees (default 140;
-//   each page turned (180 − angle) / 2 toward the viewer), tilted back --tilt degrees and seen from in front, slightly
-//   above. The two pages are the trap's two lobes and the hinge is its midrib. Drawn around it: a thin graphite bezel
+//   each page turned (180 − angle) / 2 toward the viewer), tilted back --tilt degrees (default 15) and seen from in
+//   front and above, from --distance page heights (default 2.8), turned --yaw degrees on a side layout (default −5). The two pages are the trap's two lobes and the hinge is its midrib. Drawn around it: a thin graphite bezel
 //   (2.4 % of the page height, lit from the --light side), the hinge spine (a metal barrel showing past the top and
 //   bottom bezel, and the seam in the bezel), a soft drop shadow and a ground shadow. No hands. Nothing is drawn ON
 //   the screen: the pixels are the capture's, only warped; its outer corners are clipped to the display's rounded
@@ -344,12 +344,17 @@ func drawBook() {
     let wl = Double(fold), wr = Double(iw - fold), h = Double(ih)
     let angle = max(100, min(175, number("angle", 140)))
     let theta = (180 - angle) / 2 * Double.pi / 180      // each page turned this far toward the viewer
-    let tilt = max(-30, min(30, number("tilt", 8))) * Double.pi / 180
-    let yaw = max(-30, min(30, number("yaw", 0))) * Double.pi / 180
+    // R7 (SCORE-R6 #6): the fold must read at search-thumbnail size. At tilt 8 and a far camera a 146° book showed a
+    // V only along its top edge and read as ~170°. Seen from higher (tilt 15) and a little closer (2.8 h), both the
+    // top and the bottom edge bow toward the spine and the outer edges stand ~9 % taller than the spine; on a side
+    // layout (the iPhone slots: the book on the right of the caption) the book also turns 5° toward the caption, so
+    // one page is visibly nearer than the other (store-banner.swift's side default).
+    let tilt = max(-30, min(30, number("tilt", 15))) * Double.pi / 180
+    let yaw = max(-30, min(30, number("yaw", layout == .top ? 0 : -5))) * Double.pi / 180
     let bezel = h * 0.024
     let deviceRadius = h * 0.065
     let screenRadius = max(0, deviceRadius - bezel)
-    let distance = h * 3.4                              // camera distance from the spine: mild perspective
+    let distance = h * max(2.2, min(5, number("distance", 2.8)))   // camera distance from the spine (× page height)
     let eye = h * 0.06
 
     guard let convention = warpConvention() else { fail("Core Image perspective warp unavailable") }

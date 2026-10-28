@@ -48,6 +48,26 @@ enum GoalScope: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// R7 (SCORE-R6 #15): how hard a goal is, for the tier dot on Home and "Next goal" on Results.
+enum GoalTier: Int, CaseIterable, Sendable, Comparable {
+    case easy = 0
+    case medium = 1
+    case hard = 2
+
+    /// A short tag for the goal card (the UI may restyle it).
+    var label: String {
+        switch self {
+        case .easy: return "Easy"
+        case .medium: return "Medium"
+        case .hard: return "Hard"
+        }
+    }
+
+    static func < (a: GoalTier, b: GoalTier) -> Bool {
+        return a.rawValue < b.rawValue
+    }
+}
+
 /// How a goal's progress carries between runs.
 enum GoalSpan: String, Codable, Sendable {
     /// In one run: the best run so far counts.
@@ -122,6 +142,8 @@ struct GoalSpec: Equatable, Sendable {
     let ranks: ClosedRange<Int>
     /// Completing it unlocks this variety (Varieties); such a goal is offered once its band opens and never again.
     let unlocks: TrapVariety?
+    /// R7 (#15): easy, medium or hard (GoalTier.label).
+    let tier: GoalTier
 
     /// "Catch 3 dragonflies in one run", "Score 2,000 in the Daily".
     var title: String {
@@ -376,64 +398,65 @@ enum GoalBook {
     static let fusedToothGoal: String = "chain5"
 
     private static func g(_ id: String, _ template: String, _ kind: GoalKind, _ target: Int, _ span: GoalSpan,
-                          _ scope: GoalScope, _ ranks: ClosedRange<Int>, unlocks: TrapVariety? = nil) -> GoalSpec {
+                          _ scope: GoalScope, _ ranks: ClosedRange<Int>, _ tier: GoalTier,
+                          unlocks: TrapVariety? = nil) -> GoalSpec {
         return GoalSpec(id: id, template: template, kind: kind, target: target, span: span, scope: scope, ranks: ranks,
-                       unlocks: unlocks)
+                        unlocks: unlocks, tier: tier)
     }
 
     /// The pool (39). Bands overlap so every rank has a dozen or more to draw from.
     static let pool: [GoalSpec] = [
         // Bite sizes
-        g("bite3", "A 3-bug bite", .biteSize, 3, .run, .anyMode, 0...1),
-        g("bite4", "A 4-bug bite", .biteSize, 4, .run, .anyMode, 0...4),
-        g("bite5", "A 5-bug bite", .biteSize, 5, .run, .anyMode, 2...8),
-        g(sharkToothGoal, "A 6-bug bite", .biteSize, 6, .run, .anyMode, 6...11, unlocks: .sharkTooth),
-        g("bite7", "A 7-bug bite", .biteSize, 7, .run, .anyMode, 8...11),
-        g("mixed3", "One bite, {n} kinds of bug", .mixedBite, 3, .run, .anyMode, 1...8),
+        g("bite3", "A 3-bug bite", .biteSize, 3, .run, .anyMode, 0...1, .easy),
+        g("bite4", "A 4-bug bite", .biteSize, 4, .run, .anyMode, 0...4, .easy),
+        g("bite5", "A 5-bug bite", .biteSize, 5, .run, .anyMode, 2...8, .medium),
+        g(sharkToothGoal, "A 6-bug bite", .biteSize, 6, .run, .anyMode, 6...11, .hard, unlocks: .sharkTooth),
+        g("bite7", "A 7-bug bite", .biteSize, 7, .run, .anyMode, 8...11, .hard),
+        g("mixed3", "One bite, {n} kinds of bug", .mixedBite, 3, .run, .anyMode, 1...8, .medium),
         // Feasts
-        g("feast2", "Feast twice in one run", .feasts, 2, .run, .standard, 0...4),
-        g("feast6", "Feast {n} times in one run", .feasts, 6, .run, .standard, 5...11),
-        g("feastMorning", "Feast before noon", .feastAt(.morning), 1, .run, .anyMode, 0...5),
+        g("feast2", "Feast twice in one run", .feasts, 2, .run, .standard, 0...4, .easy),
+        g("feast6", "Feast {n} times in one run", .feasts, 6, .run, .standard, 5...11, .hard),
+        g("feastMorning", "Feast before noon", .feastAt(.morning), 1, .run, .anyMode, 0...5, .medium),
         // Chains
-        g("chain2", "Reach a ×{n} chain", .chain, 2, .run, .anyMode, 0...2),
-        g("chain3", "Reach a ×{n} chain", .chain, 3, .run, .anyMode, 1...6),
-        g("chain4", "Reach a ×{n} chain", .chain, 4, .run, .standard, 4...10),
-        g(fusedToothGoal, "Reach a ×{n} chain", .chain, 5, .run, .standard, 9...11, unlocks: .fusedTooth),
+        g("chain2", "Reach a ×{n} chain", .chain, 2, .run, .anyMode, 0...2, .easy),
+        g("chain3", "Reach a ×{n} chain", .chain, 3, .run, .anyMode, 1...6, .medium),
+        g("chain4", "Reach a ×{n} chain", .chain, 4, .run, .standard, 4...10, .hard),
+        g(fusedToothGoal, "Reach a ×{n} chain", .chain, 5, .run, .standard, 9...11, .hard, unlocks: .fusedTooth),
         // Sparing
-        g("spare3", "Spare {n} bees in one run", .spare, 3, .run, .standard, 0...2),
-        g("spare8", "Spare {n} bees in one run", .spare, 8, .run, .standard, 2...7),
-        g(sawtoothGoal, "Spare {n} bees in one run", .spare, 12, .run, .standard, 3...11, unlocks: .sawtooth),
-        g("spare100", "Spare {n} bees", .spare, 100, .total, .anyMode, 5...11),
-        g("wasp2", "Spare {n} wasps in one run", .spareSpecies(.wasp), 2, .run, .standard, 3...11),
-        g("clean25", "Catch {n} bugs before biting a bee", .catchBeforeSting, 25, .run, .standard, 2...8),
+        g("spare3", "Spare {n} bees in one run", .spare, 3, .run, .standard, 0...2, .easy),
+        g("spare8", "Spare {n} bees in one run", .spare, 8, .run, .standard, 2...7, .medium),
+        g(sawtoothGoal, "Spare {n} bees in one run", .spare, 12, .run, .standard, 3...11, .hard, unlocks: .sawtooth),
+        g("spare100", "Spare {n} bees", .spare, 100, .total, .anyMode, 5...11, .medium),
+        g("wasp2", "Spare {n} wasps in one run", .spareSpecies(.wasp), 2, .run, .standard, 3...11, .medium),
+        g("clean25", "Catch {n} bugs before biting a bee", .catchBeforeSting, 25, .run, .standard, 2...8, .medium),
         // Species hunts
-        g("ladybird2", "Catch {n} ladybirds in one run", .catchSpecies(.ladybird), 2, .run, .standard, 0...5),
+        g("ladybird2", "Catch {n} ladybirds in one run", .catchSpecies(.ladybird), 2, .run, .standard, 0...5, .medium),
         g("flyTrio", "Catch a housefly, a fruit fly and a bluebottle in one run",
-          .catchSet([.housefly, .fruitFly, .bluebottle]), 3, .run, .anyMode, 0...4),
-        g("dragonfly1", "Catch a dragonfly", .catchSpecies(.dragonfly), 1, .run, .anyMode, 1...4),
-        g("dragonfly3", "Catch {n} dragonflies in one run", .catchSpecies(.dragonfly), 3, .run, .standard, 4...11),
-        g("fireflyNight", "Catch a firefly at night", .catchSpeciesAt(.firefly, .night), 1, .run, .anyMode, 2...6),
+          .catchSet([.housefly, .fruitFly, .bluebottle]), 3, .run, .anyMode, 0...4, .easy),
+        g("dragonfly1", "Catch a dragonfly", .catchSpecies(.dragonfly), 1, .run, .anyMode, 1...4, .medium),
+        g("dragonfly3", "Catch {n} dragonflies in one run", .catchSpecies(.dragonfly), 3, .run, .standard, 4...11, .hard),
+        g("fireflyNight", "Catch a firefly at night", .catchSpeciesAt(.firefly, .night), 1, .run, .anyMode, 2...6, .medium),
         g("firefly5", "Catch {n} fireflies at night", .catchSpeciesAt(.firefly, .night), 5, .run, .standard,
-          6...11),
+          6...11, .hard),
         g("nightShift", "Catch a firefly, a cricket and a moth in one run", .catchSet([.firefly, .cricket, .moth]),
-          3, .run, .anyMode, 4...11),
-        g("scarab", "Catch a Golden Scarab", .catchSpecies(.goldenScarab), 1, .run, .anyMode, 2...11),
+          3, .run, .anyMode, 4...11, .medium),
+        g("scarab", "Catch a Golden Scarab", .catchSpecies(.goldenScarab), 1, .run, .anyMode, 2...11, .medium),
         // Time of day
-        g("cleanToDusk", "No dry snaps until dusk", .cleanUntil(.dusk), 1, .run, .standard, 1...7),
-        g("cleanToNight", "No dry snaps until night", .cleanUntil(.night), 1, .run, .standard, 6...11),
-        g("night", "Keep your trap going until night", .reach(.night), 1, .run, .standard, 1...3),
-        g("dusk10", "Catch {n} bugs at dusk", .catchAt(.dusk), 10, .run, .standard, 2...6),
-        g("night20", "Catch {n} bugs at night", .catchAt(.night), 20, .run, .standard, 5...11),
+        g("cleanToDusk", "No dry snaps until dusk", .cleanUntil(.dusk), 1, .run, .standard, 1...7, .medium),
+        g("cleanToNight", "No dry snaps until night", .cleanUntil(.night), 1, .run, .standard, 6...11, .hard),
+        g("night", "Keep your trap going until night", .reach(.night), 1, .run, .standard, 1...3, .easy),
+        g("dusk10", "Catch {n} bugs at dusk", .catchAt(.dusk), 10, .run, .standard, 2...6, .easy),
+        g("night20", "Catch {n} bugs at night", .catchAt(.night), 20, .run, .standard, 5...11, .hard),
         // Run totals
-        g("catch20", "Catch {n} bugs in one run", .catchAny, 20, .run, .standard, 0...2),
-        g("catch60", "Catch {n} bugs in one run", .catchAny, 60, .run, .standard, 3...8),
+        g("catch20", "Catch {n} bugs in one run", .catchAny, 20, .run, .standard, 0...2, .easy),
+        g("catch60", "Catch {n} bugs in one run", .catchAny, 60, .run, .standard, 3...8, .medium),
         // The Daily
-        g("dailyFinish", "Finish a Daily Bog", .finish, 1, .run, .daily, 0...11),
-        g("daily2k", "Score {n} in the Daily", .score, 2_000, .run, .daily, 0...4),
-        g("daily6k", "Score {n} in the Daily", .score, 6_000, .run, .daily, 4...11),
+        g("dailyFinish", "Finish a Daily Bog", .finish, 1, .run, .daily, 0...11, .easy),
+        g("daily2k", "Score {n} in the Daily", .score, 2_000, .run, .daily, 0...4, .easy),
+        g("daily6k", "Score {n} in the Daily", .score, 6_000, .run, .daily, 4...11, .hard),
         // The Zen Bog
-        g("zenCatch50", "Catch {n} bugs in the Zen Bog", .catchAny, 50, .run, .zen, 0...11),
-        g("zenSpare15", "Spare {n} bees in the Zen Bog", .spare, 15, .run, .zen, 0...11),
+        g("zenCatch50", "Catch {n} bugs in the Zen Bog", .catchAny, 50, .run, .zen, 0...11, .easy),
+        g("zenSpare15", "Spare {n} bees in the Zen Bog", .spare, 15, .run, .zen, 0...11, .medium),
     ]
 
     static func def(_ id: String) -> GoalSpec? {

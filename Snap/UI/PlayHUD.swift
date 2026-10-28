@@ -24,10 +24,15 @@ struct PlayLayer: View {
         let lesson = controller.route == .lesson ? controller.lessonDisplay : nil
         let showsCard = lesson.map { !$0.isFinal } ?? false
         // R4 (REVIEW-3 #3): the plate never covers a live pop (it moves to the inner bottom, or waits a beat).
+        // R7 (#5, frame 43: the free-sting toast sat on the trap's flies): a toast waits, its clock still, rather than
+        // cover the bugs (`strict`), up to `MessageQueue.maxHold`; Core's state hints always show.
+        let toast = v.hint.map { AppRules.hudHintIsToast($0) } ?? false
         let slot: (rect: CGRect, low: Bool)? = showsCard
             ? (rect: l.lessonHint, low: true)
             : HUDLayout.hintSlot(primary: l.hint, alternate: l.lessonHint, pops: v.popRects.map { info.screenRect($0) },
-                                 subjects: v.subjectRects.map { info.screenRect($0) })
+                                 subjects: v.subjectRects.map { info.screenRect($0) },
+                                 strict: toast && !v.plateMayCover)
+        let plateHeld = toast && slot == nil && !paused
         let hintRect = slot?.rect ?? l.hint
         let inner: HorizontalAlignment = l.trailing ? .leading : .trailing
         let hintAlign = Alignment(horizontal: inner, vertical: (slot?.low ?? false) ? .bottom : .top)
@@ -45,7 +50,7 @@ struct PlayLayer: View {
                 // R4 (REVIEW-3 #13: "DAILY BOG · 28 OCT" ran under Pause, on the phone and the Duo): the Daily's name
                 // is the score's own caption line, inside the score's box.
                 ScoreBlock(score: v.score, best: v.best, passedBest: v.passedBest, trailing: l.trailing, compact: c,
-                           daily: paused ? nil : controller.dailyMarker)
+                           daily: paused ? nil : controller.dailyMarker, zen: v.zen)
                     .frame(width: l.score.width, height: l.score.height,
                            alignment: l.trailing ? .topTrailing : .topLeading)
                     .position(x: l.score.midX, y: l.score.midY)
@@ -158,9 +163,11 @@ struct PlayLayer: View {
             guard new > old + 0.01 else { return }
             bumpChain()
         }
+        .onChange(of: plateHeld) { _, held in controller.setPlateHeld(held) }
         .onDisappear {
             flashTask?.cancel()
             bumpTask?.cancel()
+            controller.setPlateHeld(false)
         }
     }
 
@@ -330,10 +337,16 @@ struct ScoreBlock: View {
     let compact: Bool
     /// The Daily's "Daily Bog · 28 Oct" (nil outside a Daily).
     var daily: String? = nil
+    /// R7 (#10, SCORE-R6 D8 #1: P08 didn't read as Zen): the Zen Bog keeps no best, so its badge goes under the score.
+    var zen = false
+
+    /// R7 (#10): the Zen Bog's HUD badge.
+    static let zenBadge = "Zen Bog"
 
     /// The line under the score: "NEW BEST", the Daily's name, "BEST 3,200" or "SCORE" (R5, REVIEW-4 #13: the
-    /// founder's word; it was "PROTEIN"). Pure; tested.
-    static func caption(passedBest: Bool, best: Int, daily: String?) -> String {
+    /// founder's word; it was "PROTEIN"); R7: "ZEN BOG" on the Zen Bog's badge. Pure; tested.
+    static func caption(passedBest: Bool, best: Int, daily: String?, zen: Bool = false) -> String {
+        if zen { return zenBadge.uppercased() }
         if passedBest { return "NEW BEST" }
         if let daily { return daily.uppercased() }
         return best > 0 ? "BEST " + AppRules.formatted(best) : AppRules.scoreWord.uppercased()
@@ -349,16 +362,34 @@ struct ScoreBlock: View {
                 .contentTransition(.numericText(value: Double(score)))
                 .animation(.easeOut(duration: 0.25), value: score)
                 .snapLegible()
-            Text(Self.caption(passedBest: passedBest, best: best, daily: daily))
-                .font(.system(size: compact ? 11 : 12, weight: .heavy, design: .rounded))
-                .kerning(0.8)
-                .foregroundStyle(passedBest ? SnapTheme.gold : SnapTheme.mist)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .snapLegible()
+            if zen {
+                // R7 (#10): the Zen Bog's badge, a lime pill, so every Zen frame reads as Zen.
+                HStack(spacing: 4) {
+                    Image(systemName: "leaf.fill")
+                        .font(.system(size: compact ? 9 : 10, weight: .heavy))
+                    Text(Self.caption(passedBest: passedBest, best: best, daily: daily, zen: true))
+                        .font(.system(size: compact ? 10 : 11, weight: .heavy, design: .rounded))
+                        .kerning(0.8)
+                        .lineLimit(1)
+                }
+                .foregroundStyle(SnapTheme.ink)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(SnapTheme.limeLight))
+                .overlay(Capsule().stroke(SnapTheme.lime, lineWidth: 1))
+                .fixedSize()
+            } else {
+                Text(Self.caption(passedBest: passedBest, best: best, daily: daily))
+                    .font(.system(size: compact ? 11 : 12, weight: .heavy, design: .rounded))
+                    .kerning(0.8)
+                    .foregroundStyle(passedBest ? SnapTheme.gold : SnapTheme.mist)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .snapLegible()
+            }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Score \(score)" + (best > 0 ? ", best \(best)" : ""))
+        .accessibilityLabel("Score \(score)" + (zen ? ", " + Self.zenBadge : (best > 0 ? ", best \(best)" : "")))
     }
 }
 
@@ -439,6 +470,20 @@ struct SnapsRow: View {
                     .frame(width: layout.numeral.width, height: layout.numeral.height,
                            alignment: layout.trailing ? .trailing : .leading)
                     .position(x: layout.numeral.midX, y: layout.numeral.midY)
+                // R7 (#13: no SNAPS label on the 6.3" or the Duo): where the numeral had to sit on the row, its
+                // caption still shows, in the layout's own spot (`HUDLayout.snapsLabel`).
+                if !layout.numeralLabeled, let r = layout.snapsLabel {
+                    Text(HUDLayout.numeralLabel)
+                        .font(.system(size: HUDLayout.rowLabelSize, weight: .heavy, design: .rounded))
+                        .kerning(0.6)
+                        .foregroundStyle(SnapTheme.mist)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .snapLegible()
+                        .frame(width: r.width, height: r.height,
+                               alignment: layout.trailing ? .bottomTrailing : .bottomLeading)
+                        .position(x: r.midX, y: r.midY)
+                }
             }
             .frame(width: size.width, height: size.height)
         }

@@ -3,7 +3,19 @@ import Foundation
 import Testing
 @testable import Snap
 
-// MARK: - Headless balance playtest (Round 6)
+// MARK: - Headless balance playtest (Round 7)
+//
+// R7 (design/notes/core-R7.md): the ×2 FEAST (a clean bite of 5+ scores × Tuning.feastMultiplier), the night pool
+// (fireflies and crickets lead) and the late decays 0.955 / 0.91. tools/balance-sim.js predicts on these 16 seeds:
+//   novice  286 score     /  48 s / 10.5 snaps / 1 sting / 0 wilts
+//   casual  7,834         / 122 s / 22 snaps   / 3 stings / longest chain 5 / 0 wilts
+//   expert  40,069        / 302 s (p90 332 s) / 39.5 snaps / 0 stings / 2 wilts
+//   perfect 67,073        / 341 s / 37.5 snaps / never stung / 3 wilts
+//   without pilotGiveUp: expert 387 s, perfect 423 s, none capped; Sprout run 1: novice 101 s, casual 156 s;
+//   taper: novice run 2 100 s, run 3 90 s; Zen 600 s: casual 333 bugs, perfect 485, ≥ 52 in the last 2 minutes.
+//   (8 seeds: casual 124 s, chain 5; expert 315 s, p90 330 s; perfect 341 s; novice Sprout 1 / 2 / 3 98 / 95 / 85 s.)
+// R7 targets added: expert p90 ≤ 360 s; casual median < Tuning.wellFedScore (10,000) ≤ expert median.
+// The R6 numbers below are history.
 //
 // Every PilotSkill plays real TrapSessions (mode .feed, SNAP_BAL_SEEDS seeds, default 16; CI sets 8) at 60 Hz, the
 // pilot fed the previous frame's snapshot the way GameController feeds it. Each run is capped at 10 min. R4: every
@@ -473,12 +485,27 @@ struct BalanceTests {
         #expect(capped == 0, "\(line)")
     }
 
-    /// R6 (#19, REVIEW-5 P2-5): an expert run lasts at most about 6 minutes (median).
+    /// R6 (#19, REVIEW-5 P2-5): an expert run lasts at most about 6 minutes (median). R7 (SCORE-R6 #14): with the
+    /// night pool led by fireflies and crickets and the late decays 0.955 / 0.91, nine expert runs in ten do too
+    /// (p90; the sim: 332 s on 16 seeds, 330 s on 8).
     @Test func expertRunLength() {
         let runs: [SnapBalanceRun] = SnapBalanceMemo.shared.runs(.expert)
         let line: String = SnapBalanceHarness.report(.expert, runs)
         let seconds: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in r.seconds }
+        let secs: [Double] = runs.map { (r: SnapBalanceRun) -> Double in r.seconds }
+        let p90: Double = SnapBalanceHarness.percentile(secs, 0.9)
         #expect(seconds <= 360, "expert seconds \(seconds): \(line)")
+        #expect(p90 <= 360, "expert p90 seconds \(p90): \(line)")
+    }
+
+    /// R7 (#3): with the ×2 FEAST scores rise about 1.6× (the sim: casual ~7,800, expert ~40,000); "Well Fed"
+    /// (Tuning.wellFedScore, R6's 10,000) still sits above the casual median and at or below the expert's, as
+    /// docs/appstore/achievements.md asks.
+    @Test func wellFedSitsBetweenCasualAndExpert() {
+        let casual: Double = SnapBalanceHarness.medianScore(.casual)
+        let expert: Double = SnapBalanceHarness.medianScore(.expert)
+        let bar: Double = Double(Tuning.wellFedScore)
+        #expect(casual < bar && bar <= expert, "casual \(casual) < \(bar) <= expert \(expert)")
     }
 
     /// R6 (#19): the last light ends even a hand that never gives up waiting (R5: 14 of 16 such runs hit the cap).

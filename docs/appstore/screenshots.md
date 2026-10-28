@@ -18,6 +18,7 @@ Rules: PNG, **no alpha channel**, 1–10 per size (**we use all 10**). In search
 ## Frame 1 is the Duo held like a book, the trap across the fold
 
 The hero is the whole pitch: **an iPhone Duo standing open like a book at about 140°, the flytrap's two lobes filling its two halves, a crowd of bugs sipping nectar on both lobes, the midrib on the hinge.** Swoop's `store-frame --book` takes D01, a **real Duo inner-display capture** (2853 × 2007), splits it at the fold and maps each half by a true perspective transform onto one page of a stylised Duo, with a graphite bezel, the hinge spine and a soft ground shadow. **No hands.**
+- **R7 (SCORE-R6 #6): the fold must read at 365 pt.** store3's book was drawn at 146° from a hinge held at 150°, seen almost head-on, and the panel read it as ~170°. D01 is now shot with the real hinge at **140°** (`ciHinge=140`); the composite's angle is that logged angle (store-set.sh keeps 130–150°, else 140°); and the camera sits higher and closer (tilt 15°, 2.8 page heights; on the iPhone slots the book also turns 5° toward the caption), so both the top and the bottom edge bow toward the spine. The bee halo cut by the right edge in P01/D01 is Scene's clear-zone rule (R7 #4): eyeball it.
 - **Truthful:** every screen pixel is the app's, only warped and clipped to the display's corners. The device is the real pose Snapjaw is played in, open at a relaxed book angle, never closed, never flat.
 - **Used in every set** as frame 1, including the iPhone sets (from the same Duo capture); the iPhone caption's sub-line says other iPhones play too. It never shows a non-folding iPhone folded.
 - **Fallback, automatic:** if D01's capture is missing or isn't the folded inner canvas (`SNAP-T canvas 951x669 fold=1`), P01 is made flat from the iPhone capture and **FLAGGED**. Don't upload a flat P01 without telling the founder.
@@ -37,36 +38,38 @@ Same frames and captions at both sizes. On these phones there is no hinge, so th
 | # (file) | Story beat (in-game moment) | Headline (count) / sub-line | Demo args (`ci/store-scenarios.txt`) |
 |---|---|---|---|
 | **P01** `P01-book-hero` | **The plant.** Book composite of D01: the lobes across the fold, a crowd of bugs sipping on the gold nectar drops | **Your Duo is a *flytrap*** (21) / Best on iPhone Duo. Plays on other iPhones too. | frame `book:D01-book-hero` (fallback capture `screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd`) |
-| **P02** `P02-feast` | **The big FEAST.** A bite of 5+ bugs: the gold burst, the big "FEAST!" banner, the multiplier pop, the snaps refilling | **Wait for a crowd. *FEAST!*** (24) / One bite catches every bug inside. | `screen=play;mode=feed;pilot=expert;progress=mid;freezeOn=bigFeast` |
+| **P02** `P02-feast` | **The big FEAST, mid-gulp.** 0.12 s into a bite of 5+ bugs: the jaws shut, the crowd still held over them and gulped into the midrib one after another, the bite pop | **Wait for a crowd. *FEAST!*** (24) / One bite catches every bug inside. | `screen=play;mode=feed;pilot=expert;progress=late;freezeOn=snap;freezeAfter=10.5` |
 | **P03** `P03-bee` | **The bee.** A bee with its white halo sipping among the flies; the hint "Bee! Wait…" | **Never eat a *bee*** (15) / Bees cost snaps. Wait them out. | `screen=play;seed=7;wave=15;pilot=perfect;freezeOn=bee` |
-| **P04** `P04-garden` | **The Garden.** Late progress: grown flytraps (Classic, Red Dragon, B52 …) with their blurbs, the rest as silhouettes with their unlock rule | **Grow *8 flytraps*** (15) / Real cultivars, from Red Dragon to B52. | `screen=garden;progress=late` |
+| **P04** `P04-garden` | **The Garden.** Late progress: 6 of 8 grown (Classic, Red Dragon, B52 …) with their blurbs, two as silhouettes with their unlock rule | **Grow *8 flytraps*** (15) / From Red Dragon to B52, and one of gold. | `screen=garden;progress=late` |
 | **P05** `P05-night` | **The night.** Blue night, fireflies glowing, night bugs in the trap | **Fireflies light the *night*** (25) / New bugs as the day goes on. | `screen=play;seed=7;wave=24;pilot=expert;freezeOn=crowd;freezeAfter=3` |
-| **P06** `P06-goals` | **Goals and the streak.** Home, mid progress: the Goals card (three goals with progress), the rank bar, the Daily Bog button with its 🔥 streak badge | **Three *goals* every run** (21) / And a Daily Bog with a streak. | `screen=home;progress=mid` |
-| **P07** `P07-bug-book` | **The collection.** The Bug Book, mid progress: drawn pages with jokes and counts, silhouettes for the rest | **Fill the *Bug Book*** (17) / 16 species, each with a joke. | `screen=book;progress=mid` |
-| **P08** `P08-zen` | **The Zen Bog.** Zen play after 40 s: bugs sipping, no snaps row | **Or just *relax*** (13) / Zen Bog: no rush, no end. | `screen=play;mode=zen;pilot=casual;progress=mid;freezeAfter=40` |
-| **P09** `P09-results` | **The result.** Results: the score counting up, best bite, best chain, bees spared, the Goals card ticked with "+n growth", the rank bar | **One more *go*?** (12) / Goals, growth and a best to beat. | `screen=results;pilot=casual;progress=mid` |
+| **P06** `P06-goals` | **Goals and the streak.** Home, late progress (Garden 6/8, as P04): the Goals card (three goals with progress), the rank bar, the Daily Bog button with its 🔥 streak badge | **Three *goals* every run** (21) / And a Daily Bog with a streak. | `screen=home;progress=late` |
+| **P07** `P07-bug-book` | **The collection.** The Bug Book, late progress (as P06's Home): the 16 drawn pages with jokes and counts, bees "spared" | **Fill the *Bug Book*** (17) / 16 species, each with a joke. | `screen=book;progress=late` |
+| **P08** `P08-zen` | **The Zen Bog, calm.** Zen play 25 s in, frozen on a crowd sipping (a state, so no fresh pop or sting): the Zen Bog badge, no snaps row | **Or just *relax*** (13) / Zen Bog: no rush, no end. | `screen=play;mode=zen;pilot=casual;progress=late;freezeOn=crowd;freezeAfter=25` |
+| **P09** `P09-results` | **The result.** Results, late progress: the score counting up under the best to beat (14,800), best bite, best chain, bees spared, the Goals card ticked with "+n growth", the rank bar | **One more *go*?** (12) / Goals, growth and a best to beat. | `screen=results;pilot=casual;progress=late` |
 | **P10** `P10-first-bite` | **The lesson.** First Bite step 6: three flies landing together, "Wait for a crowd… now!" | **Learn it in one *First Bite*** (26) / A short lesson on your first go. | `screen=lesson;lessonStep=6` |
 
 **Why this order:** 1–3 are the pitch and the difference from the free toys (the plant, choosing the moment and its payoff, sparing bees); 4–9 are the reasons to come back, alternating progress and play (the Garden, the night, goals and the streak, the Bug Book, the Zen Bog, the results that feed it all); 10 says it's easy to learn.
 
 **Caption notes (truth):**
-- **P02:** a big FEAST is a clean bite of 5 or more (or one at ×4 chain or more, `FeastEvent.isBig`); the `bigFeast` freeze lands only on one, so "FEAST!" in the caption is what the frame shows.
-- **P04:** "Real cultivars, from Red Dragon to B52" is about the names: Red Dragon, B52 and the toothed and cupped ones are named after real Venus flytrap cultivars. Golden Glow is the game's own fantasy, and the sub-line doesn't claim it.
-- **P06:** "Three goals every run" means the three active goals are there in every run (on Home and in the pause menu); progress on an unfinished goal carries over to the next run. The 🔥 badge shows from a 2-day streak, so `progress=mid` must carry one (R6 frame 52 shows 🔥 2).
-- **P08:** "no rush, no end" is the Home button's own sub-line; Zen has no hunger and no snaps running out.
-- **P09:** the best to beat is the Feed best; the Goals card shows the run's three goals, ticked where done.
+- **P02:** a big FEAST is a clean bite of 5 or more (or one at ×4 chain or more, `FeastEvent.isBig`). R7: the frame is the gulp, not the glitter after it. The seeded expert run bites 3, 4, then 5 bugs (~5.7, ~8.8 and ~12.4 s on all three devices in store3), so `freezeOn=snap;freezeAfter=10.5` holds 0.12 s after the 5-bug bite, and the expect (`caught=[5-9]`) FLAGS the frame if the timing ever moves. A `feastGulp` freeze tag is asked of App (`design/notes/ci-R7.md`).
+- **P04:** "From Red Dragon to B52, and one of gold" (R7: no longer "Real cultivars"; Golden Glow is the game's own fantasy and the old line half-claimed it). Red Dragon and B52 are real cultivar names; the gold one is Golden Glow.
+- **One progress state (R7, SCORE-R6 #9):** every frame that shows progress (P02 and P08's HUD, P04, P06, P07, P09) uses `progress=late`, so the set reads as one player: Garden 6 of 8 on P04 and on P06's Home, Bug Book 16/16 on P06 and P07, best 14,800. `tools/appstore/build-metadata.js` fails if two states ever appear.
+- **P06:** "Three goals every run" means the three active goals are there in every run (on Home and in the pause menu); progress on an unfinished goal carries over to the next run. The 🔥 badge shows from a 2-day streak; `progress=late` carries 4.
+- **P08:** "no rush, no end" is the Home button's own sub-line; Zen has no hunger and no snaps running out. R7: a calm moment (a crowd sipping), never "Stung!" or "Bzzt!" (store3's D08).
+- **P09:** the best to beat is the Feed best (late: 14,800, so no "New best!" over a tired trap); the Goals card shows the run's three goals, ticked where done, and the expect FLAGS a run that ticked none.
+- **P10 and D10:** the same lesson step (6) and the same caption; the card's line differs only by the control ("now tap!" on a phone, "now!" on the Duo). The "Now!" pill under it doubles the cue: App is asked to let the pill carry it (`design/notes/ci-R7.md`).
 
-**Asks to the CI / App engineers for these frames** (none changes the game): `freezeOn=bigFeast` must freeze with the "FEAST!" banner fully on screen; `screen=garden;progress=late` must show grown and locked varieties side by side; `screen=home`, `screen=book` and `screen=results` must render with `progress=mid` (rank 4, 9 species, best 3,200, a goal book and a Daily streak of at least 2).
+**Asks to the CI / App engineers for these frames** (none changes the game): `screen=garden;progress=late` must show grown and locked varieties side by side; `screen=home`, `screen=book` and `screen=results` must render with `progress=late` (rank 10, 16 species, best 14,800, a goal book and a Daily streak of at least 2). R7 asks (`design/notes/ci-R7.md`): a `feastGulp` freeze tag for P02/D02; Home's pose card saying "Snap it a little shut" (D06); one "now" on P10/D10.
 
 ## B. iPhone Duo, inner display (2853 × 2007): 10 frames
 
-The same beats as A, captured on the Duo simulator with the hinge held at **150°** and the pilot driving the closure (no tap control). The Duo frames show the **HUD on the right half** (the sharp half, the Duo default) and the Duo wording ("Hold it open like a book") wherever a hint speaks about the control.
+The same beats as A, captured on the Duo simulator with the hinge held at **150°** (D01 at **140°**, `ciHinge=140`, for the book) and the pilot driving the closure (no tap control). The Duo frames show the **HUD on the right half** (the sharp half, the Duo default) and the Duo wording ("Hold it open like a book") wherever a hint speaks about the control.
 
 | # (file) | Headline (count) / sub-line where it differs from A |
 |---|---|
 | **D01** `D01-book-hero` | **Your Duo is a *flytrap*** (21) / Hold it open like a book. (frame `book`) |
-| **D02** `D02-feast` | **Wait for a crowd. *FEAST!*** (24) / Snap it a little shut. Open again. |
-| **D03–D10** `D03-bee`, `D04-garden`, `D05-night`, `D06-goals`, `D07-bug-book`, `D08-zen`, `D09-results`, `D10-first-bite` | as P03–P10 (D10: the Duo variant, the lesson's pose and snap words; eyeball its hint) |
+| **D02** `D02-feast` | **Wait for a crowd. *FEAST!*** (24) / Snap it a little shut. Open again. (the same mid-gulp freeze as P02) |
+| **D03–D10** `D03-bee`, `D04-garden`, `D05-night`, `D06-goals`, `D07-bug-book`, `D08-zen`, `D09-results`, `D10-first-bite` | as P03–P10 (D06: Home's Duo pose card must read "Snap it a little shut", an App string; D10: the Duo variant, the lesson's pose and snap words; eyeball its hint) |
 
 Every Duo frame must log the folded inner canvas (`SNAP-T canvas 951x669 fold=1 hudLeft=0`), so a cover-display capture is FLAGGED, never uploaded.
 
@@ -75,14 +78,14 @@ Reserves (not uploaded unless a frame above fails; the full list is in the scena
 ## Truthfulness rules (check every frame before upload)
 
 - [ ] **Only what the app renders.** Every screen is an unedited capture (frame 1: only warped onto the device); captions sit outside it. No composited bugs, pops, nectar or light.
-- [ ] **Frame 1's device is a real iPhone Duo pose** (book, 140–150°), never a non-folding iPhone drawn folded, never closed or flat.
+- [ ] **Frame 1's device is a real iPhone Duo pose** (book, about 140°: the hinge angle D01 was shot at), never a non-folding iPhone drawn folded, never closed or flat. The fold must read in the 365 pt search thumbnail.
 - [ ] **No hands, no people, no photos** in 1.0's sets.
 - [ ] **Every caption is true of the build** (tick against the code, `metadata.md` §10): a Feast at ≥ 3 bugs wins a snap back and a big FEAST is 5+; bees cost an extra snap; 10 snaps to start, 14 at most; the chain to ×5, grown by bites of 2+ bugs; the day runs morning → noon → dusk (wave 15) → night (wave 23); 16 Bug Book species; 8 Garden flytraps; three active goals from 39; the Zen Bog never ends and has no leaderboard; the Daily Bog is one scored try a day, with a streak; First Bite runs on the first go. If any of these change, change the caption.
 - [ ] **No "smash" or "Fold to …" anywhere,** in captions or in any in-game text visible in a frame.
 - [ ] **No "protein"** on any Results, HUD or Home frame (the word is "score").
 - [ ] **Bees are clearly bees** (halo, stripes) in every frame they appear in, and no frame shows a bee being eaten (P03 is the moment *before*).
 - [ ] **The bite looks like a gulp, not a squash** (`metadata.md` §11 ask 1): gold juice, no red, no flattened bugs (P02 especially).
-- [ ] **Seeded states are reachable states:** a crowd of 3–7, a chain of 2–5, "mid" and "late" progress are things a real player sees. Never seed a full Bug Book, a full Garden or an impossible score.
+- [ ] **Seeded states are reachable states:** a crowd of 3–7, a chain of 2–5, "mid" and "late" progress are things a real player sees. Never seed a full Garden or an impossible score. (`late`'s full Bug Book is a real rank-10 state; R7 shows it on P06 and P07 so the set agrees with itself.)
 - [ ] **The iPhone frames have no Duo-only line inside the capture**; the Duo frames show the HUD on the right half.
 - [ ] **Nothing important in the crease band** (x ≈ 456–496 pt) on the Duo frames, except the midrib, which is the point.
 - [ ] **No prices, "#1", Apple logos or the "Made for iPhone Duo" badge** drawn into a frame (Guideline 2.3.7; Apple adds its own badge).

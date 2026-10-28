@@ -360,8 +360,8 @@ struct LessonTests {
     }
 
     @Test func stepNumbersCountOnlyVisibleSteps() {
-        // R5 (REVIEW-4 #11): the same four numbered steps on the Duo and on phones.
-        #expect(LessonScript.stepLabel(.firstSnap, touch: false, hasPose: true) == "Step 1 of 4")
+        // R5 (REVIEW-4 #11): four numbered steps on phones; R7 (#12): five on the Duo (its re-arm step counts).
+        #expect(LessonScript.stepLabel(.firstSnap, touch: false, hasPose: true) == "Step 1 of 5")
         #expect(LessonScript.stepLabel(.tooSlow, touch: true, hasPose: false) == "Step 2 of 4")
         #expect(LessonScript.stepLabel(.triple, touch: true, hasPose: false) == "Step 4 of 4")
         #expect(LessonScript.stepLabel(.bee, touch: true, hasPose: true) == "Step 3 of 4")
@@ -542,7 +542,7 @@ struct WordsTests {
         #expect(AppRules.allHintCopy.contains("Snap the halves together"))
         #expect(AppRules.allHintCopy.contains("Tap to snap"))
         #expect(AppRules.hintText(.lastSnap, touch: false) == "Last snap! Make it count")
-        #expect(HomeView.foldCaption == "Snap it shut a little")
+        #expect(HomeView.foldCaption == "Snap it a little shut")
     }
 
     @Test func foldHintShowsOnTheFirstWaveOnly() {
@@ -621,8 +621,9 @@ struct WordsTests {
         #expect(AppRules.multiplierText(1.5) == "×1.5")
         #expect(AppRules.multiplierText(2) == "×2")
         #expect(AppRules.biteName(1) == nil)
-        #expect(AppRules.biteName(3) == "Triple ×3")
-        #expect(AppRules.biteName(6) == "FEAST ×6")
+        // R7 (#3): "×" is only ever the chain.
+        #expect(AppRules.biteName(3) == "Triple")
+        #expect(AppRules.biteName(6) == "FEAST")
     }
 
     @Test func dailyDates() {
@@ -1156,7 +1157,8 @@ struct RoundFourTests {
         #expect(AppRules.refundHitTheCap(before: 14, after: 14, back: 2, max: 14))
         #expect(!AppRules.refundHitTheCap(before: 10, after: 11, back: 2, max: 14))
         #expect(!AppRules.refundHitTheCap(before: 14, after: 13, back: 0, max: 14))
-        #expect(AppRules.snapGainText(1, full: true) == "+1 (full)")
+        // R7 (#5): in plain words.
+        #expect(AppRules.snapGainText(1, full: true) == "+1 snap (row full)")
         #expect(AppRules.snapGainText(2) == "+2 snaps")
     }
 
@@ -1424,7 +1426,12 @@ struct RoundFiveTests {
         #expect((bannerAt ?? 0) >= AppRules.tiredBannerDelay)
         // CI's `freezeOn=tired` holds once the banner is up.
         #expect(!GameController.matches(.tired, TrapSnapshot(phase: .tired(elapsed: 0.1)), events: [.tired]))
-        #expect(GameController.matches(.tired, TrapSnapshot(phase: .tired(elapsed: 1.2)), events: []))
+        #expect(GameController.matches(.tired, TrapSnapshot(phase: .tired(elapsed: 1.7)), events: []))
+        // R7 (#5): the banner waits for the bite's pops, but never past `tiredBannerLatest`.
+        #expect(!AppRules.showsTiredBanner(phase: .tired(elapsed: 0.8), shownSnaps: 0, popsLive: true))
+        #expect(AppRules.showsTiredBanner(phase: .tired(elapsed: AppRules.tiredBannerLatest), shownSnaps: 0,
+                                          popsLive: true))
+        #expect(AppRules.tiredFreezeAt > AppRules.tiredBannerLatest)
     }
 
     /// REVIEW-4 #5 (belt and braces): never "Hungry… bite!" while a halo is inside the zone; "Bee! Wait…" instead.
@@ -1504,19 +1511,27 @@ struct RoundFiveTests {
         #expect(ResultsView.shareText(makeRun(mode: .feed)) == nil)
     }
 
-    /// REVIEW-4 #11: "Step n of N" is the same on the Duo and on phones.
+    /// REVIEW-4 #11: "Step n of N" never depends on the pose step. R7 (#12, duo-ui-lesson-3-hinge-128): on the Duo the
+    /// re-arm step is a step of its own, so the counter moves on with its words (of 5); phones count 4.
     @Test func lessonNumberingMatches() {
         let steps: [LessonScript.Step] = [.firstSnap, .openAgain, .tooSlow, .bee, .triple, .done]
+        var duoSeen: [String] = []
         for s in steps {
             let duo = LessonScript.stepLabel(s, touch: false, hasPose: true)
             let phone = LessonScript.stepLabel(s, touch: true, hasPose: false)
             let duoNoPose = LessonScript.stepLabel(s, touch: false, hasPose: false)
-            #expect(duo == phone)
             #expect(duo == duoNoPose)
-            #expect(duo.hasSuffix("of 4"))
+            #expect(duo.hasSuffix("of 5"))
+            #expect(phone.hasSuffix("of 4"))
+            if s != .done { duoSeen.append(duo) }
         }
+        // Every Duo step has its own number.
+        #expect(Set(duoSeen).count == duoSeen.count)
+        #expect(LessonScript.stepLabel(.openAgain, touch: false, hasPose: true) == "Step 2 of 5")
+        #expect(LessonScript.stepLabel(.openAgain, touch: true, hasPose: false) == "Step 1 of 4")
         #expect(LessonScript.stepLabel(.pose, touch: false, hasPose: true) == LessonScript.readyLabel)
-        #expect(LessonScript.stepLabel(.bee, touch: false, hasPose: true) == "Step 3 of 4")
+        #expect(LessonScript.stepLabel(.bee, touch: false, hasPose: true) == "Step 4 of 5")
+        #expect(LessonScript.stepLabel(.bee, touch: true, hasPose: false) == "Step 3 of 4")
     }
 
     /// REVIEW-4 #8 (founder call): the Sprout taper's options for Feed runs 1–3, standard from run 4.
@@ -1602,16 +1617,21 @@ struct RoundSixTests {
         q.post(.tag(.loss("−2 snaps")), seconds: 1, now: 0.5, interrupt: true)
         let tag = q.shown(now: 0.6, hint: nil)
         #expect(tag == .tag(.loss("−2 snaps")))
-        let back = q.shown(now: 1.6, hint: nil)
+        // R7 (#5): the tag ended at 1.5; nothing (not even a state hint) for the 0.4 s gap.
+        let quiet = q.shown(now: 1.6, hint: .trap(.crowd))
+        #expect(quiet == nil)
+        let back = q.shown(now: 2.0, hint: nil)
         #expect(back == .plate(.goalDone("A 3-bug bite")))
-        // A warning shows over a waiting toast, and the toast keeps its time.
+        // A warning shows over a waiting toast, and the toast keeps its time (it runs 2.0 → 4.0, plus 0.5 s).
         let warned = q.shown(now: 2.5, hint: .trap(.beeInside), warning: true)
         #expect(warned == .plate(.trap(.beeInside)))
         let still = q.shown(now: 3.0, hint: nil)
         #expect(still == .plate(.goalDone("A 3-bug bite")))
-        let next = q.shown(now: 4.6, hint: nil)   // the toast ran 1.6 → 3.6, plus the 0.9 s the warning covered (CI 40667000285)
+        let gap = q.shown(now: 4.6, hint: nil)
+        #expect(gap == nil)
+        let next = q.shown(now: 5.0, hint: nil)
         #expect(next == .plate(.chainTag(1.5)))
-        let hint = q.shown(now: 7, hint: .trap(.crowd))
+        let hint = q.shown(now: 7.5, hint: .trap(.crowd))
         #expect(hint == .plate(.trap(.crowd)))
         #expect(q.isIdle)
         q.clear()
@@ -1751,7 +1771,8 @@ struct RoundSixTests {
         #expect(ProgressRules.best(for: .zen, in: d) == 0)
         #expect(AppRules.againMode(.zen) == .zen)
         #expect(AppRules.startBanner(.zen, touch: true) == AppRules.zenBanner)
-        #expect(ResultsView.heroWord(zen: true) == "bugs caught")
+        // R7 (#10): Zen play shows a score, so Zen Results does too (with its bugs and time under it).
+        #expect(ResultsView.heroWord(zen: true) == "score")
         #expect(ResultsView.heroWord(zen: false) == "score")
         #expect(PauseMenu.zenEnd == "End")
         // Feed and the Daily still count every bug for the rank.
@@ -1806,7 +1827,7 @@ struct RoundSixTests {
         s2.markVarietiesSeen()
         #expect(!HomeView.gardenHasNew(s2.data))
         #expect(GardenCard.line(.redDragon, grown: true) == Varieties.info(.redDragon).blurb)
-        #expect(GardenCard.line(.goldenGlow, grown: false) == Varieties.ruleText(.goldenGlow))
+        #expect(GardenCard.line(.goldenGlow, grown: false) == VarietyBridge.rule(.goldenGlow))
         // A run that crosses a rank names the new variety for Results' celebration.
         var r = ProgressData()
         r.rankBugs = PlantRanks.threshold(2) - 5
@@ -1922,6 +1943,220 @@ struct RoundSixTests {
         #expect(late.unlockedVarieties.contains(.sawtooth))
         #expect(!late.unlockedVarieties.contains(.goldenGlow))
         #expect(!HomeView.gardenHasNew(late))
+    }
+}
+
+// MARK: - Round 7: one message at a time for real, Results that fit, the Duo's counter, Zen, tiers
+
+@MainActor
+struct RoundSevenTests {
+    /// #5: two toasts posted together show one after the other, at least `MessageQueue.gap` apart.
+    @Test func messagesAreSpacedApart() {
+        var q = MessageQueue()
+        q.post(.plate(.goalDone("A 3-bug bite")), seconds: 1, now: 0)
+        q.post(.plate(.nightCue(.lastLight)), seconds: 1, now: 0)
+        var lastEnd: Double?
+        var secondStart: Double?
+        var previous: HUDMessage?
+        for i in 0..<60 {
+            let t = Double(i) * 0.05
+            let m = q.shown(now: t, hint: nil)
+            if previous == .plate(.goalDone("A 3-bug bite")) && m != previous { lastEnd = t }
+            if m == .plate(.nightCue(.lastLight)) && secondStart == nil { secondStart = t }
+            previous = m
+        }
+        let end = lastEnd ?? -1
+        let start = secondStart ?? -1
+        #expect(end > 0)
+        #expect(start - end >= MessageQueue.gap - 0.051)
+        #expect(abs(MessageQueue.gap - 0.4) < 1e-9)
+    }
+
+    /// #5: a toast with no clear spot keeps its clock still, for at most `maxHold`; then it may show where it must.
+    @Test func aHeldToastWaits() {
+        var q = MessageQueue()
+        q.post(.plate(.beesCost), seconds: 1, now: 0)
+        _ = q.shown(now: 0, hint: nil)
+        _ = q.shown(now: 0.5, hint: nil, hold: true)
+        let a = q.until
+        #expect(abs(a - 1.5) < 1e-9)
+        #expect(!q.holdSpent)
+        // To 2.25 s: the hold is spent at 2.0 (0.5 + 1.5), and the toast now ends at 3.0.
+        for i in 1...35 { _ = q.shown(now: 0.5 + Double(i) * 0.05, hint: nil, hold: true) }
+        #expect(q.holdSpent)
+        #expect(abs(q.until - (1 + MessageQueue.maxHold)) < 1e-6)
+        // A strict slot is refused while both slots cover a bug; a free one is taken.
+        let top = CGRect(x: 500, y: 20, width: 220, height: 100)
+        let bottom = CGRect(x: 500, y: 540, width: 200, height: 100)
+        let flies = [CGRect(x: 520, y: 40, width: 30, height: 30), CGRect(x: 520, y: 560, width: 30, height: 30)]
+        #expect(HUDLayout.hintSlot(primary: top, alternate: bottom, pops: [], subjects: flies, strict: true) == nil)
+        #expect(HUDLayout.hintSlot(primary: top, alternate: bottom, pops: [], subjects: flies) != nil)
+        #expect(HUDLayout.hintSlot(primary: top, alternate: bottom, pops: [], subjects: [flies[0]], strict: true)?.low
+                == true)
+        #expect(AppRules.hudHintIsToast(.beesCost))
+        #expect(AppRules.hudHintIsToast(.goalDone("x")))
+        #expect(!AppRules.hudHintIsToast(.trap(.crowd)))
+        #expect(!AppRules.hudHintIsToast(.foldInput))
+    }
+
+    /// #3: the bite counts bugs in words; "×" is only the chain. The refund's one tag at the row, in plain words.
+    @Test func plainBiteWords() {
+        #expect(AppRules.biteCallout(count: 5, points: 540) == "5 bugs · +540")
+        #expect(AppRules.biteCallout(count: 1, points: 12) == "+12")
+        #expect(!AppRules.biteCallout(count: 7, points: 1_080).contains("×"))
+        #expect(AppRules.biteGainText(back: 2, full: false, lucky: [], bigFeast: true, firstFeast: false)
+                == "FEAST! +2 snaps")
+        #expect(AppRules.biteGainText(back: 2, full: false, lucky: [.goldenScarab], bigFeast: false, firstFeast: false)
+                == "Golden scarab! +2 snaps")
+        #expect(AppRules.biteGainText(back: 1, full: true, lucky: [], bigFeast: false, firstFeast: false)
+                == "+1 snap (row full)")
+        #expect(AppRules.biteGainText(back: 1, full: false, lucky: [], bigFeast: false, firstFeast: true) == "+1 snap")
+        #expect(AppRules.biteGainText(back: 1, full: false, lucky: [], bigFeast: false, firstFeast: false) == nil)
+        #expect(AppRules.biteGainText(back: 0, full: false, lucky: [.ladybird], bigFeast: true, firstFeast: true) == nil)
+        #expect(AppRules.luckyText(.ladybird).hasPrefix("Ladybird! +"))
+        #expect(AppRules.luckyText(.goldenScarab, snaps: false) == "Golden scarab!")
+        #expect(AppRules.leaderboardName == "Best Score")
+    }
+
+    /// #12: the too-flat prompt replaces any hint but a warning; the lesson's pose step says it in full.
+    @Test func tooFlatPrompt() {
+        #expect(AppRules.isTooFlat(angle: 178))
+        #expect(AppRules.isTooFlat(angle: Tuning.tooFlatAngle))
+        #expect(!AppRules.isTooFlat(angle: 160))
+        #expect(!AppRules.isTooFlat(angle: nil))
+        #expect(!AppRules.isTooFlat(angle: Double.nan))
+        #expect(AppRules.flatGuardedHint(.crowd, tooFlat: true) == .bendALittle)
+        #expect(AppRules.flatGuardedHint(nil, tooFlat: true) == .bendALittle)
+        #expect(AppRules.flatGuardedHint(.beeInside, tooFlat: true) == .beeInside)
+        #expect(AppRules.flatGuardedHint(.crowd, tooFlat: false) == .crowd)
+        #expect(AppRules.hintText(.bendALittle, touch: false) == "Fold it a little")
+        #expect(AppRules.hintText(.bendALittle, touch: true) == nil)
+        #expect(LessonScript.bendALittle.hasPrefix(AppRules.tooFlatCopy))
+        #expect(LessonScript.numbered(touch: false).count == 5)
+        #expect(LessonScript.numbered(touch: true).count == 4)
+        // The triple step's card says wait; the "Now!" plate says now.
+        #expect(!LessonScript.line(.triple, touch: true).lowercased().contains("now"))
+        #expect(!LessonScript.line(.triple, touch: false).lowercased().contains("now"))
+    }
+
+    /// #17: a bee's halo over the trap's edge counts as beside the trap (no "Hungry… bite!").
+    @Test func haloOnTheEdge() {
+        let g = ScreenLayout(hasFold: true).geometry
+        let edge = BugState(id: 1, species: .bee, position: CGPoint(x: g.center.x + g.a + 10, y: g.center.y),
+                            heading: 0, activity: .walking, height: 0, inTrap: false, onRim: false)
+        let far = BugState(id: 2, species: .bee, position: CGPoint(x: g.center.x + g.a + 200, y: g.center.y),
+                           heading: 0, activity: .walking, height: 0, inTrap: false, onRim: false)
+        #expect(AppRules.haloReaches(edge.position, species: .bee, geometry: g))
+        #expect(!AppRules.haloReaches(far.position, species: .bee, geometry: g))
+        #expect(AppRules.protectedHaloInTrap(TrapSnapshot(bugs: [edge]), geometry: g))
+        #expect(!AppRules.protectedHaloInTrap(TrapSnapshot(bugs: [far]), geometry: g))
+        #expect(!AppRules.haloReaches(CGPoint(x: CGFloat.nan, y: 0), species: .bee, geometry: g))
+    }
+
+    /// #7, #10, #15: Results' words.
+    @Test func resultsWords() throws {
+        #expect(GameController.feedTitle(newBest: true) == "What a feast!")
+        #expect(GameController.feedTitle(newBest: false) == "Your trap is tired")
+        #expect(ResultsView.zenLine(bugs: 94, seconds: 150) == "94 bugs in 2:30 · no best kept")
+        #expect(ResultsView.zenLine(bugs: 1, seconds: 59.6) == "1 bug in 1:00 · no best kept")
+        #expect(ResultsView.zenLine(bugs: 3, seconds: Double.nan) == "3 bugs in 0:00 · no best kept")
+        #expect(ResultsView.stripBiteTitle(5) == "5-bug bite")
+        #expect(ResultsView.stripBiteTitle(1) == "Best bite")
+        #expect(ResultsView.Fit.allCases.first == .full)
+        #expect(ResultsView.Fit.allCases.last == .tightest)
+        // The next goal: a goal just drawn first, else the first one still open.
+        let spec = try #require(GoalBook.pool.first)
+        let line = GoalLine.make(spec, progress: 0, done: false)
+        #expect(line.tier == spec.tier)
+        #expect(line.tierLabel == spec.tier.label)
+        var o = RecordOutcome()
+        o.goalLines = [GoalLine.make(spec, progress: 0, done: true)]
+        #expect(ResultsView.nextGoal(o) == nil)
+        o.newGoals = [spec.id]
+        #expect(ResultsView.nextGoal(o)?.id == spec.id)
+        #expect(ResultsView.nextGoalText(line) == "Next goal: " + spec.title)
+        for t in [GoalTier.easy, .medium, .hard] { _ = GoalRow.tierColor(t) }
+    }
+
+    /// #19: the Garden's rules in one style; every locked card the same silhouette.
+    @Test func gardenRulesInOneStyle() {
+        for v in TrapVariety.allCases {
+            let rule = VarietyBridge.rule(v)
+            switch Varieties.info(v).unlock {
+            case .start: #expect(!rule.isEmpty)
+            case .rank: #expect(rule.hasPrefix("Rank: "))
+            case .goal: #expect(rule.hasPrefix("Goal: "))
+            }
+            #expect(GardenTrapImage.drawn(v, grown: false) == .classic)
+            #expect(GardenTrapImage.drawn(v, grown: true) == v)
+        }
+    }
+
+    /// #10, #13: the Zen badge; "SNAPS" at every size.
+    @Test func hudLabels() {
+        #expect(ScoreBlock.caption(passedBest: true, best: 9, daily: nil, zen: true) == "ZEN BOG")
+        #expect(ScoreBlock.caption(passedBest: false, best: 0, daily: nil) == "SCORE")
+        let phone = CGSize(width: 874, height: 402)
+        let duo = CGSize(width: 951, height: 669)
+        let canvases = [AppCanvas(size: duo, insets: EdgeInsets(), layout: ScreenLayout.make(viewSize: duo, hasFold: true)),
+                        AppCanvas(size: duo, insets: EdgeInsets(),
+                                  layout: ScreenLayout.make(viewSize: duo, hasFold: true, hudOnLeft: true)),
+                        AppCanvas(size: phone, insets: EdgeInsets(top: 0, leading: 62, bottom: 21, trailing: 62),
+                                  layout: ScreenLayout.make(viewSize: phone, hasFold: false))]
+        for c in canvases {
+            let l = HUDLayout.make(c)
+            // Either the labelled block or the row's own label.
+            #expect(l.numeralLabeled || l.snapsLabel != nil)
+            if let r = l.snapsLabel {
+                #expect(l.snaps.contains(r))
+                #expect(!r.intersects(l.numeral.insetBy(dx: 1, dy: 1)))
+                #expect(!r.intersects(l.chain))
+                for i in 0..<HUDLayout.slotCount {
+                    #expect(!r.insetBy(dx: 1, dy: 1).contains(l.glyphCenter(i)))
+                }
+                if c.hasFold { #expect(c.isFoldClear(r)) }
+            }
+        }
+        #expect(HUDLayout.glyphDuo >= 28)
+    }
+
+    /// #4 (with Scene and Core): Home's button frames go to the scene in scene space, rounded out, never NaN.
+    @Test func homeButtonFramesInSceneSpace() {
+        let duo = CGSize(width: 951, height: 669)
+        let c = AppCanvas(size: duo, insets: EdgeInsets(), layout: ScreenLayout.make(viewSize: duo, hasFold: true))
+        let button = CGRect(x: 600, y: 300, width: 300, height: 70)
+        let out = HomeView.sceneRects([button, CGRect(x: CGFloat.nan, y: 0, width: 10, height: 10), .zero], info: c)
+        #expect(out.count == 1)
+        if let r = out.first {
+            let back = c.screenRect(r)
+            #expect(back.insetBy(dx: -0.5, dy: -0.5).contains(button))
+            #expect(back.width - button.width <= 4 * c.scale + 0.5)
+        }
+    }
+
+    /// The R7 demo keys: `freezeOn=feastGulp`, `progress=story`, the Zen Results seed.
+    @Test func roundSevenDemoKeys() {
+        #if DEBUG
+        #expect(DemoMode.parse("freezeOn=feastGulp").freezeOn == .feastGulp)
+        #expect(DemoMode.parse("progress=story").progress == .story)
+        #endif
+        #expect(DemoMode.Freeze.feastGulp.isEvent)
+        #expect(DemoMode.Freeze.feastGulp.holdsSceneAtOnce)
+        #expect(!DemoMode.Freeze.bigFeast.holdsSceneAtOnce)
+        #expect(abs(DemoMode.Freeze.feastGulp.holdDelay - 0.15) < 1e-9)
+        let five = report(caught: [.gnat, .gnat, .gnat, .gnat, .housefly])
+        let three = report(caught: [.gnat, .gnat, .housefly])
+        #expect(GameController.matches(.feastGulp, TrapSnapshot(), events: [.snapped(five)]))
+        #expect(!GameController.matches(.feastGulp, TrapSnapshot(), events: [.snapped(three)]))
+        #expect(AppRules.isCrowdFeast([.snapped(five)]))
+        #expect(DemoMode.seed(for: .zen, screen: .results) == DemoMode.zenResultsSeed)
+        #expect(DemoMode.seed(for: .zen, screen: .play) == DemoMode.defaultSeed)
+        #expect(DemoMode.seed(for: .feed, screen: .results) == DemoMode.defaultSeed)
+        let story = DemoPresets.progress(.story, today: 299)
+        #expect(story.rank == 7)
+        #expect(story.unlockedVarieties.count == 5)
+        #expect(story.speciesFound == 13)
+        #expect(story.goalBook?.active.count == GoalBridge.slots)
     }
 }
 

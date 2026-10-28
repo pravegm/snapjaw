@@ -123,7 +123,7 @@ enum Achievements {
         check(monarch, PlantRanks.rank(forLifetimeBugs: lifetimeBugs) == PlantRanks.count - 1)
         check(night, run.waves >= Tuning.nightWave)
         check(daily, scoredDaily)
-        check(score10k, run.score >= 10_000)
+        check(score10k, run.score >= Tuning.wellFedScore)
         check(nobees, run.bugsCaught >= 30 && run.stings == 0)
         return out
     }

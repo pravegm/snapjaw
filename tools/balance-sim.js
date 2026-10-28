@@ -39,16 +39,22 @@
 // R6: the Zen Bog (SessionOptions.for(.zen): snaps never run out, no hunger, stingers cost nothing, the day loops every
 // zenDayWaves and the late ramp never starts: TrapRules.paceWave), and the last light (Feed and Daily: from lastLightWave the
 // hunger clock ticks whatever is in the trap, so a hand that never gives up still ends) (design/notes/core-R6.md).
+// R7: the FEAST multiplier (a clean bite of >= bigFeastCount scores x feastMultiplier: TrapRules.bitePoints), and
+// the night pool (day bugs x nightDayBugWeight, fireflies and crickets lead) (design/notes/core-R7.md).
+//   node tools/balance-sim.js night=1              # R7: who lands in the trap at night (waves 23-90)
 'use strict';
 
 // MARK: Tuning (mirror of Snap/Core/Tuning.swift)
 const T = {
   // economy (GAME-DESIGN §5)
   startSnaps: 10, maxSnaps: 14, snapCost: 1, feastCount: 3, feastRefund: 1, bigFeastCount: 5, bigFeastRefund: 2,
+  // R7 (#3): a clean bite of >= bigFeastCount scores x this, on top of the chain (TrapRules.bitePoints / feastBonus)
+  feastMultiplier: 2.0,
   scarabRefund: 2, ladybirdRefund: 1, beeCost: 1, waspCost: 2, chainStep: 0.5, chainMaxMultiplier: 5,
   // bite (GAME-DESIGN §4)
   sipReactionFactor: 1.35, flyingReactionFactor: 0.55, rimReactionFactor: 0.6, catchableHeight: 0.6,
-  lateWaveStart: 30, lateReactionDecay: 0.96, lateReactionFloor: 0.2, lateLingerDecay: 0.92, lateLingerFloor: 0.2,
+  // R7 (#14): reactions x 0.955 and lingers x 0.91 per late wave (R6: 0.96 / 0.92), so the expert p90 sits <= 340 s on 8 seeds
+  lateWaveStart: 30, lateReactionDecay: 0.955, lateReactionFloor: 0.2, lateLingerDecay: 0.91, lateLingerFloor: 0.2,
   // waves (GAME-DESIGN §6)
   firstWaveTime: 1.2, waveDelayMin: 3.0, waveDelayMax: 4.5,
   noonWave: 7, duskWave: 15, nightWave: 23, deepNightWave: 31,
@@ -62,6 +68,8 @@ const T = {
   beeChanceNight2: 0.15, extraBeeEvery: 40, maxProtectedPerWave: 4, beeLingerFactor: 0.6,
   sizeFirstMin: 2, sizeFirstMax: 3, sizeMorningMin: 2, sizeMorningMax: 4, sizeNoonMin: 2, sizeNoonMax: 4,
   sizeDuskMin: 2, sizeDuskMax: 4, sizeNightMin: 2, sizeNightMax: 5,
+  // R7 (#14): the night pool: day bugs x nightDayBugWeight, fireflies and crickets lead
+  nightDayBugWeight: 0.3, nightFireflyWeight: 8, nightCricketWeight: 6,
   crowdFromWave: 3, crowdChance: 0.45, crowdSpread: 0.1, trickleMin: 0.6, trickleMax: 1.2, beeSpread: 2.5,
   passerChance: 0.12, beePasserChance: 0.15, maxWaveBugs: 7, maxBugsOnScreen: 18,
   scarabFromWave: 7, scarabChance: 1 / 12, gnatFromWave: 4, spotRadius: 0.75,
@@ -293,13 +301,15 @@ function lingerRange(ph, index) {
   }
 }
 function pool(ph, index) {
-  const out = [['housefly', 6], ['fruitFly', 3]];
-  if (index >= T.gnatFromWave) out.push(['gnat', 2]);
-  if (ph >= NOON) out.push(['bluebottle', 3], ['grasshopper', 2]);
+  // R7 (#14): at night the day bugs thin out (x nightDayBugWeight) and fireflies and crickets lead the pool
+  const k = ph >= NIGHT ? T.nightDayBugWeight : 1;
+  const out = [['housefly', 6 * k], ['fruitFly', 3 * k]];
+  if (index >= T.gnatFromWave) out.push(['gnat', 2 * k]);
+  if (ph >= NOON) out.push(['bluebottle', 3 * k], ['grasshopper', 2 * k]);
   // ants and ladybirds are day bugs: they go home at dusk
   if (ph === NOON) out.push(['ant', 2], ['ladybird', 2]);
   if (ph >= DUSK) out.push(['moth', 3], ['mosquito', 3], ['dragonfly', 1.5]);
-  if (ph >= NIGHT) out.push(['firefly', 3], ['cricket', 2.5]);
+  if (ph >= NIGHT) out.push(['firefly', T.nightFireflyWeight], ['cricket', T.nightCricketWeight]);
   return out;
 }
 function pickWeighted(p, r) {
@@ -965,7 +975,9 @@ class Session {
     let sum = 0; for (const s of caught) sum += info(s).points;
     // R3 (REVIEW-2 #8): a bite with a stinger in it scores x1 and refunds nothing (the sting cost stays)
     const mult = stung ? 1 : chainMultiplier(this.chain);
-    const points = Math.round(sum * n * mult);
+    // R7 (#3, founder call): a clean bite of >= bigFeastCount scores x feastMultiplier (TrapRules.feastBonus)
+    const feastX = (!stung && n >= T.bigFeastCount) ? T.feastMultiplier : 1;
+    const points = Math.round(sum * n * mult * feastX);
     let back = 0;
     if (!stung) {
       if (n >= T.bigFeastCount) back += T.bigFeastRefund; else if (n >= T.feastCount) back += T.feastRefund;
@@ -1311,6 +1323,24 @@ function zenTable(seeds, base, stride, skills) {
   }
   return out;
 }
+// R7 (#14): who lands in the trap at night: waves nightWave..90 of each seed, catchable bugs that land in the trap
+// (mirror of CoreTests' nightIsFirefliesAndCrickets)
+function nightShare(seeds, base, stride) {
+  const g = new Geo(SCENE.w, SCENE.h); const counts = {}; let total = 0;
+  for (let i = 0; i < seeds; i++) {
+    const seed = u64(BigInt(base + i * stride));
+    for (let w = T.nightWave; w <= 90; w++) {
+      const block = Math.floor((w - 1) / T.nectarReseedWaves);
+      const nectar = nectarDrops(nectarSeed(seed, block), g);
+      for (const b of makeWave(seed, w, g, nectar, false).bugs) {
+        if (isProtected(b.species) || !b.landsInTrap) continue;
+        counts[b.species] = (counts[b.species] || 0) + 1; total += 1;
+      }
+    }
+  }
+  let top = ''; for (const [k, v] of Object.entries(counts)) if (!top || v > counts[top]) top = k;
+  return { total, counts, top, share: ((counts.firefly || 0) + (counts.cricket || 0)) / Math.max(total, 1) };
+}
 function zenLine(sk, m) { return `SNAP-BAL zen ${sk} 600 s: caught=${m.caught} minLate120s=${m.minLate} stings=${m.stings} chain=${m.chain} waves=${m.waves} tired=${m.tired} snapsChanged=${m.snapsChanged} maxWilts=${m.wilts}`; }
 function pct(a, p) { if (a.length === 0) return 0; const s = a.slice().sort((x, y) => x - y); const pos = (s.length - 1) * p; const lo = Math.floor(pos); const hi = Math.min(s.length - 1, lo + 1); return s[lo] + (s[hi] - s[lo]) * (pos - lo); }
 const KEYS = ['score', 'seconds', 'snaps', 'caught', 'stings', 'feasts', 'dry', 'waves', 'chain', 'biggest', 'spared', 'wilts'];
@@ -1319,9 +1349,12 @@ function medians(runs) {
   for (const k of KEYS) m[k] = pct(runs.map((r) => r[k]), 0.5);
   m.maxStings = Math.max(...runs.map((r) => r.stings));
   m.maxWilts = Math.max(...runs.map((r) => r.wilts));
+  m.p90seconds = pct(runs.map((r) => r.seconds), 0.9);
   m.capped = runs.filter((r) => r.capped).length;
   return m;
 }
+// R7: the "Well Fed" achievement's score (Achievements.score10k, R6's 10,000; not a balance value, so not in T)
+const WELL_FED = 10000;
 // MARK: Targets (mirror of SnapTests/BalanceTests.swift)
 function checks(med) {
   const out = [];
@@ -1342,6 +1375,12 @@ function checks(med) {
   if (e) out.push([`expert wilts <= 6 (${e.wilts})`, e.wilts <= 6]);
   // R6 (#19): an expert run lasts at most about 6 minutes (median)
   if (e) out.push([`expert seconds <= 360 (${e.seconds.toFixed(1)})`, e.seconds <= 360]);
+  // R7 (#14): ... and nine expert runs in ten (p90), with the night pool led by fireflies and crickets
+  if (e) out.push([`expert p90 seconds <= 360 (${e.p90seconds.toFixed(1)})`, e.p90seconds <= 360]);
+  if (med.night) {
+    out.push([`night: fireflies + crickets >= 40% of landing bugs (${(med.night.share * 100).toFixed(1)}%)`, med.night.share >= 0.4]);
+    out.push([`night: the firefly is the commonest landing bug (${med.night.top})`, med.night.top === 'firefly']);
+  }
   // R6 (#19): with the last light even a hand that never gives up ends (the nogiveup rows)
   for (const [tag, m] of [['expert', med.nogiveupExpert], ['perfect', med.nogiveupPerfect]]) if (m) out.push([`${tag} without pilotGiveUp never capped (${m.capped})`, m.capped === 0]);
   // R6: the Zen Bog never tires or wilts, keeps its snaps, and the pilot still catches in its last 2 minutes
@@ -1357,6 +1396,8 @@ function checks(med) {
   if (p) out.push([`perfect never stung (max ${p.maxStings})`, p.maxStings === 0]);
   if (n && c) out.push([`novice < casual (${n.score} < ${c.score})`, n.score < c.score]);
   if (c && e) out.push([`casual < expert (${c.score} < ${e.score})`, c.score < e.score]);
+  // R7 (#3): "Well Fed" (Tuning.wellFedScore, not in T) sits above the casual median and at or below the expert's
+  if (c && e) out.push([`casual < Well Fed ${WELL_FED} <= expert (${c.score}, ${e.score})`, c.score < WELL_FED && WELL_FED <= e.score]);
   if (e && p) out.push([`expert <= perfect (${e.score} <= ${p.score})`, e.score <= p.score]);
   for (const sk of ['novice', 'casual', 'expert', 'perfect']) if (med[sk]) out.push([`${sk} never capped (${med[sk].capped})`, med[sk].capped === 0]);
   return out;
@@ -1431,6 +1472,13 @@ function main() {
     }
     console.log(`CREASE resting frames=${rests} too close=${bad} worst slack=${worst.toFixed(2)} pt`);
     console.log(`CREASE band frames=${banded} low=${low} ${JSON.stringify(lowKinds)}`);
+    return;
+  }
+  if (args.night) {
+    // R7 (#14): who lands in the trap at night
+    const nt = nightShare(seeds, base, stride);
+    console.log(`NIGHT bugs=${nt.total} firefly+cricket=${(nt.share * 100).toFixed(1)}% top=${nt.top} ${JSON.stringify(nt.counts)}`);
+    for (const [name, ok] of checks({ night: nt })) console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`);
     return;
   }
   if (args.zen) {

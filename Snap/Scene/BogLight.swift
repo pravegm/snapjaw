@@ -54,12 +54,15 @@ final class BogLight {
             lift: RGBA(1, 0.58, 0.5), liftAlpha: 0.14, sky: RGBA(1, 0.6, 0.44), skyAlpha: 0.52),
         // R6 (#5): a blue night, not teal: the multiply keeps only a little red and green, and a faint blue lift and
         // sky glow from the top make the bog a deep moonlit blue (≈ #0B2B4A bottom → #1A3E77 top).
-        Key(env: RGBA(0.28, 0.4, 1.0), haze: RGBA(0.3, 0.42, 0.95), hazeAlpha: 0.08, bug: RGBA(0.3, 0.38, 0.75),
-            bugAmount: 0.3, lobe: RGBA(0.05, 0.04, 0.1), rim: RGBA(0.66, 0.76, 1), rimAlpha: 0.3,
-            lift: RGBA(0.22, 0.32, 0.9), liftAlpha: 0.07, sky: RGBA(0.3, 0.4, 1), skyAlpha: 0.1),
-        Key(env: RGBA(0.24, 0.34, 0.95), haze: RGBA(0.25, 0.32, 0.85), hazeAlpha: 0.07, bug: RGBA(0.26, 0.32, 0.7),
-            bugAmount: 0.36, lobe: RGBA(0.04, 0.03, 0.08), rim: RGBA(0.62, 0.72, 1), rimAlpha: 0.28,
-            lift: RGBA(0.2, 0.28, 0.85), liftAlpha: 0.06, sky: RGBA(0.28, 0.36, 0.95), skyAlpha: 0.08),
+        // R7 (#14): night reads as night. A deeper blue grade: the multiply keeps less green (no teal), a bluer lift and
+        // sky glow, and the trap's overlay is a dark navy (it still darkens the crimson without turning it violet);
+        // a navy vignette closes in (`vignetteRGBA`) and the bog's fireflies glow bigger and steadier.
+        Key(env: RGBA(0.2, 0.3, 0.92), haze: RGBA(0.28, 0.4, 0.95), hazeAlpha: 0.08, bug: RGBA(0.3, 0.38, 0.75),
+            bugAmount: 0.3, lobe: RGBA(0.04, 0.06, 0.18), rim: RGBA(0.66, 0.76, 1), rimAlpha: 0.3,
+            lift: RGBA(0.16, 0.26, 0.95), liftAlpha: 0.08, sky: RGBA(0.26, 0.36, 1), skyAlpha: 0.12),
+        Key(env: RGBA(0.17, 0.26, 0.86), haze: RGBA(0.25, 0.32, 0.85), hazeAlpha: 0.07, bug: RGBA(0.26, 0.32, 0.7),
+            bugAmount: 0.36, lobe: RGBA(0.03, 0.05, 0.16), rim: RGBA(0.62, 0.72, 1), rimAlpha: 0.28,
+            lift: RGBA(0.14, 0.22, 0.9), liftAlpha: 0.07, sky: RGBA(0.24, 0.32, 0.95), skyAlpha: 0.1),
     ]
 
     /// R5 (#9, tests): the bog colour `c` as lit by `k` at sky level `skyLevel` (0 the bottom of the screen … 1 the
@@ -170,6 +173,9 @@ final class BogLight {
     /// R6 (#5): the sun glow's colour and its strength at full dusk.
     static let sunColor = RGBA(1, 0.62, 0.34)
     static let sunPeak: CGFloat = 0.42
+    /// R7 (#14, tests): the vignette's colour now (navy at night), and the night level it was set at.
+    private(set) var vignetteRGBA = BogLight.dayVignette
+    private var vignetteNight: CGFloat = -1
     private var pulseLevel: CGFloat = 0
     private var twinkles: [(SKSpriteNode, CGFloat)] = []
     private var flies: [(core: SKSpriteNode, glow: SKSpriteNode, home: CGPoint, phase: CGFloat)] = []
@@ -211,7 +217,7 @@ final class BogLight {
         h.colorBlendFactor = 1
         h.zPosition = 21
         s.zPosition = 21.5
-        v.color = UIColor(red: 0.02, green: 0.04, blue: 0.03, alpha: 1)
+        v.color = BogPaint.ui(BogLight.dayVignette)
         v.colorBlendFactor = 1
         v.zPosition = 70
     }
@@ -256,17 +262,19 @@ final class BogLight {
         }
         var rng = BogRNG(seed: 0xF1EF)
         var tries = 0
-        while flies.count < 14 && tries < 3000 {
+        while flies.count < BogLight.fireflyCount && tries < 3000 {
             tries += 1
             let p = CGPoint(x: rng.range(10, size.width - 10), y: rng.range(70, size.height - 10))
-            guard g.normalizedRadius(p) > 1.12 else { continue }
-            // R3 (#10): blooms big enough to see at arm's length.
-            let gl = SKSpriteNode(texture: BogTextures.glow, size: CGSize(width: 58, height: 58))
+            // (Off the trap, so they are never taken for the catchable fireflies.)
+            guard g.normalizedRadius(p) > 1.08 else { continue }
+            // R3 (#10): blooms big enough to see at arm's length. R7 (#14): bigger and greener-gold.
+            let gs = BogLight.fireflyGlow
+            let gl = SKSpriteNode(texture: BogTextures.glow, size: CGSize(width: gs, height: gs))
             gl.blendMode = .add
-            gl.color = BogPaint.ui(RGBA(hex: 0xCFFF5E))
+            gl.color = BogPaint.ui(BogLight.fireflyColor)
             gl.colorBlendFactor = 1
             gl.alpha = 0
-            let core = SKSpriteNode(texture: BogTextures.dot, size: CGSize(width: 8, height: 8))
+            let core = SKSpriteNode(texture: BogTextures.dot, size: CGSize(width: 9, height: 9))
             core.blendMode = .add
             core.color = BogPaint.ui(RGBA(hex: 0xF4FFC0))
             core.colorBlendFactor = 1
@@ -334,7 +342,13 @@ final class BogLight {
             rimAlpha = CGFloat(min(max(k.rimAlpha, 0), 1))
         }
         pulseLevel = BogMath.approach(pulseLevel, 0, rate: 2.6, dt: CGFloat(max(fxDt, 0)))
-        vignette.alpha = 0.2 + 0.28 * night + 0.5 * pulseLevel
+        // R7 (#14): the vignette turns navy and closes in at night.
+        if abs(night - vignetteNight) > 0.002 {
+            vignetteNight = night
+            vignetteRGBA = BogLight.dayVignette.mixed(with: BogLight.nightVignette, Double(night))
+            vignette.color = BogPaint.ui(vignetteRGBA)
+        }
+        vignette.alpha = 0.2 + 0.34 * night + 0.5 * pulseLevel
 
         let day = 1 - 0.8 * night
         for (n, ph) in twinkles {
@@ -356,15 +370,29 @@ final class BogLight {
             let p = CGPoint(x: f.home.x + 26 * sin(t * 0.31 + f.phase) + 8 * sin(t * 1.3 + f.phase * 2),
                             y: f.home.y + 18 * cos(t * 0.23 + f.phase) + 6 * sin(t * 1.7 + f.phase))
             let b = max(0, sin(t * 1.6 + f.phase))
-            let blink = 0.2 + 0.8 * b * b * b
+            // R7 (#14): a firefly never blinks below `fireflyFloor`, so a still frame always shows them glowing.
+            let blink = BogLight.fireflyFloor + (1 - BogLight.fireflyFloor) * b * b * b
             f.core.position = p
             f.glow.position = p
             f.core.alpha = on * blink
             f.glow.alpha = on * blink
-            f.glow.setScale(0.75 + 0.35 * blink)
+            f.glow.setScale(0.8 + 0.4 * blink)
         }
     }
 
     /// Fireflies drawn this frame (tests).
     var visibleFireflies: Int { flies.filter { !$0.glow.isHidden && $0.glow.alpha > 0.01 }.count }
+    /// R7 (#14, tests): fireflies glowing at least `fireflyFloor` × full now.
+    var glowingFireflies: Int {
+        flies.filter { !$0.glow.isHidden && $0.glow.alpha >= BogLight.fireflyFloor - 0.01 }.count
+    }
+
+    /// R7 (#14): the bog's fireflies (count, glow size, colour and their dimmest blink).
+    static let fireflyCount = 18
+    static let fireflyGlow: CGFloat = 74
+    static let fireflyColor = RGBA(hex: 0xD8FF5A)
+    static let fireflyFloor: CGFloat = 0.45
+    /// R7 (#14): the vignette's colour by day and at night.
+    static let dayVignette = RGBA(0.02, 0.04, 0.03)
+    static let nightVignette = RGBA(0.01, 0.03, 0.13)
 }

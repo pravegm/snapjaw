@@ -27,7 +27,7 @@
 # summary line is `summary: ok <n>  problems <n>`; tools/appstore/asc.swift refuses a folder with problems.
 # Env: SOURCE_RUN (the run the captures came from, for the MANIFEST); STORE_BANNER_BIN (compiled renderer cache;
 #      default $RUNNER_TEMP or $TMPDIR); HERO_HEADER / HERO_SEARCH (scenario names tried in order, default
-#      "D01-book-hero D02-feast"); BOOK_ANGLE (degrees, or auto = the capture's logged hinge angle if 120–170, else
+#      "D01-book-hero D02-feast"); BOOK_ANGLE (degrees, or auto = the capture's logged hinge angle if 130–150, else
 #      140); BANNER_ARGS: "header=<opts>; search=<opts>; <name>=<opts>; …" — extra ci/store-banner.swift options for
 #      the header, the search art, and any other name = a review-only variant (review/variant-<name>.png; give it
 #      `--kind header` or `--kind search`, default search). Options are split like a shell line (quotes work), and
@@ -130,7 +130,7 @@ angle_of() {   # store-set.sh's book_angle: the real hinge (SNAP-H, else SNAP-T 
     a=$(sed -nE 's/^SNAP-H [0-9.]+ ([0-9]+)(\.[0-9]+)?.*/\1/p' "$1" | tail -1)
     [[ -z "$a" ]] && a=$(sed -nE 's/.*SNAP-T hinge .*angle ([0-9]+)(\.[0-9]+)?.*/\1/p' "$1" | tail -1)
   fi
-  if [[ -n "$a" ]] && (( a >= 120 && a <= 170 )); then echo "$a"; else echo 140; fi
+  if [[ -n "$a" ]] && (( a >= 130 && a <= 150 )); then echo "$a"; else echo 140; fi   # R7: the store book is ~140° (130–150 kept)
 }
 
 WHY=""

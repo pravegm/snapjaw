@@ -75,8 +75,8 @@ struct LessonScript: Equatable {
     static let praiseCatchTouch = "CHOMP! It opens again by itself."
     static let praiseMissTouch = "Snap! It opens again by itself."
     static let waitForSip = "Wait till it's sipping…"
-    /// R4 (QA-2 #15): held flat (or nearly), the pose step says what to do.
-    static let bendALittle = "Bend it a little, like a book"
+    /// R4 (QA-2 #15): held flat (or nearly), the pose step says what to do. R7 (#12): play's words too.
+    static let bendALittle = AppRules.tooFlatCopy + ", like a book"
     /// Above this the Duo is too flat to read as a book.
     static let flatAbove: Double = 176
 
@@ -345,23 +345,30 @@ struct LessonScript: Equatable {
         }
     }
 
-    /// R5 (REVIEW-4 #11: the phone showed "Step n of 4", the Duo "Step 1 of 5" and "Step 2 of 6"): the four taught
-    /// steps are numbered the same on every iPhone. The Duo's pose step is "Get ready", and its re-arm step is part of
-    /// step 1 (the bite, then open again).
+    /// R5 (REVIEW-4 #11: the phone showed "Step n of 4", the Duo "Step 1 of 5" and "Step 2 of 6"): the taught steps
+    /// are numbered the same way on every launch of a device, and the pose step is "Get ready" (never counted).
+    /// R7 (#12, duo-ui-lesson-3-hinge-128: "STEP 1 OF 4 · Open up to reset the trap."): on a hinge the re-arm step is
+    /// a step of its own, so the counter moves on with its words: five steps on the Duo, four on phones (taps re-arm
+    /// by themselves, so phones have no re-arm step).
     static let numberedSteps: [Step] = [.firstSnap, .tooSlow, .bee, .triple]
+    static let numberedStepsHinge: [Step] = [.firstSnap, .openAgain, .tooSlow, .bee, .triple]
     static let readyLabel = "Get ready"
 
-    /// "Step 2 of 4" (the same on the Duo and on phones; `touch` and `hasPose` no longer change it). Pure; tested.
+    /// The numbered steps for an input (`touch`: phones). Pure; tested.
+    static func numbered(touch: Bool) -> [Step] { touch ? numberedSteps : numberedStepsHinge }
+
+    /// "Step 2 of 4" on phones, "Step 2 of 5" on the Duo (`hasPose` never changes it). Pure; tested.
     static func stepLabel(_ s: Step, touch: Bool, hasPose: Bool) -> String {
-        let n = numberedSteps.count
+        let steps = numbered(touch: touch)
+        let n = steps.count
         let shown: Step
         switch s {
         case .pose: return readyLabel
-        case .openAgain: shown = .firstSnap
+        case .openAgain: shown = touch ? .firstSnap : .openAgain
         case .done: shown = .triple
         case .firstSnap, .tooSlow, .bee, .triple: shown = s
         }
-        let index = (numberedSteps.firstIndex(of: shown) ?? 0) + 1
+        let index = (steps.firstIndex(of: shown) ?? 0) + 1
         return "Step \(min(index, n)) of \(n)"
     }
 
@@ -385,7 +392,8 @@ struct LessonScript: Equatable {
         case .openAgain: return touch ? "It opens again by itself." : "Open up to reset the trap."
         case .tooSlow: return touch ? "Two flies. Get both in one bite." : "Quick snaps catch more."
         case .bee: return "Never eat a bee. Wait…"
-        case .triple: return touch ? "Wait for a crowd… now tap!" : "Wait for a crowd… now!"
+        // R7 (SCORE-R6 D2 #3: the card's "…now tap!" doubled the "Now!" plate): the card says wait, the plate says now.
+        case .triple: return "Wait for a crowd of three…"
         case .done: return "Snaps run out. Big bites earn them back."
         }
     }

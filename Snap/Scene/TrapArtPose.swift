@@ -194,10 +194,12 @@ enum TrapPose {
     }
 
     /// The back crown: 13 long cilia along the back margin, fanning out at the corners, pointing away from the face.
+    /// R7 (#1): `TrapLook.heroTeeth` of them, cut `heroToothLength` × `heroToothWidth` (Sawtooth 25 short saw teeth,
+    /// Shark Tooth 9 wide triangles, B52 11 fat hairs, Fused Tooth 15 touching scallops).
     static func backCilia(_ variety: TrapVariety = .classic) -> [Hair] {
         let vl = TrapArt.look(variety)
-        let lf = vl.toothLength, wf = min(vl.toothWidth, 3.5)
-        let n = 13
+        let lf = vl.heroToothLength, wf = vl.heroToothWidth
+        let n = max(vl.heroTeeth, 2)
         var out: [Hair] = []
         let rim = backRim
         for i in 0..<n {
@@ -220,7 +222,7 @@ enum TrapPose {
     /// sides. The middle (where a fly peeks over) stays bare, so nothing reads as teeth.
     static func frontCilia(_ variety: TrapVariety = .classic) -> [Hair] {
         let vl = TrapArt.look(variety)
-        let lf = vl.toothLength, wf = min(vl.toothWidth, 3.5)
+        let lf = vl.heroToothLength, wf = min(vl.heroToothWidth, 3.2)
         let spots: [CGFloat] = [0.07, 0.17, 0.27, 0.36, 0.64, 0.73, 0.83, 0.93]
         var out: [Hair] = []
         let lip = frontLip
@@ -237,6 +239,31 @@ enum TrapPose {
                             length: length, width: 10 * unit * wf, bend: 0.2 * side, kind: vl.tooth))
         }
         return out
+    }
+
+    /// R7 (Fused Tooth): the frill's continuous base along the back rim, from the rim out to most of the scallops'
+    /// reach (never past their tips, never short of the green band), so the row reads as one frill.
+    static func frillPath(_ variety: TrapVariety) -> CGPath {
+        let vl = TrapArt.look(variety)
+        let rim = backRim
+        let minReach = backBandWidth / 2 + 4
+        let n = 48
+        let p = CGMutablePath()
+        for i in 0...n {
+            let t = CGFloat(i) / CGFloat(n)
+            let q = rim.point(t)
+            let along = rim.tangent(t)
+            let normal = CGPoint(x: -along.y, y: along.x)
+            let hair = 112 * unit * (0.55 + 0.45 * sin(.pi * t)) * vl.heroToothLength
+            let reach = max(minReach, (hair * 1.05 - 14 * unit) * 0.85)
+            let o = CGPoint(x: q.x + normal.x * reach, y: q.y + normal.y * reach)
+            if i == 0 { p.move(to: o) } else { p.addLine(to: o) }
+        }
+        for i in stride(from: n, through: 0, by: -1) {
+            p.addLine(to: rim.point(CGFloat(i) / CGFloat(n)))
+        }
+        p.closeSubpath()
+        return p
     }
 
     /// The broad stem from under the front lobe, down and to the left (the icon's, cut short in a rounded foot so the
@@ -265,10 +292,27 @@ enum TrapPose {
     /// The tilt as a transform (trap frame → drawing frame).
     static var turn: CGAffineTransform { CGAffineTransform(rotationAngle: tilt) }
 
-    /// R6: the tilt for `variety` (B52's lobes are drawn wider along the hinge first).
+    /// R7 (#1): the lobes' scale about the hinge for `variety` (`TrapLook.heroLobes`: B52 15 % larger, Cupped 22 %
+    /// deeper), before the tilt. Identity for Classic.
+    static func lobeScale(_ variety: TrapVariety) -> CGAffineTransform {
+        let s = TrapArt.look(variety).heroLobes
+        return CGAffineTransform(scaleX: s.width, y: s.height)
+    }
+
+    /// R7: how far the stem and its ground shadow drop (y up, ≤ 0), so they hang under a taller front lobe.
+    static func stemDrop(_ variety: TrapVariety) -> CGFloat {
+        let s = TrapArt.look(variety).heroLobes
+        return frontBelly.point(0.5).y * (s.height - 1)
+    }
+
+    /// R6, R7: the lobes' and cilia's transform for `variety` (trap frame → drawing frame): `lobeScale`, then the tilt.
     static func variedTurn(_ variety: TrapVariety) -> CGAffineTransform {
-        let wide = 1 + (TrapArt.look(variety).spread - 1) * 2
-        return CGAffineTransform(scaleX: wide, y: 1).concatenating(CGAffineTransform(rotationAngle: tilt))
+        lobeScale(variety).concatenating(turn)
+    }
+
+    /// R7: the stem's and its shadow's transform for `variety`: `stemDrop`, then the tilt (never scaled).
+    static func stemTurn(_ variety: TrapVariety) -> CGAffineTransform {
+        CGAffineTransform(translationX: 0, y: stemDrop(variety)).concatenating(turn)
     }
 
     static func normalized(_ p: CGPoint) -> CGPoint {
@@ -307,14 +351,17 @@ enum TrapPose {
                 }
             }
         }
-        let sh = groundShadow
-        pts += [CGPoint(x: sh.center.x - sh.rx, y: sh.center.y), CGPoint(x: sh.center.x + sh.rx, y: sh.center.y),
-                CGPoint(x: sh.center.x, y: sh.center.y - sh.ry)]
         var box = CGRect.null
-        var k = variedTurn(variety)
+        let k = variedTurn(variety)
         for p in pts { box = box.union(CGRect(origin: p.applying(k), size: .zero)) }
+        // R7: the ground shadow and the stem hang under the lobes (dropped, never scaled).
+        var st = stemTurn(variety)
+        let sh = groundShadow
+        let feet = [CGPoint(x: sh.center.x - sh.rx, y: sh.center.y), CGPoint(x: sh.center.x + sh.rx, y: sh.center.y),
+                    CGPoint(x: sh.center.x, y: sh.center.y - sh.ry)]
+        for p in feet { box = box.union(CGRect(origin: p.applying(st), size: .zero)) }
         // The stem, turned (its own tight bounds, outline included).
-        if let stem = stemPath().copy(using: &k) {
+        if let stem = stemPath().copy(using: &st) {
             box = box.union(stem.boundingBoxOfPath.insetBy(dx: -1.5, dy: -1.5))
         }
         return box.insetBy(dx: -8, dy: -8)
@@ -354,10 +401,12 @@ enum TrapPose {
     static func draw(_ ctx: CGContext, sippingBug: BugSpecies?, variety: TrapVariety = .classic) {
         let vl = TrapArt.look(variety)
         ctx.saveGState()
-        ctx.concatenate(variedTurn(variety))
+        ctx.concatenate(turn)
         let u = unit
 
-        // The soft ground shadow and the stem, behind the trap.
+        // The soft ground shadow and the stem, behind the trap (R7: dropped under a taller lobe, `stemTurn`).
+        ctx.saveGState()
+        ctx.translateBy(x: 0, y: stemDrop(variety))
         let sh = groundShadow
         BogPainter.ellipticalRadial(ctx, [RGBA(0, 0.05, 0.02, 0.45), RGBA(0, 0.05, 0.02, 0.3), RGBA(0, 0.05, 0.02, 0)],
                                     [0, 0.55, 1], center: sh.center, rx: sh.rx, ry: sh.ry)
@@ -365,7 +414,16 @@ enum TrapPose {
         BogPainter.stroke(ctx, stem, TrapArt.lobeOutline, width: 2.2, 0.8)
         BogPainter.gradient(ctx, stem, [leafDark, leafLight, leafDark], [0, 0.5, 1], from: icon(-270, 0),
                             to: icon(40, 0))
+        ctx.restoreGState()
+        // R7 (#1): the lobes and everything on them, scaled about the hinge (`variedTurn`).
+        ctx.concatenate(lobeScale(variety))
 
+        // R7 (Fused Tooth): the frill's continuous base, under its scallops.
+        if let frill = vl.heroFrill {
+            let f = frillPath(variety)
+            BogPainter.stroke(ctx, f, vl.outline, width: 2.2, 0.75)
+            BogPainter.fill(ctx, f, frill)
+        }
         // The back crown of cilia (their roots tuck under the green band).
         drawHairs(ctx, backCilia(variety), shadow: CGPoint(x: 3 * u, y: -7 * u), shadowColor: RGBA(hex: 0x051E0C),
                   shadowAlpha: 0.35, color: vl.heroCilium, outline: vl.outline, sheen: vl.sheen)
@@ -376,6 +434,8 @@ enum TrapPose {
         BogPainter.stroke(ctx, rim, vl.heroLeafDark, width: backBandWidth)
         strokeGradient(ctx, rim, width: backMarginWidth, [vl.heroMargin, vl.heroMarginDeep], [0, 1],
                        from: icon(0, -300), to: icon(0, 0))
+        // R7 (Cupped): a dark line down the margin.
+        if let line = vl.heroRimLine { BogPainter.stroke(ctx, rim, line, width: 9 * u, 0.8) }
 
         // The glossy crimson face: hot at the top, deep down towards the hidden hinge. No stipple, no veins.
         let mouth = facePath()
@@ -399,8 +459,11 @@ enum TrapPose {
         BogPainter.fill(ctx, BogPainter.ellipse(icon(70, -262), 22 * u, 13 * u, rotation: 0.1), RGBA(1, 1, 1),
                         min(0.45 * gl, 0.9))
         if vl.gloss > 1.3 {
+            // R7 (Cupped): a strong second glint low on the deep face, and a wet sheen across its bottom.
             BogPainter.fill(ctx, BogPainter.ellipse(icon(150, -150), 60 * u, 14 * u, rotation: -0.5), RGBA(1, 1, 1),
-                            0.35)
+                            min(0.22 * gl, 0.6))
+            BogPainter.fill(ctx, BogPainter.ellipse(icon(-40, -40), 120 * u, 16 * u, rotation: 0.05), RGBA(1, 0.9, 0.94),
+                            min(0.12 * gl, 0.3))
         }
         ctx.restoreGState()
 
@@ -430,6 +493,7 @@ enum TrapPose {
         // …its lime lip, and the fringe of cilia over the outside.
         strokeGradient(ctx, curvePath(frontLip), width: frontMarginWidth, [vl.heroMargin, vl.heroMarginDeep], [0, 1],
                        from: icon(0, 0), to: icon(0, 170))
+        if let line = vl.heroRimLine { BogPainter.stroke(ctx, curvePath(frontLip), line, width: 8 * u, 0.8) }
         drawHairs(ctx, frontCilia(variety), shadow: CGPoint(x: 3 * u, y: -6 * u), shadowColor: RGBA(hex: 0x0E3A16),
                   shadowAlpha: 0.4, color: vl.heroCilium, outline: vl.outline, sheen: vl.sheen)
         if vl.sparkle {

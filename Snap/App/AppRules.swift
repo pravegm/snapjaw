@@ -84,7 +84,8 @@ enum AppRules {
     /// don't apply. Pure; tested.
     static func hintText(_ hint: TrapHint, touch: Bool) -> String? {
         switch hint {
-        case .bendALittle: return touch ? nil : "Bend it, like a book"
+        // R7 (#12, duo-ui-too-flat-178): the Duo held (nearly) flat says what to do: "Fold it a little".
+        case .bendALittle: return touch ? nil : tooFlatCopy
         case .quick: return touch ? nil : "Snap it — quick!"
         case .openUp: return touch ? nil : "Open up to reset"
         case .beeInside: return "Bee! Wait…"
@@ -92,6 +93,24 @@ enum AppRules {
         case .lastSnap: return "Last snap! Make it count"
         case .hungry: return "Hungry… bite!"
         }
+    }
+
+    /// R7 (#12): the too-flat prompt on play's plate (short, so it fits the narrowest plate in the big type); the
+    /// lesson's pose step says it in full (`LessonScript.bendALittle`).
+    static let tooFlatCopy = "Fold it a little"
+
+    /// R7 (#12): the Duo is held too flat to read as a book (Core's own `Tuning.tooFlatAngle`, 174°). Pure; tested.
+    static func isTooFlat(angle: Double?) -> Bool {
+        guard let a = angle, a.isFinite else { return false }
+        return a >= Tuning.tooFlatAngle
+    }
+
+    /// R7 (#12): play's state hint with the too-flat prompt folded in: on a hinge held too flat it replaces any hint
+    /// but a warning (a bee inside, the last snap, hunger: those still matter more). Pure; tested.
+    static func flatGuardedHint(_ hint: TrapHint?, tooFlat: Bool) -> TrapHint? {
+        guard tooFlat else { return hint }
+        if let h = hint, hintIsWarning(h) { return h }
+        return .bendALittle
     }
 
     /// R4 (REVIEW-3 #3, the founder's copy): Sprout's free first sting, in the hint slot.
@@ -145,6 +164,15 @@ enum AppRules {
         switch hint {
         case .trap, .foldInput, .nightCue: return false
         case .beesCost, .chainTag, .goalDone: return true
+        }
+    }
+
+    /// R7 (#5): a plate that is a moment from the message queue (a toast), not a state: it waits (its clock still)
+    /// rather than cover the bugs on the trap. Core's hints and the fold line are states and always show. Pure; tested.
+    static func hudHintIsToast(_ hint: HUDHint) -> Bool {
+        switch hint {
+        case .trap, .foldInput: return false
+        case .beesCost, .chainTag, .goalDone, .nightCue: return true
         }
     }
 
@@ -300,11 +328,51 @@ enum AppRules {
     }
 
     /// The one-time label on the first Feast's flying glyph ("+1 snap", "+2 snaps"). R4 (ROUND-4 "+1 (full)"): a
-    /// refund that the full row can't hold says so. Pure; tested.
+    /// refund that the full row can't hold says so. R7 (#5, SCORE-R6 D2 #2: "+2 (full)" was never explained): in plain
+    /// words, "+2 snaps (row full)". Pure; tested.
     static func snapGainText(_ n: Int, full: Bool = false) -> String {
         let k = max(n, 1)
-        if full { return "+\(k) (full)" }
-        return "+\(k) \(k == 1 ? "snap" : "snaps")"
+        let snaps = "+\(k) \(k == 1 ? "snap" : "snaps")"
+        return full ? snaps + " (row full)" : snaps
+    }
+
+    /// R7 (#5: "Lucky!" and "Golden!" were never explained): the lucky bug's plain name.
+    static func luckyName(_ s: BugSpecies) -> String {
+        s == .goldenScarab ? "Golden scarab" : BugCatalog.info(s).name
+    }
+
+    /// R7 (#5): the lucky bug's line in plain words: "Golden scarab! +2 snaps", "Ladybird! +1 snap" (the Zen Bog has
+    /// no snaps to win: "Golden scarab!"). For the Scene's line under the bite (design/notes/app-R7.md). Pure; tested.
+    static func luckyText(_ s: BugSpecies, snaps: Bool = true) -> String {
+        let name = luckyName(s) + "!"
+        guard snaps else { return name }
+        let k = max(s == .goldenScarab ? Tuning.scarabRefund : Tuning.ladybirdRefund, 1)
+        return name + " +\(k) \(k == 1 ? "snap" : "snaps")"
+    }
+
+    /// R7 (#3, #5): the one tag a bite's refund gets at the snaps row, or nil (most bites say nothing there):
+    /// - a lucky bug names itself ("Golden scarab! +2 snaps");
+    /// - a FEAST event shows its refill ("FEAST! +2 snaps");
+    /// - a refund the full row can't hold says so ("+2 snaps (row full)");
+    /// - the player's first Feast ever is labelled once ("+1 snap").
+    /// `back`: the bite's whole refund (`BiteReport.snapsBack`). Pure; tested.
+    static func biteGainText(back: Int, full: Bool, lucky: [BugSpecies], bigFeast: Bool, firstFeast: Bool) -> String? {
+        guard back > 0 else { return nil }
+        let k = max(back, 1)
+        let snaps = "+\(k) \(k == 1 ? "snap" : "snaps")" + (full ? " (row full)" : "")
+        if let s = lucky.first { return luckyName(s) + "! " + snaps }
+        if bigFeast { return "FEAST! " + snaps }
+        if full || firstFeast { return snaps }
+        return nil
+    }
+
+    /// R7 (#3, SCORE-R6 D2 #2: "×" meant the bug count and the chain at once): the bite's callout counts bugs in
+    /// words, "5 bugs · +540" ("+12" for one bug); "×" is only ever the chain. For the Scene's pop
+    /// (design/notes/app-R7.md). Pure; tested.
+    static func biteCallout(count n: Int, points: Int) -> String {
+        let p = "+" + formatted(max(points, 0))
+        guard n >= 2 else { return p }
+        return "\(n) bugs · " + p
     }
 
     /// R5 (REVIEW-4 #7, founder call): a costly sting's tag at the row, the mirror of "+1 snap": "−1 snap",
@@ -316,8 +384,10 @@ enum AppRules {
 
     // MARK: R5: the score word, the tired banner, the bee guard, the Daily share
 
-    /// R5 (REVIEW-4 #13, founder call): the score's word in the UI (the leaderboard stays "Best Feast").
+    /// R5 (REVIEW-4 #13, founder call): the score's word in the UI. R7 (#8): the leaderboard's display name is "Best
+    /// Score" too ("Feast" is a 3+ bite).
     static let scoreWord = "score"
+    static let leaderboardName = "Best Score"
 
     /// R5 (REVIEW-4 #4, with Feel's `afterLoss`): the tired banner waits this long after the bite (session s into the
     /// tired moment), so the numeral has dropped first.
@@ -325,8 +395,11 @@ enum AppRules {
     /// If the numeral still hasn't reached 0 this far in (the Scene's crack held up, the scene paused), it is set to 0,
     /// so the banner can follow.
     static let tiredNumeralLimit: Double = 0.8
-    /// Demo `freezeOn=tired` holds here: the numeral at 0 and the banner up.
-    static let tiredFreezeAt: Double = 1.0
+    /// R7 (#5, frame 19: "+12", "×1.5 held" and the banner at once): while the last bite's pops are still up the
+    /// banner waits for them, until this far into the tired moment at the latest.
+    static let tiredBannerLatest: Double = 1.5
+    /// Demo `freezeOn=tired` holds here: the numeral at 0, the bite's pops gone and the banner up.
+    static let tiredFreezeAt: Double = 1.6
 
     /// Seconds into the tired moment (nil while the trap is in play or the run is over). Pure; tested.
     static func tiredElapsed(_ phase: RunPhase) -> Double? {
@@ -336,9 +409,11 @@ enum AppRules {
 
     /// "Your trap is tired." shows only once the numeral shows 0, and at least `tiredBannerDelay` after the bite
     /// (REVIEW-4 #4: 19 and 40 showed it over a 1 and a 2). Pure; tested.
-    static func showsTiredBanner(phase: RunPhase, shownSnaps: Int) -> Bool {
+    /// R7 (#5): `popsLive`: the Scene's pops are still on screen, so the banner waits (to `tiredBannerLatest`).
+    static func showsTiredBanner(phase: RunPhase, shownSnaps: Int, popsLive: Bool = false) -> Bool {
         guard let t = tiredElapsed(phase) else { return false }
-        return shownSnaps <= 0 && t >= tiredBannerDelay
+        guard shownSnaps <= 0 && t >= tiredBannerDelay else { return false }
+        return !popsLive || t >= tiredBannerLatest
     }
 
     /// The numeral in the tired moment: what it would show, or 0 once `tiredNumeralLimit` has passed. Pure; tested.
@@ -349,12 +424,28 @@ enum AppRules {
 
     /// R5 (REVIEW-4 #5, founder call, belt and braces): a protected bug's halo is inside the trap zone (the Scene draws
     /// the halo on every protected bug that isn't being caught). Pure; tested.
+    /// R7 (#17, frame 33: "Hungry… bite!" beside a halo on the trap's edge): the halo counts, not just the bee's
+    /// centre: a bee outside the zone whose halo (and a little margin) reaches the trap's edge is beside the trap too.
     static func protectedHaloInTrap(_ s: TrapSnapshot, geometry g: TrapGeometry) -> Bool {
         s.bugs.contains { b in
             guard b.species.isProtected else { return false }
             if case .caught = b.activity { return false }
-            return b.inTrap || g.contains(b.position)
+            if b.inTrap || g.contains(b.position) { return true }
+            return haloReaches(b.position, species: b.species, geometry: g)
         }
+    }
+
+    /// R7 (#17): the margin past the halo's drawn edge that still counts as touching the trap (scene points).
+    static let haloMargin: CGFloat = 8
+
+    /// R7 (#17): a protected bug at `p` has its halo (the Scene's ring, `TrapArt.protectedRingScale` × its radius,
+    /// plus `haloMargin`) over the trap zone's edge: `p` is inside the zone grown by that halo. Pure; tested.
+    static func haloReaches(_ p: CGPoint, species: BugSpecies, geometry g: TrapGeometry) -> Bool {
+        guard p.x.isFinite, p.y.isFinite, g.a > 0, g.b > 0 else { return false }
+        let halo = BugCatalog.info(species).radius * TrapArt.protectedRingScale + 4 + haloMargin
+        let dx = (p.x - g.center.x) / (g.a + halo)
+        let dy = (p.y - g.center.y) / (g.b + halo)
+        return dx * dx + dy * dy <= 1
     }
 
     /// The App never shows "Hungry… bite!" while a halo is inside the zone: it says "Bee! Wait…" instead. Pure; tested.
@@ -380,6 +471,15 @@ enum AppRules {
     static func isBigFeast(_ events: [TrapEvent]) -> Bool {
         events.contains { e in
             if case let .snapped(r) = e { return FeastEvent.isBig(r) }
+            return false
+        }
+    }
+
+    /// R7 (demo `freezeOn=feastGulp`): a FEAST event of 5+ bugs (a ×4-chain FEAST of fewer bugs has no crowd to
+    /// gulp). Pure; tested.
+    static func isCrowdFeast(_ events: [TrapEvent]) -> Bool {
+        events.contains { e in
+            if case let .snapped(r) = e { return FeastEvent.isBig(r) && r.caught.count >= FeastEvent.count }
             return false
         }
     }
@@ -488,14 +588,14 @@ enum AppRules {
         return f.string(from: NSNumber(value: n)) ?? "\(n)"
     }
 
-    /// "Double ×2", "Triple ×3", "Quad ×4", "FEAST ×5" (GAME-DESIGN §5), nil for one bug.
+    /// "Double", "Triple", "Quad", "FEAST" (GAME-DESIGN §5), nil for one bug. R7 (#3): no "×" (that is the chain's).
     static func biteName(_ count: Int) -> String? {
         switch count {
         case ..<2: return nil
-        case 2: return "Double ×2"
-        case 3: return "Triple ×3"
-        case 4: return "Quad ×4"
-        default: return "FEAST ×\(count)"
+        case 2: return "Double"
+        case 3: return "Triple"
+        case 4: return "Quad"
+        default: return "FEAST"
         }
     }
 

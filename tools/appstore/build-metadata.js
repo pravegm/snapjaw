@@ -60,13 +60,13 @@ const achievements = rows.map(r => {
   return { vendorIdentifier: id, referenceName: tGB, points: parseInt(r[5], 10), showBeforeEarned: !hidden, repeatable: false,
     localizations: { 'en-GB': loc(tGB, bGB, aGB), 'en-US': loc(tUS, bUS, aUS) }, image: `tools/appstore/badges/${id}.png` };
 });
-for (const s of ['`snap.best`', '`snap.daily`', '`Best feast`', '`Daily Bog`', '`Best Feast`', '` point` / ` points`',
+for (const s of ['`snap.best`', '`snap.daily`', '`Best score`', '`Daily Bog`', '`Best Score`', '` point` / ` points`',
                  '0 – 10,000,000', 'Start **Mon 2 Nov 2026, 00:00 UTC**; duration **1 day**; repeats every **1 day**']) need(ach, s, 'achievements.md');
 // R5/R6: the word is "score" (suffix "points"), never "protein" (achievements.md, Format suffix row).
 const lbLoc = (n) => ({ name: n, formatterSuffix: ' points', formatterSuffixSingular: ' point' });
 const leaderboards = [
-  { vendorIdentifier: 'snap.best', referenceName: 'Best feast', defaultFormatter: 'INTEGER', scoreSortType: 'DESC', submissionType: 'BEST_SCORE',
-    scoreRangeStart: 0, scoreRangeEnd: 10000000, recurrence: null, localizations: { 'en-GB': lbLoc('Best Feast'), 'en-US': lbLoc('Best Feast') } },
+  { vendorIdentifier: 'snap.best', referenceName: 'Best score', defaultFormatter: 'INTEGER', scoreSortType: 'DESC', submissionType: 'BEST_SCORE',
+    scoreRangeStart: 0, scoreRangeEnd: 10000000, recurrence: null, localizations: { 'en-GB': lbLoc('Best Score'), 'en-US': lbLoc('Best Score') } },
   { vendorIdentifier: 'snap.daily', referenceName: 'Daily Bog', defaultFormatter: 'INTEGER', scoreSortType: 'DESC', submissionType: 'BEST_SCORE',
     scoreRangeStart: 0, scoreRangeEnd: 10000000,
     recurrence: { startDate: '2026-11-02T00:00:00Z', duration: 'PT24H', rule: 'FREQ=DAILY;INTERVAL=1' },
@@ -91,6 +91,28 @@ for (const [file, prefix] of [['ci/store-scenarios.txt', 'P'], ['ci/duo-store-sc
   let names = []; try { names = rd(file).split('\n').filter(l => new RegExp('^' + prefix + '\\d\\d-').test(l)).map(l => l.split('|')[0]); } catch (e) { problems.push(file + ' missing'); }
   const want = FRAMES.map(n => prefix + n);
   if (names.join() !== want.join()) problems.push(`${file} frames ${JSON.stringify(names)} != ${JSON.stringify(want)}`);
+}
+// R7 (SCORE-R6 #9): store truth and consistency, checked on the scenario files against screenshots.md.
+{
+  const ssDoc = rd('docs/appstore/screenshots.md');
+  for (const [file, prefix] of [['ci/store-scenarios.txt', 'P'], ['ci/duo-store-scenarios.txt', 'D']]) {
+    let lines = []; try { lines = rd(file).split(/\r?\n/).filter(l => new RegExp('^' + prefix + '\\d\\d-').test(l)); } catch (e) { continue; }
+    const states = new Set();
+    for (const l of lines) {
+      const f = l.split('|'), name = f[0], args = f[1] || '', caption = f[3] || '', num = name.slice(1, 3);
+      // One progress state on every frame that shows progress (SCORE-R6: P04's 6 of 8 against P06's Garden 2/8).
+      const m = args.match(/(?:^|;)progress=([a-z]+)/);
+      if (m) states.add(m[1]);
+      else if (['04', '06', '07', '09'].includes(num)) problems.push(`${file} ${name}: no progress= (the set shows one progress state)`);
+      // Golden Glow is the game's own variety: no frame says "real cultivars".
+      if (/real cultivars?/i.test(caption)) problems.push(`${file} ${name}: "real cultivars" (Golden Glow is fantasy)`);
+      // screenshots.md quotes every iPhone sub-line and names every Duo frame (the scenario files win).
+      const sub = (caption.split(' / ')[1] || '').trim();
+      if (prefix === 'P' && sub && !ssDoc.includes(sub)) problems.push(`screenshots.md does not quote ${name}'s sub-line: ${sub}`);
+      if (prefix === 'D' && !ssDoc.includes(name.slice(4)) ) problems.push(`screenshots.md does not mention ${name}`);
+    }
+    if (states.size > 1) problems.push(`${file}: ${states.size} progress states (${[...states].join(', ')}); the set must read as one player`);
+  }
 }
 const screenshots = {
   _comment: 'store.yml (to be ported from Swoop) artifacts store-69 (6.9", 2868x1320), store-63 (6.3", 2622x1206: the required "Dynamic Island, medium" slot, the APP_IPHONE_61 class) and store-duo (inner 2853x2007), all landscape. Frames P01-P10 / D01-D10 in screenshots.md order. Until a store run exists (DEFAULT_STORE_RUN in asc.yml), validate reports them as gaps and push skips them.',
@@ -152,7 +174,8 @@ const banned = /smash|squish|squash|\bkill|splat|fold to /i;
 for (const [k, v] of [['name', name], ['subtitle', subtitle], ['promo', promo], ['descGB', descGB], ['descUS', descUS], ['keywords', keywords], ['notes', notes], ['nomDesc', nomDesc], ['nomNotes', nomNotes.replace('Squish, ', '')]]) if (banned.test(v)) problems.push(`${k} has a banned word: ${v.match(banned)[0]}`);
 for (const a of achievements) for (const x of Object.values(a.localizations['en-GB'])) if (banned.test(x)) problems.push('banned word in ' + a.vendorIdentifier);
 // R6: the untrue R5 claims (SCORE-R5 §4 #3) must never come back.
-const stale = /protein|HUD on the left|to (×|x)4\b|12 at most|max(imum)? 12|up to 12 snaps|seven clean bites in a row/i;
+// R7 (SCORE-R6 #8): "Best Feast" was the leaderboard's old name (a Feast is a 3+ bite; the board holds the best score).
+const stale = /protein|HUD on the left|to (×|x)4\b|12 at most|max(imum)? 12|up to 12 snaps|seven clean bites in a row|best feast/i;
 for (const [k, v] of [['promo', promo], ['descGB', descGB], ['descUS', descUS], ['notes', notes], ['nomDesc', nomDesc], ['nomNotes', nomNotes], ['whatsNew', whatsNew]]) if (stale.test(v)) problems.push(`${k} repeats an untrue claim: ${v.match(stale)[0]}`);
 for (const a of achievements) for (const x of Object.values(a.localizations['en-GB'])) if (stale.test(x)) problems.push('untrue claim in ' + a.vendorIdentifier + ': ' + x);
 for (const lb of leaderboards) for (const l of Object.values(lb.localizations)) if (stale.test(l.formatterSuffix + l.formatterSuffixSingular)) problems.push('leaderboard suffix says protein: ' + lb.vendorIdentifier);

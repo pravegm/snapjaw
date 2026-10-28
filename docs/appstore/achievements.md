@@ -13,8 +13,8 @@
 | | `snap.best` | `snap.daily` |
 |---|---|---|
 | Type | **Classic** (all-time) | **Recurring** |
-| Reference name | `Best feast` | `Daily Bog` |
-| Display name (en-GB and en-US) | `Best Feast` | `Daily Bog` |
+| Reference name | `Best score` | `Daily Bog` |
+| Display name (en-GB and en-US) | `Best Score` | `Daily Bog` |
 | Score format | Integer | Integer |
 | Format suffix (singular / plural) | ` point` / ` points` | ` point` / ` points` |
 | Sort order | High to Low | High to Low |
@@ -23,7 +23,7 @@
 | Recurring settings | — | Start **Mon 2 Nov 2026, 00:00 UTC**; duration **1 day**; repeats every **1 day** |
 | What the app submits | `RunResult.score` (the score) of every finished **Feed** run (the Feed best, as Home shows it; Daily runs go to the Daily board only: `GameCenterManager.report`, 27 Oct) | `RunResult.score` of the **first scored Daily Bog** of the (UTC) day (`RunMode.daily(day:, scored: true)`). **The Zen Bog submits nothing** (`GameCenterManager.report`, R6) |
 
-**Why "points":** since R5 the game's word is "score", never "protein" (Results shows "score" under the number), so the board reads "Best Feast · 12,480 points" (`tools/appstore/build-metadata.js` checks the suffix and pushes ` point` / ` points`). **Why the range goes to 10 million:** one 7-bug bite at ×5 can be worth several thousand, and GAME-DESIGN §5 says a perfect player's run lasts 6–8 minutes; 10 million leaves room. **Never submit** attract or lesson scores.
+**Why "points":** since R5 the game's word is "score", never "protein" (Results shows "score" under the number), so the board reads "Best Score · 12,480 points" (`tools/appstore/build-metadata.js` checks the suffix and pushes ` point` / ` points`). **Why the range goes to 10 million:** one 7-bug bite at ×5 can be worth several thousand, and GAME-DESIGN §5 says a perfect player's run lasts 6–8 minutes; 10 million leaves room. **Never submit** attract or lesson scores.
 
 **Why the Daily starts on Mon 2 Nov:** a few days after the tool first creates Game Center (runbook §3), so TestFlight testers (Game Center sandbox) see the board for weeks before launch. If the tool runs after 1 Nov, Claude moves the start date to the next day before pushing (whether App Store Connect accepts a start date in the past is unconfirmed: Swoop's note).
 

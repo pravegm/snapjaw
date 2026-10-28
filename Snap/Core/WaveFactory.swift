@@ -147,12 +147,15 @@ enum WaveFactory {
         }
     }
 
+    /// R7 (SCORE-R6 #14): at night the day bugs thin out (× Tuning.nightDayBugWeight) and fireflies and crickets
+    /// lead (Tuning.nightFireflyWeight, nightCricketWeight). Same entries in the same order, so the same draws.
     private static func pool(_ ph: DayPhase, _ index: Int) -> [Weighted] {
-        var out: [Weighted] = [Weighted(species: .housefly, weight: 6), Weighted(species: .fruitFly, weight: 3)]
-        if index >= Tuning.gnatFromWave { out.append(Weighted(species: .gnat, weight: 2)) }
+        let k: Double = ph >= .night ? Tuning.nightDayBugWeight : 1
+        var out: [Weighted] = [Weighted(species: .housefly, weight: 6 * k), Weighted(species: .fruitFly, weight: 3 * k)]
+        if index >= Tuning.gnatFromWave { out.append(Weighted(species: .gnat, weight: 2 * k)) }
         if ph >= .noon {
-            out.append(Weighted(species: .bluebottle, weight: 3))
-            out.append(Weighted(species: .grasshopper, weight: 2))
+            out.append(Weighted(species: .bluebottle, weight: 3 * k))
+            out.append(Weighted(species: .grasshopper, weight: 2 * k))
         }
         // Ants and ladybirds are day bugs: they go home at dusk.
         if ph == .noon {
@@ -165,8 +168,8 @@ enum WaveFactory {
             out.append(Weighted(species: .dragonfly, weight: 1.5))
         }
         if ph >= .night {
-            out.append(Weighted(species: .firefly, weight: 3))
-            out.append(Weighted(species: .cricket, weight: 2.5))
+            out.append(Weighted(species: .firefly, weight: Tuning.nightFireflyWeight))
+            out.append(Weighted(species: .cricket, weight: Tuning.nightCricketWeight))
         }
         return out
     }

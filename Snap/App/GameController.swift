@@ -147,6 +147,12 @@ final class GameController: ObservableObject, SceneDriver {
     private var chainHeldUntil: Double = -1
     /// R6 (#6): one message at a time (every toast and tag; Core's hints when it's empty).
     private var messages = MessageQueue()
+    /// R7 (#5): PlayLayer found no spot for the current toast clear of the trap's bugs (its clock stands still).
+    private var plateHeld = false
+    /// R7 (#12): the too-flat prompt is up (logged on each change: `SNAP-T too-flat on|off angle=<deg>`).
+    private var tooFlatShown = false
+    /// R7 (#4): the scene's last `coreKeepOut` (scene space), given to every session.
+    private var lastKeepOut: [CGRect] = []
     /// R6: this run's goals, ticked live.
     private var goalRun = GoalRun()
     /// R6 Garden: the variety the scene last drew.
@@ -272,11 +278,13 @@ final class GameController: ObservableObject, SceneDriver {
         feedback.handle(events, telemetry: AppRules.telemetry(snapshot, sceneWidth: width, playing: live))
         var snapped = false
         var stingCost = 0
+        var bite: BiteReport?
         for event in events {
             tally.note(event)
             switch event {
             case let .snapped(report):
                 snapped = true
+                bite = report
                 // QA-2 #10: only a bite that eats something feeds the trap (a dry snap or a bee bite doesn't).
                 if !report.caught.isEmpty { hungryOn = false }
             case .tired: watchTheEnd()
@@ -302,23 +310,6 @@ final class GameController: ObservableObject, SceneDriver {
             case .hungry:
                 hungryOn = true
                 snapped = true
-            case let .feast(_, back):
-                let full = session.mode != .lesson
-                    && AppRules.refundHitTheCap(before: lastCoreSnaps, after: snapshot.snapsLeft, back: back,
-                                                max: snapshot.snapsMax)
-                if full && session.mode != .zen {
-                    // ROUND-4: a Feast at the cap says "+1 (full)" (the numeral never dips).
-                    messages.post(.tag(.gain(AppRules.snapGainText(back, full: true))), seconds: Self.snapGainSeconds,
-                                  now: snapshot.time, interrupt: true)
-                    snapped = true
-                } else if back > 0 && !snapGainShown && feastsAtStart == 0 && session.mode != .lesson
-                            && session.mode != .zen {
-                    // The first Feast ever: its flying glyph is labelled once (REVIEW-2 #12).
-                    snapGainShown = true
-                    messages.post(.tag(.gain(AppRules.snapGainText(back))), seconds: Self.snapGainSeconds,
-                                  now: snapshot.time, interrupt: true)
-                    snapped = true
-                }
             case let .chainUp(_, multiplier):
                 // REVIEW-3 #10, R6 (#14): the chain chip is explained once ever, at a player's first chain step.
                 if chainTagEligible && session.mode != .lesson {
@@ -331,6 +322,25 @@ final class GameController: ObservableObject, SceneDriver {
             default: break
             }
             AppTrace.t("SNAP-T event " + AppTrace.describe(event))
+        }
+        // The bite's refund, one tag at the row (R7 #3, #5): a lucky bug names itself ("Golden scarab! +2 snaps"), a
+        // FEAST event shows its refill ("FEAST! +2 snaps"), a refund the full row can't hold says so ("+1 snap (row
+        // full)"; ROUND-4: the numeral never dips), and the first Feast ever is labelled once (REVIEW-2 #12).
+        if let bite, bite.snapsBack > 0, session.mode != .lesson, session.mode != .zen {
+            let full = AppRules.refundHitTheCap(before: lastCoreSnaps, after: snapshot.snapsLeft, back: bite.snapsBack,
+                                                max: snapshot.snapsMax)
+            let feasted = events.contains { e in
+                if case .feast = e { return true }
+                return false
+            }
+            let first = feasted && !snapGainShown && feastsAtStart == 0
+            let lucky = bite.caught.filter { $0 == .goldenScarab || $0 == .ladybird }
+            if let text = AppRules.biteGainText(back: bite.snapsBack, full: full, lucky: lucky,
+                                                bigFeast: FeastEvent.isBig(bite), firstFeast: first) {
+                if first { snapGainShown = true }
+                messages.post(.tag(.gain(text)), seconds: Self.snapGainSeconds, now: snapshot.time, interrupt: true)
+                snapped = true
+            }
         }
         if AppRules.chainHeld(events, chain: snapshot.chain) {
             chainHeldUntil = snapshot.time + Self.chainHeldSeconds
@@ -636,6 +646,34 @@ final class GameController: ObservableObject, SceneDriver {
         SceneHooks.setHUDKeepOut(scene, rects)
     }
 
+    /// R7 (#5): PlayLayer reports whether the toast on the plate has a spot clear of the trap's bugs this frame.
+    func setPlateHeld(_ held: Bool) {
+        if plateHeld != held { plateHeld = held }
+    }
+
+    /// R7 (Scene/Core #4): Home's real button frames (scene space), so no bug rests behind them.
+    func setHomeButtonFrames(_ rects: [CGRect]) {
+        SceneHooks.setHomeButtonFrames(scene, rects.isEmpty ? nil : rects)
+    }
+
+    /// R7 (Scene/Core #4): Core's clear zones (`BogScene.coreKeepOut`: the HUD plates or Home's buttons, the midrib,
+    /// the edges) on both sessions. The Scene sends them on every change; a new session also takes them before its
+    /// first step (`prepareKeepOut`).
+    fileprivate func applyKeepOut(_ rects: [CGRect]) {
+        lastKeepOut = rects
+        session?.keepOut = rects
+        homeSession?.keepOut = rects
+    }
+
+    /// A new session takes the scene's keep-out now (or the last one sent, before a scene exists).
+    private func prepareKeepOut(_ s: TrapSession) {
+        if let scene {
+            scene.applyKeepOut(to: s)
+        } else {
+            s.keepOut = lastKeepOut
+        }
+    }
+
     // MARK: - Home's live bog
 
     /// Home on an iPhone without a hinge: a tap on the bog chomps the trap.
@@ -678,8 +716,11 @@ final class GameController: ObservableObject, SceneDriver {
         sessionLayout = l
         if let scene, scene.layout != l { scene.layout = l }
         let seed: UInt64 = isDemo ? (demo?.seed ?? DemoMode.defaultSeed) : UInt64.random(in: 1...UInt64.max)
-        homeSession = TrapSession(mode: .attract, seed: seed, best: 0, geometry: l.geometry,
-                                  options: SessionOptions.`for`(.attract))
+        let home = TrapSession(mode: .attract, seed: seed, best: 0, geometry: l.geometry,
+                               options: SessionOptions.`for`(.attract))
+        // R7 (#4): Core's clear zones before the first step (Home's buttons follow from `goHome`).
+        prepareKeepOut(home)
+        homeSession = home
         homeTouch.reset()
         scene?.reset()
     }
@@ -867,6 +908,8 @@ final class GameController: ObservableObject, SceneDriver {
         feedback.silence()
         feedback.zen = false
         messages.clear()
+        plateHeld = false
+        tooFlatShown = false
         goalRun = GoalRun()
         hud.update(HUDValues())
         shownSnaps = nil
@@ -1028,6 +1071,8 @@ final class GameController: ObservableObject, SceneDriver {
                                      options: options)
         session = newSession
         if let scene, scene.layout != sessionLayout { scene.layout = sessionLayout }
+        // R7 (#4): Core's clear zones before the first step (the HUD's plates follow once PlayLayer reports them).
+        prepareKeepOut(newSession)
         homeSession = nil
         wilts = 0
         stings = 0
@@ -1041,6 +1086,8 @@ final class GameController: ObservableObject, SceneDriver {
         chainTagEligible = !store.data.chainTipSeen && m != .lesson && m != .attract
         chainHeldUntil = -1
         messages.clear()
+        plateHeld = false
+        tooFlatShown = false
         // R6: the run plays the goals Home showed (written now); Feel's Zen bed for the Zen Bog only.
         switch m {
         case .feed, .daily, .zen:
@@ -1126,7 +1173,9 @@ final class GameController: ObservableObject, SceneDriver {
         switch mode {
         case .feed, .zen:
             if let s = demo?.seed { return s }
-            if isDemo { return DemoMode.defaultSeed }
+            // R7 (#10, 47 repeated 26's best bite and chain): the Zen Results demo plays its own seed, a Zen run's
+            // own numbers.
+            if isDemo { return DemoMode.seed(for: mode, screen: demo?.effectiveScreen) }
             return UInt64.random(in: 1...UInt64.max)
         case let .daily(day, _):
             return DailySeed.seed(day: day)
@@ -1237,12 +1286,16 @@ final class GameController: ObservableObject, SceneDriver {
         if demo?.freezeOn == .results { AppTrace.t("SNAP-T freeze results") }
     }
 
+    /// R7 (#7): Feed's Results title. Pure; tested.
+    nonisolated static func feedTitle(newBest: Bool) -> String { newBest ? "What a feast!" : "Your trap is tired" }
+
     private func makeSummary(_ result: RunResult, outcome: RecordOutcome) -> ResultSummary {
         let title: String
         let again: String
         switch result.mode {
         case .feed:
-            title = "Your trap is tired"
+            // R7 (#7: "YOUR TRAP IS TIRED" over "New best!" in 26, 50, P09): a new best is a feast, not a tired trap.
+            title = Self.feedTitle(newBest: outcome.showsNewBest)
             again = "Again"
         case let .daily(day, scored):
             title = scored ? AppRules.dailyTitle(day: day) : "Daily practice · " + AppRules.dailyDate(day: day)
@@ -1273,11 +1326,20 @@ final class GameController: ObservableObject, SceneDriver {
     private func publishHUD(_ s: TrapSnapshot, now: TimeInterval, force: Bool, hold: Bool = false) {
         // R5 (REVIEW-4 #5, belt and braces): never "Hungry… bite!" while a bee's halo is inside the trap zone.
         let haloInTrap = AppRules.protectedHaloInTrap(s, geometry: sessionLayout.geometry)
-        var core = AppRules.guardedHint(s.hint, haloInTrap: haloInTrap)
+        let live = AppRules.isLive(s.phase)
+        // R7 (#12, duo-ui-too-flat-178 showed "Now!"): a Duo held too flat says "Fold it a little" over
+        // every hint but a warning, from the hinge's own angle (whatever Core's input saw), and logs it for CI.
+        let flat = route == .playing && input == .hinge && live && !isPaused
+            && AppRules.isTooFlat(angle: hinge.angle ?? hinge.lastRawAngle)
+        if flat != tooFlatShown {
+            tooFlatShown = flat
+            let a = hinge.angle ?? hinge.lastRawAngle ?? -1
+            AppTrace.t("SNAP-T too-flat " + (flat ? "on" : "off") + String(format: " angle=%.0f", a))
+        }
+        var core = AppRules.flatGuardedHint(AppRules.guardedHint(s.hint, haloInTrap: haloInTrap), tooFlat: flat)
         // The lesson shows only the hints it teaches with ("Bee! Wait…", "Now!" once all three sip).
         if route == .lesson, let h = core, !AppRules.lessonShowsHint(h) { core = nil }
         if let h = core, AppRules.hintText(h, touch: touchWording) == nil { core = nil }
-        let live = AppRules.isLive(s.phase)
         // R6 (#6): one message at a time. The queue's toast or tag, else the state hint (Core's, or the opening's
         // fold line); a warning keeps a waiting toast's clock still.
         var state: HUDHint? = core.map { HUDHint.trap($0) }
@@ -1286,7 +1348,8 @@ final class GameController: ObservableObject, SceneDriver {
             state = .foldInput
         }
         let warning = core.map { AppRules.hintIsWarning($0) } ?? false
-        var message = messages.shown(now: s.time, hint: state, warning: warning)
+        // R7 (#5): a toast with no clear spot (PlayLayer: both slots on the trap's bugs) keeps its clock still.
+        var message = messages.shown(now: s.time, hint: state, warning: warning, hold: plateHeld)
         if let m = message, AppRules.hidesMessage(m, paused: isPaused, frozen: frozen, live: live) { message = nil }
         var hint: HUDHint?
         var tag: HUDTag?
@@ -1323,7 +1386,10 @@ final class GameController: ObservableObject, SceneDriver {
         let shown = AppRules.tiredNumeral(truthful, phase: s.phase)
         shownSnaps = shown
         values.snapsLeft = shown
-        values.tired = AppRules.showsTiredBanner(phase: s.phase, shownSnaps: shown)
+        // R7 (#5, frame 19): the banner waits for the last bite's pops to go (to `tiredBannerLatest`).
+        let popsLive = AppRules.tiredElapsed(s.phase) != nil && !SceneHooks.livePopRects(scene).isEmpty
+        values.tired = AppRules.showsTiredBanner(phase: s.phase, shownSnaps: shown, popsLive: popsLive)
+        values.plateMayCover = messages.holdSpent
         values.rowFlashing = scene?.snapsRowFlashing ?? false
         values.freeFlash = live && s.time < freeFlashUntil
         // QA-2 #10 (Core R4): keyed on Core's own `hungry` hint, which stays up through a dry snap or a bee bite until a
@@ -1346,7 +1412,7 @@ final class GameController: ObservableObject, SceneDriver {
         let urgent = force || hint != lastHint || values.tired != hud.values.tired
             || values.snapsLeft != hud.values.snapsLeft || values.rowFlashing != hud.values.rowFlashing
             || values.freeFlash != hud.values.freeFlash || values.chainHeld != hud.values.chainHeld
-            || values.tag != hud.values.tag
+            || values.tag != hud.values.tag || values.plateMayCover != hud.values.plateMayCover
         guard urgent || now - lastHUD >= Self.hudInterval else { return }
         lastHUD = now
         lastHint = hint
@@ -1472,7 +1538,10 @@ final class GameController: ObservableObject, SceneDriver {
     private func demoAfterStep(_ s: TrapSnapshot, events: [TrapEvent]) {
         guard let demo, !frozen else { return }
         if let at = freezePendingAt {
-            if playTime >= at { freeze(freezePendingTag?.rawValue ?? "after", holdScene: freezePendingTag != nil) }
+            if playTime >= at {
+                freeze(freezePendingTag?.rawValue ?? "after", holdScene: freezePendingTag != nil,
+                       atOnce: freezePendingTag?.holdsSceneAtOnce ?? false)
+            }
             return
         }
         if let after = demo.holdAfter, playTime < after { return }
@@ -1553,6 +1622,8 @@ final class GameController: ObservableObject, SceneDriver {
             return AppRules.chainHeld(events, chain: s.chain)
         case .bigFeast:
             return AppRules.isBigFeast(events)
+        case .feastGulp:
+            return AppRules.isCrowdFeast(events)
         case .goalDone:
             if case .goalDone? = hint { return true }
             return false
@@ -1561,17 +1632,36 @@ final class GameController: ObservableObject, SceneDriver {
 
     /// Stops stepping. An event freeze also pauses the scene after a beat, so the CHOMP, "Bzzt!" and the score pop
     /// are still on screen when CI's shot lands.
-    private func freeze(_ tag: String, holdScene: Bool) {
+    /// R7: `atOnce` (`DemoMode.Freeze.holdsSceneAtOnce`): the scene is paused now, not a beat later.
+    private func freeze(_ tag: String, holdScene: Bool, atOnce: Bool = false) {
         frozen = true
         freezePendingAt = nil
         feedback.silence()
         AppTrace.t("SNAP-T freeze \(tag)")
         guard holdScene else { return }
+        if atOnce {
+            sceneHeld = true
+            scene?.isPaused = true
+            return
+        }
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(GameController.sceneHoldDelay * 1_000_000_000))
             guard let self, self.frozen else { return }
             self.sceneHeld = true
             self.scene?.isPaused = true
+        }
+    }
+}
+
+// MARK: - R7 (#4): the Scene's clear zones reach Core's sessions
+
+extension GameController: SceneKeepOutReceiver {
+    /// The Scene (main actor) sends `coreKeepOut` when it gets this driver, when the plates, Home or the layout
+    /// change, and on every `reset()`. The protocol isn't actor-bound, so the witness is nonisolated and hops onto the
+    /// main actor it is always called from.
+    nonisolated func sceneKeepOutChanged(_ rects: [CGRect]) {
+        MainActor.assumeIsolated {
+            self.applyKeepOut(rects)
         }
     }
 }

@@ -50,6 +50,15 @@ enum SceneHooks {
         if scene.hudKeepOut != rects { scene.hudKeepOut = rects }
     }
 
+    /// R7 (Scene #4): Home's real button frames in scene space (`BogScene.homeButtonFrames`; nil: the Scene's own
+    /// estimate). Core's resting bugs keep clear of them through `coreKeepOut`.
+    static func setHomeButtonFrames(_ scene: BogScene?, _ rects: [CGRect]?) {
+        guard let scene else { return }
+        if let rs = rects, rs.contains(where: { !($0.minX.isFinite && $0.minY.isFinite && $0.width.isFinite
+                                                  && $0.height.isFinite) }) { return }
+        if scene.homeButtonFrames != rects { scene.homeButtonFrames = rects }
+    }
+
     /// R6 Garden: the play trap, Home's trap and the snap glyphs in the chosen variety (`BogScene.variety`).
     static func setVariety(_ scene: BogScene?, _ v: TrapVariety) {
         guard let scene else { return }

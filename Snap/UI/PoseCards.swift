@@ -360,6 +360,10 @@ struct CoverCard: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
+        // R7 (#8, duo-ui-cover: the card's centre sat 43 pt left of the screen's, the right third empty): the reader
+        // fills the whole display. It sat inside the safe area, so a stale 86 pt trailing inset shrank and shifted it
+        // before `CoverLayout.evenInsets` ever saw the insets; now the insets are applied once, evenly.
+        .ignoresSafeArea()
         .accessibilityElement(children: .combine)
     }
 

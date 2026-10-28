@@ -102,7 +102,7 @@ SOUND AND FEEL
 The CHOMP, every buzz and hum, the frogs by day and the crickets at night are all synthesised live in the app, and a big FEAST gets its own crunch and a burp. You feel a soft tick in your hands when a bug lands. Sound, haptics, the silent switch and Reduce motion each have a setting.
 
 GAME CENTER
-Leaderboards for your Best Feast and the Daily Bog, and 12 achievements. Optional: Snapjaw works fully without signing in.
+Leaderboards for your Best Score and the Daily Bog, and 12 achievements. Optional: Snapjaw works fully without signing in.
 
 PRIVATE BY DESIGN
 No accounts, no tracking, no data collected. Your progress stays on your iPhone.
@@ -159,7 +159,7 @@ SOUND AND FEEL
 The CHOMP, every buzz and hum, the frogs by day and the crickets at night are all synthesized live in the app, and a big FEAST gets its own crunch and a burp. You feel a soft tick in your hands when a bug lands. Sound, haptics, the silent switch and Reduce motion each have a setting.
 
 GAME CENTER
-Leaderboards for your Best Feast and the Daily Bog, and 12 achievements. Optional: Snapjaw works fully without signing in.
+Leaderboards for your Best Score and the Daily Bog, and 12 achievements. Optional: Snapjaw works fully without signing in.
 
 PRIVATE BY DESIGN
 No accounts, no tracking, no data collected. Your progress stays on your iPhone.
@@ -305,7 +305,7 @@ Why each risky item is None:
 | Score and snaps on the sharp (right) half; Settings **"Score on the left"** ("Your score and snaps on the left half") | `SettingsView.hudSideTitle` / `hudSideDetail`; `ScreenLayout.hudOnLeft` | [x] src | [ ] |
 | All sound synthesised live; landing tick haptic; frogs by day, crickets at night | GAME-DESIGN §10; `Feedback/` (no audio files in the bundle) | [ ] | [ ] |
 | Sound on silent by default; "Respect silent switch"; "Sound" and "Haptics" switches; "Reduce motion" | `UI/SettingsView.swift` rows | [x] src (labels) | [ ] |
-| 2 leaderboards (Best Feast: Feed only; Daily Bog: the scored try) + 12 achievements report from the build | `App/GameCenterManager.swift`; `achievements.md` = `Achievements.all` (except the `chain4` detail: §11 ask 2) | [x] src | [ ] |
+| 2 leaderboards (Best Score: Feed only; Daily Bog: the scored try) + 12 achievements report from the build | `App/GameCenterManager.swift`; `achievements.md` = `Achievements.all` (except the `chain4` detail: §11 ask 2) | [x] src | [ ] |
 | No network code, no SDKs, no tracking (privacy) | `privacy.md` §3 grep | [ ] | [ ] |
 
 ## 11. Asks to the build team (so the store copy stays true)

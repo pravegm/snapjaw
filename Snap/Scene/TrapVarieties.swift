@@ -41,7 +41,7 @@ struct TrapLook {
     /// The cilia's length and width over Classic's.
     var toothLength: CGFloat
     var toothWidth: CGFloat
-    /// The lobes' x scale about the midrib (B52: 1.03).
+    /// The play lobes' x scale about the midrib (B52: 1.03; the hero uses `heroLobes`).
     var spread: CGFloat
     /// The wet gloss's strength (1 = Classic; Cupped 1.6).
     var gloss: CGFloat
@@ -64,6 +64,17 @@ struct TrapLook {
     var heroLeafLight: RGBA
     var heroLeafDark: RGBA
     var heroCilium: RGBA
+    /// R7 (#1): the hero 3/4 trap's own cut, so the 8 read apart at a 120 pt thumbnail (cosmetic: play never changes).
+    /// The lobes' scale about the hinge before the tilt (B52 1.15 both ways; Cupped 1.22 tall, a deep cup), the back
+    /// crown's tooth count (Classic 13), and its teeth's length and half-width over Classic's.
+    var heroLobes = CGSize(width: 1, height: 1)
+    var heroTeeth: Int = 13
+    var heroToothLength: CGFloat = 1
+    var heroToothWidth: CGFloat = 1
+    /// R7 (Fused Tooth): the continuous frill under the scallops along the back rim.
+    var heroFrill: RGBA?
+    /// R7 (Cupped): a dark line along both rims.
+    var heroRimLine: RGBA?
 
     /// The face colour at `f` (0 midrib … 1 margin), from `faceStops`.
     func face(at f: CGFloat) -> RGBA {
@@ -132,47 +143,122 @@ extension TrapArt {
             k.heroLeafDark = RGBA(hex: 0x4A0A16)
             k.heroCilium = RGBA(hex: 0xF4C6BC)
         case .b52:
-            // Big: wider lobes and chunky long cilia.
+            // R7 (#1): big. The hero's lobes are 15 % larger (play: 3 % wider, the trap's zone never changes), with
+            // few fat, long cilia and a deeper wine face on a dark leaf.
             k.tooth = .cilia
-            k.toothLength = 1.28
-            k.toothWidth = 1.9
+            k.toothLength = 1.4
+            k.toothWidth = 2.2
             k.spread = 1.03
-            k.ciliaBase = RGBA(hex: 0x5E9238)
+            k.ciliaBase = RGBA(hex: 0x4E8A30)
+            k.ciliaMid = RGBA(hex: 0xC2DC8A)
+            k.leaf = RGBA(hex: 0x24502A)
+            k.leafDark = RGBA(hex: 0x0F2E12)
+            k.heroLobes = CGSize(width: 1.15, height: 1.15)
+            k.heroTeeth = 11
+            k.heroToothLength = 1.5
+            k.heroToothWidth = 2.3
+            k.heroHot = RGBA(hex: 0xE8506A)
+            k.heroFace = RGBA(hex: 0xC42444)
+            k.heroDeep = RGBA(hex: 0x620820)
+            k.heroLeafLight = RGBA(hex: 0x4E9A38)
+            k.heroLeafDark = RGBA(hex: 0x163E1C)
         case .sawtooth:
+            // R7 (#1): a dense row of short, jagged red saw teeth on an amber margin.
             k.tooth = .saw
             k.toothLength = 0.42
-            k.toothWidth = 2.4
-            k.ciliaBase = RGBA(hex: 0x4E8A34)
-            k.ciliaMid = RGBA(hex: 0x9CCB5C)
-            k.ciliaTip = RGBA(hex: 0xE6F2B0)
-        case .sharkTooth:
-            k.tooth = .shark
-            k.toothLength = 0.55
             k.toothWidth = 3
-            k.ciliaBase = RGBA(hex: 0x5A9A3C)
-            k.ciliaMid = RGBA(hex: 0xB8DC80)
-            k.ciliaTip = RGBA(hex: 0xF6F8DA)
+            k.ciliaBase = RGBA(hex: 0x5A7A2C)
+            k.ciliaMid = RGBA(hex: 0xC8443A)
+            k.ciliaTip = RGBA(hex: 0xF08A72)
+            k.lip = RGBA(hex: 0x5E4A1A)
+            k.blush = RGBA(hex: 0xD9A23A)
+            k.heroTeeth = 25
+            k.heroToothLength = 0.5
+            k.heroToothWidth = 1.6
+            k.heroCilium = RGBA(hex: 0xD8383A)
+            k.heroMargin = RGBA(hex: 0xE0AE40)
+            k.heroMarginDeep = RGBA(hex: 0x9A7A2A)
+        case .sharkTooth:
+            // R7 (#1): a few wide ivory triangles, and a hotter scarlet-coral face.
+            k.tooth = .shark
+            k.toothLength = 0.7
+            k.toothWidth = 3.4
+            k.ciliaBase = RGBA(hex: 0xC8D49A)
+            k.ciliaMid = RGBA(hex: 0xF2F0D6)
+            k.ciliaTip = RGBA(hex: 0xFFFFF2)
+            k.faceStops = [
+                (0, RGBA(hex: 0x6A1A0E)), (0.16, RGBA(hex: 0x8A2614)), (0.5, RGBA(hex: 0xB8341E)),
+                (0.8, RGBA(hex: 0xD0442A)), (0.92, RGBA(hex: 0xDA4C2E)), (1, RGBA(hex: 0xB43A22)),
+            ]
+            k.glyphCore = RGBA(hex: 0xB8341E)
+            k.glyphOuter = RGBA(hex: 0xDA4C2E)
+            k.glyphInner = RGBA(hex: 0x6A1A0E)
+            k.heroTeeth = 9
+            k.heroToothLength = 0.8
+            k.heroToothWidth = 3.6
+            k.heroCilium = RGBA(hex: 0xFFFBEA)
+            k.heroHot = RGBA(hex: 0xFF8A5C)
+            k.heroFace = RGBA(hex: 0xE84A30)
+            k.heroDeep = RGBA(hex: 0x8A1E12)
+            k.heroLipFace = RGBA(hex: 0xF05A3A)
         case .fusedTooth:
+            // R7 (#1): one continuous lime frill, never single cilia.
             k.tooth = .fused
-            k.toothLength = 0.5
+            k.toothLength = 0.6
             k.toothWidth = 6
-            k.ciliaBase = RGBA(hex: 0x4E8A34)
-            k.ciliaMid = RGBA(hex: 0x8CBE52)
-            k.ciliaTip = RGBA(hex: 0xCFE68C)
+            k.ciliaBase = RGBA(hex: 0x5E9A34)
+            k.ciliaMid = RGBA(hex: 0xA8D24E)
+            k.ciliaTip = RGBA(hex: 0xDCEE8A)
+            k.heroTeeth = 15
+            k.heroToothLength = 0.85
+            k.heroToothWidth = 3.6
+            k.heroCilium = RGBA(hex: 0xD6EC7A)
+            k.heroFrill = RGBA(hex: 0x9CCB3E)
         case .cupped:
-            // A deeper cup and a wetter gloss.
-            k.cupStrength = 2.1
+            // R7 (#1): a deep cup (the hero's lobes 22 % taller), a strong wet gloss and a dark rim.
+            k.cupStrength = 2.4
             k.glands = 0.8
-            k.gloss = 1.6
+            k.gloss = 1.9
+            k.blushAlpha = 0.18
+            k.lip = RGBA(hex: 0x1E3A14)
+            k.leaf = RGBA(hex: 0x23491F)
+            k.leafDark = RGBA(hex: 0x0F2A10)
+            k.heroLobes = CGSize(width: 1, height: 1.22)
+            k.heroFace = RGBA(hex: 0xC8304C)
+            k.heroDeep = RGBA(hex: 0x4A0618)
+            k.heroMargin = RGBA(hex: 0x6E9A34)
+            k.heroMarginDeep = RGBA(hex: 0x355E22)
+            k.heroRimLine = RGBA(hex: 0x14280E)
         case .goldenGlow:
-            // The fantasy finale: a gold sheen on the rim and the cilia, and twinkles.
+            // The fantasy finale: R7 (#1) a gold interior, a gold sheen on the rim and the cilia, and twinkles. The
+            // play face is a deep amber at the midrib, so the nectar's bright beads still read on it.
             k.sheen = pal.gold
             k.sparkle = true
             k.gloss = 1.2
+            k.faceStops = [
+                (0, RGBA(hex: 0x5A3606)), (0.16, RGBA(hex: 0x7A4A0A)), (0.5, RGBA(hex: 0xA8701A)),
+                (0.8, RGBA(hex: 0xC99028)), (0.92, RGBA(hex: 0xD8A030)), (1, RGBA(hex: 0xB8862A)),
+            ]
+            k.cup = RGBA(hex: 0x3A2204)
+            k.blush = RGBA(hex: 0xFFE27A)
+            k.blushAlpha = 0.3
+            k.glands = 0.35
             k.lip = RGBA(hex: 0xB8952E)
             k.ciliaBase = RGBA(hex: 0xB08A2A)
             k.ciliaMid = RGBA(hex: 0xF0CF62)
             k.ciliaTip = RGBA(hex: 0xFFF6C8)
+            k.closedStops = [
+                (0, RGBA(hex: 0x173D19)), (0.18, RGBA(hex: 0x2F5F2B)), (0.45, RGBA(hex: 0x41763A)),
+                (0.66, RGBA(hex: 0x2F5F2B)), (0.76, RGBA(hex: 0x6A4A10)), (0.82, RGBA(hex: 0xA8701A)),
+                (0.9, RGBA(hex: 0xD8A030)), (0.96, RGBA(hex: 0x5A3606)), (1, RGBA(hex: 0x1C0E03)),
+            ]
+            k.glyphCore = RGBA(hex: 0xA8701A)
+            k.glyphOuter = RGBA(hex: 0xD8A030)
+            k.glyphInner = RGBA(hex: 0x5A3606)
+            k.heroHot = RGBA(hex: 0xFFF0A0)
+            k.heroFace = RGBA(hex: 0xF2C040)
+            k.heroDeep = RGBA(hex: 0x8A5410)
+            k.heroLipFace = RGBA(hex: 0xF8CC50)
             k.heroMargin = pal.gold
             k.heroMarginDeep = RGBA(hex: 0xC9962E)
             k.heroCilium = RGBA(hex: 0xFFF1B0)

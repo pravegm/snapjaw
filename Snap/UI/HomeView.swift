@@ -10,7 +10,8 @@ struct HomeView: View {
     let info: AppCanvas
 
     /// The caption under Home's clap diagram.
-    static let foldCaption = "Snap it shut a little"
+    /// R7 (ci-R7.md #9, D06): the captions' and the pose card's words.
+    static let foldCaption = "Snap it a little shut"
     static let foldDetail = "The two halves are the trap. Bite, then open."
     /// R4 (REVIEW-3 #8): the clap diagram's height on Home (it was ~65 pt, on the cilia).
     static let foldDiagramHeight: CGFloat = 120
@@ -50,6 +51,31 @@ struct HomeView: View {
                 .position(x: page.midX, y: info.size.height / 2 + (c ? 4 : 10))
         }
         .frame(width: info.size.width, height: info.size.height)
+        // R7 (Scene/Core #4, frames 01, 52, D06: bugs peeked out from behind the buttons): the buttons' real frames,
+        // in scene space, are the Home bog's clear zone.
+        .coordinateSpace(.named(Self.space))
+        .onPreferenceChange(HomeButtonFramesKey.self) { frames in
+            controller.setHomeButtonFrames(Self.sceneRects(frames, info: info))
+        }
+    }
+
+    /// R7 (#4): the coordinate space the button frames are measured in (the canvas, top-left origin).
+    static let space = "snap.home"
+
+    /// R7 (#4): screen rects (the canvas) to scene rects (y up), rounded out to 2 pt so a sub-point wobble never
+    /// re-sends them. Pure; tested.
+    static func sceneRects(_ rects: [CGRect], info: AppCanvas) -> [CGRect] {
+        rects.compactMap { r -> CGRect? in
+            guard r.minX.isFinite, r.minY.isFinite, r.width.isFinite, r.height.isFinite, r.width > 0,
+                  r.height > 0 else { return nil }
+            let a = info.scenePoint(CGPoint(x: r.minX, y: r.minY))
+            let b = info.scenePoint(CGPoint(x: r.maxX, y: r.maxY))
+            let x0 = (min(a.x, b.x) / 2).rounded(.down) * 2
+            let y0 = (min(a.y, b.y) / 2).rounded(.down) * 2
+            let x1 = (max(a.x, b.x) / 2).rounded(.up) * 2
+            let y1 = (max(a.y, b.y) / 2).rounded(.up) * 2
+            return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+        }
     }
 
     // MARK: Title
@@ -116,7 +142,8 @@ struct HomeView: View {
             .padding(.top, c ? 2 : 6)
             .accessibilityElement(children: .combine)
             // R6: the three goals (the best of any run so far), under the rank they grow.
-            GoalsCard(lines: ProgressRules.goalLines(store.goalBook), compact: c)
+            // R7 (#15): each goal wears its tier (a dot and its word).
+            GoalsCard(lines: ProgressRules.goalLines(store.goalBook), compact: c, tierLabels: true)
                 .frame(maxWidth: 320)
         }
     }
@@ -161,11 +188,13 @@ struct HomeView: View {
                 .snapCard(padding: c ? 6 : 10, radius: 18)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Self.foldCaption + ". " + Self.foldDetail)
+                .homeButtonFrame()
             }
             SnapButton(kind: .primary, height: c ? 58 : 70, compact: c, action: { controller.play() }) {
                 Label("Feed", systemImage: "fork.knife")
             }
             .accessibilityHint("Start a run")
+            .homeButtonFrame()
             SnapButton(kind: .secondary, height: c ? 52 : 60, compact: c, action: { controller.show(.daily) }) {
                 HStack(spacing: 10) {
                     Image(systemName: "sun.max.fill").foregroundStyle(SnapTheme.gold)
@@ -189,6 +218,7 @@ struct HomeView: View {
                     }
                 }
             }
+            .homeButtonFrame()
             // R6: the Zen Bog and the Garden.
             HStack(spacing: c ? 8 : 12) {
                 SnapButton(kind: .secondary, height: c ? 52 : 60, compact: c, action: { controller.playZen() }) {
@@ -219,6 +249,7 @@ struct HomeView: View {
                 }
                 .accessibilityHint("Choose your trap")
             }
+            .homeButtonFrame()
             HStack(spacing: c ? 8 : 12) {
                 SnapButton(kind: .secondary, height: c ? 52 : 60, compact: c, action: { controller.show(.book) }) {
                     VStack(spacing: 0) {
@@ -235,6 +266,7 @@ struct HomeView: View {
                 .frame(width: c ? 64 : 76)
                 .accessibilityLabel("Settings")
             }
+            .homeButtonFrame()
         }
     }
 
@@ -289,5 +321,20 @@ struct HomeTrapLayer: View {
         .accessibilityElement()
         .accessibilityLabel("The title trap")
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// R7 (#4): every Home button row's frame in `HomeView.space` (the Home bog's clear zone).
+struct HomeButtonFramesKey: PreferenceKey {
+    static let defaultValue: [CGRect] = []
+    static func reduce(value: inout [CGRect], nextValue: () -> [CGRect]) { value += nextValue() }
+}
+
+extension View {
+    /// R7 (#4): reports this view's frame as one of Home's buttons (`HomeButtonFramesKey`).
+    func homeButtonFrame() -> some View {
+        background(GeometryReader { g in
+            Color.clear.preference(key: HomeButtonFramesKey.self, value: [g.frame(in: .named(HomeView.space))])
+        })
     }
 }

@@ -250,7 +250,7 @@ In App Store Connect → the app:
 - **App Information → Age Rating:** the result says **4+**. If it says anything else, tell Claude before submitting.
 - **The 1.0 page → App Review Information:** "Sign-in required" unticked, your contact details filled in, and **Notes** starts "Thanks for reviewing Snapjaw".
 - **The 1.0 page → Version Release:** **Manually release this version** is chosen.
-- **Services → Game Center:** 2 leaderboards (Best Feast, Daily Bog) and 12 achievements, each with a picture (for example **First Feast** and **Bee Kind**).
+- **Services → Game Center:** 2 leaderboards (Best Score, Daily Bog) and 12 achievements, each with a picture (for example **First Feast** and **Bee Kind**).
 
 ### 6c. The last robot run (Wed 2 Dec, after Claude names the release build)
 
@@ -310,7 +310,7 @@ IDs can never be changed once created. These are the exact values (the same as `
 
 | Leaderboard ID | Type | Reference name | Display name | Score format | Suffix | Sort | Submission |
 |---|---|---|---|---|---|---|---|
-| `snap.best` | **Classic** | Best feast | Best Feast | Integer | ` point` / ` points` | High to Low | Best score |
+| `snap.best` | **Classic** | Best score | Best Score | Integer | ` point` / ` points` | High to Low | Best score |
 | `snap.daily` | **Recurring**: start **Mon 2 Nov 2026 at 00:00 UTC**, lasts **1 day**, repeats every **1 day** | Daily Bog | Daily Bog | Integer | ` point` / ` points` | High to Low | Best score |
 
 **Achievements** (none hidden, none can be earned more than once, each with its 1024 × 1024 badge drawn by the app):

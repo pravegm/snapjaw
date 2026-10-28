@@ -20,18 +20,27 @@ struct ResultsView: View {
             hero(c)
                 .frame(width: min(other.width, 440))
                 .position(x: other.midX, y: info.size.height / 2)
-            // R6: the cards scroll (goals, the Garden and the Book's next page made the column taller than the Duo);
-            // Home / Again and Share stay put at its foot, always in reach.
+            // R7 (#7, SCORE-R6: the rank card cut by the scroll in 20, 26, 27, 47, 50, P09; the Daily's goals cut
+            // mid-row in 51): no scroll. The column takes the fullest layout that fits (`ViewThatFits`): every card,
+            // then the stats in a grid and the "next" lines on one card, then the stats on one strip, then fewer
+            // extras. Only a column too tall even at its tightest (huge Dynamic Type) scrolls. Home / Again and Share
+            // stay put at its foot, always in reach.
             let colW = min(page.width, 400)
+            let innerW = max(colW - 16, 1)
             VStack(spacing: c ? 8 : 12) {
-                ScrollView(showsIndicators: false) {
-                    details(c)
-                        .frame(width: max(colW - 16, 1))
-                        .padding(.horizontal, 8)
-                        .padding(.top, info.top)
-                        .padding(.bottom, 14)
+                ViewThatFits(in: .vertical) {
+                    column(c, fit: .full, width: innerW)
+                    column(c, fit: .grid, width: innerW)
+                    column(c, fit: .strip, width: innerW)
+                    column(c, fit: .tight, width: innerW)
+                    column(c, fit: .tightest, width: innerW)
+                    ScrollView(showsIndicators: false) {
+                        column(c, fit: .tightest, width: innerW)
+                            .padding(.bottom, 14)
+                    }
+                    .scrollColumn(initially: false)
                 }
-                .scrollColumn(initially: false)
+                .frame(maxHeight: .infinity, alignment: .top)
                 actions(c)
                     .frame(width: colW)
             }
@@ -94,8 +103,9 @@ struct ResultsView: View {
                     .shadow(color: Color.black.opacity(0.5), radius: 12, y: 4)
             }
             SnapOverline(text: summary.title, compact: c, color: SnapTheme.limeLight)
-            // R6 Zen: no score to chase, so the hero is the bugs the trap ate.
-            CountingNumber(value: o.zen ? r.bugsCaught : r.score, font: SnapType.hero(c),
+            // R7 (#10, SCORE-R6: Zen play showed a score and Zen Results none): the score, as the HUD showed it, in
+            // every mode; the Zen Bog adds its bugs and its time, and keeps no best.
+            CountingNumber(value: r.score, font: SnapType.hero(c),
                            instant: controller.reduceMotion || AppTrace.enabled)
                 .foregroundStyle(LinearGradient(colors: [SnapTheme.goldLight, SnapTheme.gold], startPoint: .top,
                                                 endPoint: .bottom))
@@ -111,7 +121,11 @@ struct ResultsView: View {
                     .accessibilityLabel("\(o.streak)-day streak")
             }
             if o.zen {
-                EmptyView()
+                Text(Self.zenLine(bugs: r.bugsCaught, seconds: r.seconds))
+                    .font(SnapType.body(c).monospacedDigit())
+                    .foregroundStyle(SnapTheme.limeLight)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             } else if o.showsNewBest {
                 HStack(spacing: 8) {
                     SnapPill(text: "New best!")
@@ -146,29 +160,132 @@ struct ResultsView: View {
 
     // MARK: The HUD page
 
-    private func details(_ c: Bool) -> some View {
-        let r = summary.result
+    /// R7 (#7): how much the HUD page's column holds, fullest first (`ViewThatFits` takes the first that fits).
+    enum Fit: Int, CaseIterable {
+        /// Every card, the stats as a list, the next goal and the next Bug Book page on cards of their own.
+        case full
+        /// The stats in a 2 × 2 grid; the next goal and the Book's next page share one card.
+        case grid
+        /// The stats on one strip; the new pages' tiles give way.
+        case strip
+        /// No bars under the goals, the rank without its hint; a new trap or the "next" card, not both.
+        case tight
+        /// The stats, the goals and the rank alone.
+        case tightest
+
+        var statsList: Bool { self == .full }
+        var statsGrid: Bool { self == .grid }
+        var separateNext: Bool { self == .full }
+        var speciesTiles: Bool { self == .full || self == .grid }
+        var goalBars: Bool { self == .full || self == .grid || self == .strip }
+        var rankHint: Bool { self == .full || self == .grid || self == .strip }
+        var showsNext: Bool { self != .tightest }
+        var gardenAndNext: Bool { self == .full || self == .grid || self == .strip }
+    }
+
+    /// R7 (#7): the HUD page's column at a fit.
+    private func column(_ c: Bool, fit: Fit, width: CGFloat) -> some View {
         let o = summary.outcome
+        let next = Self.nextGoal(o)
+        let book = AppRules.nextBookTarget(store.data)
+        let garden = o.newVarieties.first
+        let showsGarden = garden != nil && fit != .tightest
+        let showsNext = fit.showsNext && (next != nil || book != nil) && (fit.gardenAndNext || garden == nil)
         return VStack(spacing: c ? 8 : 12) {
-            VStack(spacing: c ? 6 : 10) {
-                statRow(icon: "ladybug.fill", title: "Bugs caught", value: "\(r.bugsCaught)", c)
-                statRow(icon: "flame.fill", title: "Best bite",
-                        value: AppRules.bestBiteText(bugs: r.biggestBite, points: r.bestBitePoints), c)
-                statRow(icon: "link", title: "Best chain", value: AppRules.chainText(longest: r.longestChain), c)
-                statRow(icon: "heart.fill", title: "Bees spared", value: "\(r.beesSpared)", c)
-            }
-            .snapCard(padding: c ? 10 : 14, radius: 20)
+            stats(c, fit: fit)
             // R6: the run's goals, ticked, and the growth they gave.
             if !o.goalLines.isEmpty {
                 GoalsCard(lines: o.goalLines, compact: c, title: GoalsCard.homeTitle,
-                          footer: Self.goalsFooter(o), footerColor: o.goalBonus ? SnapTheme.gold : SnapTheme.limeLight)
+                          footer: Self.goalsFooter(o), footerColor: o.goalBonus ? SnapTheme.gold : SnapTheme.limeLight,
+                          bars: fit.goalBars)
             }
             // The rank bar next (the goals' growth fills it too).
-            rankCard(c)
-            if let v = o.newVarieties.first {
+            rankCard(c, hint: fit.rankHint)
+            if showsGarden, let v = garden {
                 gardenCard(v, more: o.newVarieties.count - 1, c)
             }
-            if !o.newSpecies.isEmpty {
+            if fit.speciesTiles && !o.newSpecies.isEmpty {
+                speciesCard(c)
+            }
+            if showsNext {
+                if fit.separateNext {
+                    if let next { nextGoalCard(next, c) }
+                    if let book { nextBookCard(book, c) }
+                } else {
+                    nextCard(goal: next, book: book, c)
+                }
+            }
+        }
+        .frame(width: width)
+        .padding(.horizontal, 8)
+        .padding(.top, info.top)
+    }
+
+    /// The run's numbers: a list (the fullest fit), a 2 × 2 grid, or one strip of four.
+    @ViewBuilder
+    private func stats(_ c: Bool, fit: Fit) -> some View {
+        let r = summary.result
+        let bite = AppRules.bestBiteText(bugs: r.biggestBite, points: r.bestBitePoints)
+        let chain = AppRules.chainText(longest: r.longestChain)
+        if fit.statsList {
+            VStack(spacing: c ? 6 : 10) {
+                statRow(icon: "ladybug.fill", title: "Bugs caught", value: "\(r.bugsCaught)", c)
+                statRow(icon: "flame.fill", title: "Best bite", value: bite, c)
+                statRow(icon: "link", title: "Best chain", value: chain, c)
+                statRow(icon: "heart.fill", title: "Bees spared", value: "\(r.beesSpared)", c)
+            }
+            .snapCard(padding: c ? 10 : 14, radius: 20)
+        } else if fit.statsGrid {
+            VStack(spacing: c ? 6 : 8) {
+                HStack(spacing: 8) {
+                    statTile(value: "\(r.bugsCaught)", title: "Bugs caught", c)
+                    statTile(value: bite, title: "Best bite", c)
+                }
+                HStack(spacing: 8) {
+                    statTile(value: chain, title: "Best chain", c)
+                    statTile(value: "\(r.beesSpared)", title: "Bees spared", c)
+                }
+            }
+            .snapCard(padding: c ? 8 : 12, radius: 20)
+        } else {
+            HStack(spacing: 6) {
+                statTile(value: "\(r.bugsCaught)", title: "Bugs", c)
+                statTile(value: r.biggestBite > 0 ? AppRules.formatted(max(r.bestBitePoints, 0)) : "–",
+                         title: Self.stripBiteTitle(r.biggestBite), c)
+                statTile(value: r.longestChain > 0
+                         ? AppRules.multiplierText(TrapRules.chainMultiplier(r.longestChain)) : "–",
+                         title: "Chain", c)
+                statTile(value: "\(r.beesSpared)", title: "Spared", c)
+            }
+            .snapCard(padding: c ? 8 : 10, radius: 20)
+        }
+    }
+
+    /// R7 (#7): the strip's best-bite label ("Best bite", "5-bug bite"). Pure; tested.
+    static func stripBiteTitle(_ bugs: Int) -> String { bugs >= 2 ? "\(bugs)-bug bite" : "Best bite" }
+
+    /// One number over its label.
+    private func statTile(value: String, title: String, _ c: Bool) -> some View {
+        VStack(spacing: 1) {
+            Text(value)
+                .font(SnapType.body(c).monospacedDigit().weight(.heavy))
+                .foregroundStyle(SnapTheme.gold)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(title)
+                .font(.system(size: c ? 10 : 11, weight: .bold, design: .rounded))
+                .foregroundStyle(SnapTheme.mist)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The new Bug Book pages as tiles.
+    private func speciesCard(_ c: Bool) -> some View {
+        let o = summary.outcome
+        return Group {
                 // As many tiles as fit, then "+n" (REVIEW-1 #23: the row never runs off the card).
                 let tileW: CGFloat = c ? 52 : 62
                 let cardW = min(info.hudPage.width, 400)
@@ -201,11 +318,91 @@ struct ResultsView: View {
                 }
                 .snapCard(padding: c ? 10 : 12, radius: 20)
                 .accessibilityElement(children: .combine)
+        }
+    }
+
+    // MARK: R7 (#15): what's next
+
+    /// The goal to play for next: the first goal drawn to replace a done one, else the first one still open. Pure;
+    /// tested.
+    static func nextGoal(_ o: RecordOutcome) -> GoalLine? {
+        if let line = o.newGoals.lazy.compactMap({ GoalLine.fresh($0) }).first { return line }
+        if let open = o.goalLines.first(where: { !$0.done && $0.inPlay }) { return open }
+        return o.goalLines.first(where: { !$0.done })
+    }
+
+    static let nextGoalTitle = "Next goal"
+
+    /// "Next goal: A 5-bug bite". Pure; tested.
+    static func nextGoalText(_ g: GoalLine) -> String { nextGoalTitle + ": " + g.title }
+
+    private func nextGoalCard(_ g: GoalLine, _ c: Bool) -> some View {
+        HStack(spacing: c ? 8 : 10) {
+            Image(systemName: "flag.fill")
+                .font(.system(size: c ? 14 : 17, weight: .bold))
+                .foregroundStyle(SnapTheme.gold)
+                .frame(width: c ? 20 : 24)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    SnapOverline(text: Self.nextGoalTitle, compact: c, color: SnapTheme.gold)
+                    if let t = g.tier { TierDot(tier: t, compact: c, label: true) }
+                }
+                Text(g.title)
+                    .font(SnapType.caption(c).weight(.semibold))
+                    .foregroundStyle(SnapTheme.cream)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            if let next = AppRules.nextBookTarget(store.data) {
-                nextBookCard(next, c)
+            Spacer(minLength: 0)
+        }
+        .snapCard(padding: c ? 10 : 12, radius: 20)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The next goal and the Book's next page on one card (the tighter fits).
+    private func nextCard(goal: GoalLine?, book: BugSpecies?, _ c: Bool) -> some View {
+        VStack(alignment: .leading, spacing: c ? 4 : 6) {
+            if let g = goal {
+                HStack(spacing: 6) {
+                    Image(systemName: "flag.fill")
+                        .font(.system(size: c ? 11 : 13, weight: .bold))
+                        .foregroundStyle(SnapTheme.gold)
+                    Text(Self.nextGoalText(g))
+                        .font(SnapType.caption(c).weight(.semibold))
+                        .foregroundStyle(SnapTheme.cream)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Spacer(minLength: 0)
+                    if let t = g.tier { TierDot(tier: t, compact: c) }
+                }
+            }
+            if let s = book {
+                HStack(spacing: 6) {
+                    Image(systemName: "book.fill")
+                        .font(.system(size: c ? 11 : 13, weight: .bold))
+                        .foregroundStyle(SnapTheme.gold)
+                    Text(Self.nextBookShort + ": " + AppRules.nextBookLine(s))
+                        .font(SnapType.caption(c).weight(.semibold))
+                        .foregroundStyle(SnapTheme.cream)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Spacer(minLength: 0)
+                }
             }
         }
+        .snapCard(padding: c ? 10 : 12, radius: 20)
+        .accessibilityElement(children: .combine)
+    }
+
+    static let nextBookShort = "Bug Book"
+
+    /// R7 (#10): the Zen Bog's line under its score: "94 bugs in 2:30 · no best kept". Pure; tested.
+    static func zenLine(bugs: Int, seconds: Double) -> String {
+        let s = seconds.isFinite ? max(Int(seconds.rounded()), 0) : 0
+        let n = max(bugs, 0)
+        let time = "\(s / 60):" + String(format: "%02d", s % 60)
+        return "\(n) \(n == 1 ? "bug" : "bugs") in " + time + " · no best kept"
     }
 
     /// The Daily share's line: the scored Daily only (a practice run isn't the day's score). R6: with the streak.
@@ -215,8 +412,9 @@ struct ResultsView: View {
         return AppRules.dailyShareText(day: day, score: r.score, biggestBite: r.biggestBite, streak: streak)
     }
 
-    /// R6: the hero number's word ("score"; the Zen Bog counts bugs).
-    static func heroWord(zen: Bool) -> String { zen ? "bugs caught" : AppRules.scoreWord }
+    /// R6: the hero number's word. R7 (#10): "score" in the Zen Bog too (its HUD shows the score; `zenLine` adds the
+    /// bugs and the time).
+    static func heroWord(zen: Bool) -> String { AppRules.scoreWord }
 
     /// R6: under the goals: their growth (and the bonus), or nothing when none was done. Pure; tested.
     static func goalsFooter(_ o: RecordOutcome) -> String? {
@@ -291,7 +489,8 @@ struct ResultsView: View {
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(SnapTheme.gold.opacity(0.7), lineWidth: 2))
     }
 
-    private func rankCard(_ c: Bool) -> some View {
+    /// `hint`: the line under the bar (the tighter fits drop it).
+    private func rankCard(_ c: Bool, hint: Bool = true) -> some View {
         let o = summary.outcome
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -313,11 +512,13 @@ struct ResultsView: View {
             }
             RankBar(from: summary.rankProgressBefore, to: summary.rankProgressAfter,
                     instant: controller.reduceMotion || AppTrace.enabled)
-            Text(AppRules.rankHint(lifetimeBugs: o.lifetimeAfter))
-                .font(SnapType.caption(c))
-                .foregroundStyle(SnapTheme.mist)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+            if hint {
+                Text(AppRules.rankHint(lifetimeBugs: o.lifetimeAfter))
+                    .font(SnapType.caption(c))
+                    .foregroundStyle(SnapTheme.mist)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
         }
         .snapCard(padding: c ? 10 : 14, radius: 20)
         .accessibilityElement(children: .combine)

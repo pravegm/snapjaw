@@ -11,7 +11,8 @@ final class GameCenterManager {
     static let shared = GameCenterManager()
 
     enum Leaderboard {
-        /// Best Feast: protein in one Feed run (classic, all-time).
+        /// Best Score (R7 #8: the display name, `AppRules.leaderboardName`; the id is unchanged): the score of one
+        /// Feed run (classic, all-time).
         static let best = "snap.best"
         /// Daily Bog: the day's scored try (a recurring leaderboard that resets daily).
         static let daily = "snap.daily"
@@ -85,7 +86,7 @@ final class GameCenterManager {
         case .feed:
             if score > 0 { queueScore(score, leaderboard: Leaderboard.best, day: nil) }
         case let .daily(day, scored):
-            // A Daily goes to the Daily board only; Best Feast is the Feed's best, as Home shows it.
+            // A Daily goes to the Daily board only; Best Score is the Feed's best, as Home shows it.
             if scored && outcome.dailyCounted && score > 0 {
                 queueScore(score, leaderboard: Leaderboard.daily, day: day)
             }
@@ -131,7 +132,7 @@ final class GameCenterManager {
         earned.subtracting(reported).filter { known.contains($0) }
     }
 
-    /// One pending Daily entry per day (the larger wins), and the cap never evicts a Best Feast entry first.
+    /// One pending Daily entry per day (the larger wins), and the cap never evicts a Best Score entry first.
     nonisolated static func enqueue(_ entry: String, into queue: [String], cap: Int = 20) -> [String] {
         guard let new = parse(entry) else { return queue }
         var out = queue

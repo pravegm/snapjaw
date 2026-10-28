@@ -17,7 +17,7 @@
 03-home-duo-layout|screen=home;progress=mid;fold=1|6|Home laid out as on a Duo (fold=1): the midrib on the fold band, the buttons on the right (HUD) half|SNAP-T canvas [0-9]+x[0-9]+ fold=1
 # First Bite (GAME-DESIGN §8), phone texts ("Tap to snap"; the pose step is skipped on a phone)
 04-lesson-2-first-snap|screen=lesson;lessonStep=2|7|Lesson step 2: one fat housefly sipping on a nectar drop, "When it's sipping… tap to snap!"|SNAP-T canvas
-05-lesson-3-open-again|screen=lesson;lessonStep=3|7|Lesson step 3: "Open up to reset the trap."|SNAP-T canvas
+05-lesson-3-open-again|screen=lesson;lessonStep=3;fold=1;closure=24|7|Lesson step 3, the Duo's re-arm step (fold=1 gives the Duo lesson on a phone sim; a touch phone has no step 3, it merges into step 2's praise): the jaws held at 24°, past the bite, so the trap never re-arms and the card waits on "Open up to reset the trap." (R7: it was frame 06 again)|SNAP-T lesson step 3
 06-lesson-4-too-slow|screen=lesson;lessonStep=4|7|Lesson step 4: two flies land, "Quick snaps catch more."|SNAP-T canvas
 07-lesson-5-bee|screen=lesson;lessonStep=5|5|Lesson step 5: a bee sipping with its white protected halo, "Never eat a bee. Wait…"|SNAP-T canvas
 08-lesson-6-triple|screen=lesson;lessonStep=6|8|Lesson step 6: three flies landing together, "Wait for a crowd… now!"|SNAP-T canvas
@@ -27,25 +27,25 @@
 11-play-crowd|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd|60|Three or more bugs sipping at once, the "Now!" hint|SNAP-T freeze crowd
 12-play-bee|screen=play;seed=7;wave=15;pilot=perfect;freezeOn=bee|60|A bee sipping in the trap: yellow-black bands, the white protected halo, the "Bee! Wait…" hint|SNAP-T freeze bee
 13-play-snap|screen=play;seed=7;pilot=casual;freezeOn=snap|45|0.12 s after a bite: teeth interlocked at both outer edges, the dark vignette, juice splats, the "+N" score pop|SNAP-T event snapped
-14-play-feast|screen=play;seed=7;wave=8;pilot=perfect;freezeOn=feast|90|A Feast: 3+ caught in one bite, "TRIPLE ×3" and "Feast! +1 snap"|SNAP-T event feast
+14-play-feast|screen=play;seed=7;wave=8;pilot=perfect;freezeOn=feast|90|A Feast (3+ bugs in one bite; seed 7 at wave 8 is a 4-bug bite): the bite pop names the bug count and the points ("4 bugs · +N", R7: no × for a bug count; × is only the chain chip) and the snap won back|SNAP-T event feast count=[34] snapsBack
 15-play-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=sting|90|A bee or wasp in the bite: "Bzzt!", the stinger let go, snaps down by the cost|SNAP-T event stung
 16-play-dusk|screen=play;seed=7;wave=17;pilot=expert;freezeOn=landed|40|Dusk (wave 17, already dusk at the start so the tint has settled): the peach tint, moths drawn to the fold|SNAP-T canvas
-17-play-night|screen=play;seed=7;wave=22;pilot=expert;freezeOn=night|60|Night: the blue tint, fireflies glowing with blooms, other bugs dimmed|SNAP-T event dayPhaseChanged
+17-play-night|screen=play;seed=7;wave=26;pilot=expert;freezeOn=crowd;freezeAfter=6|60|Night, settled (wave 26, 6 s in, long after the wave-23 change, not the dusk-to-night moment): the blue tint, fireflies glowing with blooms, a crowd sipping|SNAP-T start wave 26
 18-play-last-snap|screen=play;seed=7;pilot=novice;freezeOn=lastSnap|150|One snap left: "Last snap! Make it count"|SNAP-T event lastSnap
 19-play-tired|screen=play;seed=7;pilot=novice;freezeOn=tired|180|Snaps at 0: "Your trap is tired.", the bugs leaving|SNAP-T event tired
 20-play-results|screen=play;seed=7;pilot=novice;freezeOn=results|200|The run's end handing over to Results|SNAP-T freeze results
 # Layout variants (the wide phone, the Duo layout on a phone, the HUD mirrored)
 21-play-wide-fold0|screen=play;seed=7;pilot=casual;fold=0;freezeAfter=8|16|A wide phone (fold=0): the trap and bog drawn flat, the midrib only (no fold band shadow), the bog extension at the sides|SNAP-T canvas [0-9]+x[0-9]+ fold=0
 22-play-duo-fold1|screen=play;seed=7;pilot=casual;fold=1;freezeAfter=8|16|The Duo layout (fold=1): the lobes split by the midrib on the fold band, the HUD on the right (sharp) half|SNAP-T canvas [0-9]+x[0-9]+ fold=1
-23-play-hud-left|screen=play;seed=7;pilot=casual;fold=1;hudLeft=1;freezeAfter=8|16|Settings "HUD on the left": the score, snaps and chain chip mirrored to the left half|hudLeft=1
+23-play-hud-left|screen=play;seed=7;pilot=casual;fold=1;hudLeft=1;freezeAfter=8|16|Settings "Score on the left": the score, snaps and chain chip mirrored to the left half|hudLeft=1
 24-play-jaws-half|screen=play;mode=attract;seed=7;closure=11|8|The jaws held half shut (11°): teeth leaning in, the shadow growing in from the outer edges|SNAP-T trap closure 1[01]
 25-daily|screen=play;mode=daily;seed=7;progress=mid;pilot=expert;freezeAfter=10|18|Daily Bog in play: the daily badge in the HUD, today's seed|SNAP-T input pilot
 # Results, Bug Book, Settings, pose and cover cards
-26-results-mid|screen=results;seed=7;progress=mid;pilot=casual|8|Results: protein counting up, bugs caught, best bite, longest chain, bees spared, the rank bar, the best-moment sentence; Again / Home|SNAP-T canvas
+26-results-mid|screen=results;seed=7;progress=mid;pilot=casual|8|Results after a casual Feed run: the score counting up, bugs caught, best bite, longest chain, bees spared, the Goals card, the rank bar, the best-moment sentence; Again / Home|SNAP-T canvas
 27-results-fresh|screen=results;seed=7;progress=fresh;pilot=novice|8|Results after a first run: new Bug Book entries drawn, "New best"|SNAP-T canvas
 28-book-mid|screen=book;progress=mid|6|Bug Book: 9 of 16 drawn with name, joke and count; the rest silhouettes|SNAP-T canvas
 29-book-late|screen=book;progress=late|6|Bug Book, all 16 found (bees show "spared")|SNAP-T canvas
-30-settings|screen=settings|5|Settings: Sound, Haptics, Respect silent switch, HUD on the left, Reduce motion, Replay First Bite, About, Credits|SNAP-T canvas
+30-settings|screen=settings|5|Settings: Sound, Haptics, Respect silent switch, Score on the left, Reduce motion, Replay First Bite, Game Center, About|SNAP-T canvas
 31-pose|screen=pose|5|The pose card: "Hold it open like a book" with its diagram|SNAP-T canvas
 32-cover|screen=cover|5|The cover-display card: "Open it up to carry on" and the score|SNAP-T canvas
 # R2: hunger (GAME-DESIGN §5)
@@ -58,7 +58,7 @@
 37-play-dusk-18|screen=play;seed=7;wave=18;pilot=expert;freezeOn=landed|40|Dusk at wave 18: the peach haze and the warm rim light, the trap crimson|SNAP-T canvas
 38-play-first-hint|screen=play;seed=7;freezeOn=firstHint|30|The first wave of a run, no snap yet: "Snap the halves together" (phone: "Tap to snap")|SNAP-T freeze firstHint
 39-play-chain5|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=chain5;freezeAfter=50|300|The chain at the ×5 cap: the chip flare (R5, REVIEW-4 #15: chain5 fires on the 5th step, ×3.5; ×5 is the 8th, ~41 s in, so only a step after 50 s counts)|SNAP-T event chainUp count=[0-9]+ multiplier=5
-40-play-costly-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=costlySting|120|A sting that costs snaps: "Stung! · +N", a glyph cracks and the row flashes crimson|SNAP-T freeze costlySting
+40-play-costly-sting|screen=play;seed=11;wave=15;pilot=novice;freezeOn=costlySting|120|A sting that costs snaps: "Stung! · +N" above the ring, a glyph cracks and the row flashes crimson (R7: seed 11, so it is not frame 15's moment again)|SNAP-T freeze costlySting
 41-play-dry-snap|screen=play;seed=7;pilot=novice;freezeOn=drySnap|90|A dry snap: nothing caught, the chain broken|SNAP-T freeze drySnap
 42-play-held|screen=play;seed=7;wave=6;pilot=casual;freezeOn=held|150|A 1-bug clean bite holding the chain: "×1.5 held"|SNAP-T freeze held
 43-play-sprout-first-sting|screen=play;seed=7;wave=15;pilot=novice;progress=fresh;firstRun=1;freezeOn=sting|120|Sprout run 1: the free first sting, "Bees and wasps cost snaps. This one's free!" in the hint slot, the row flashing green|SNAP-T event stung
@@ -69,9 +69,11 @@
 47-zen-results|screen=results;mode=zen;progress=mid|20|Zen Results: bugs, Bug Book, goals; no leaderboard|SNAP-T canvas
 48-big-feast|screen=play;mode=feed;pilot=expert;progress=mid;freezeOn=bigFeast|240|A FEAST event: 5+ bugs, the gold burst, the "FEAST!" banner, the gulp|SNAP-T freeze bigFeast
 49-goal-done|screen=play;mode=feed;pilot=casual;progress=mid;freezeOn=goalDone|240|A goal completed mid-run: the goal toast on its plate|SNAP-T freeze goalDone
-50-results-goals|screen=results;pilot=casual;progress=mid|240|Results with the run's goals ticked and the growth|SNAP-T canvas
+50-results-goals|screen=results;seed=7;pilot=expert;progress=mid|240|Results after an expert Feed run: all three goals ticked and the all-three bonus in the growth line (R7: the expert pilot, so it is not frame 26 again; the expect checks 3 of 3)|SNAP-T results goals 3 growth=
 51-daily-share|screen=results;mode=daily;pilot=casual;progress=mid|240|Daily Results: the streak (fire, 3 days) and the Share button|SNAP-T canvas
-52-home-goals|screen=home;progress=mid|8|Home with the goals card, the streak, Zen and Garden buttons|SNAP-T canvas
+52-home-goals|screen=home;progress=late|8|Home late on (the store set's one progress state): rank 10, the goals card, the streak, Zen and Garden (6/8) buttons, Bug Book 16/16 (R7: late, so it is not frame 02 again)|SNAP-T canvas
 53-variety-red-dragon|screen=play;seed=7;wave=6;pilot=perfect;progress=mid;variety=redDragon;freezeOn=crowd|60|Red Dragon variety in play: crimson inside and out|SNAP-T freeze crowd
 54-variety-b52|screen=play;seed=7;wave=6;pilot=perfect;progress=mid;variety=b52;freezeOn=crowd|60|B52 variety in play: big lobes, chunky cilia|SNAP-T freeze crowd
 55-variety-golden|screen=play;seed=7;wave=6;pilot=perfect;progress=late;variety=goldenGlow;freezeOn=crowd|60|Golden Glow variety: the gold sheen|SNAP-T freeze crowd
+# R7 (SCORE-R6 #16): the Garden pick (variety= is the chosen trap, so it wears the gold check)
+56-garden-pick|screen=garden;progress=late;variety=redDragon|8|The Garden with Red Dragon picked: the gold check on Red Dragon, not on Classic; grown cards in colour, two still locked|SNAP-T screen garden

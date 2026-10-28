@@ -7,8 +7,9 @@ import Foundation
 // (same names) and the detector values in its `D` table: KEEP THEM IDENTICAL. R1 tuning (design/notes/core-R1.md)
 // changed some GAME-DESIGN starting values; each change is marked "R1". R2 changes (design/notes/core-R2.md) are
 // marked "R2", R3 changes (design/notes/core-R3.md) "R3", R4 changes (design/notes/core-R4.md) "R4", R5 changes
-// (design/notes/core-R5.md) "R5", R6 changes (design/notes/core-R6.md) "R6". The R6 goal and halo values are not in the
-// sim (it has no goals or hints); lastLightWave and zenDayWaves are.
+// (design/notes/core-R5.md) "R5", R6 changes (design/notes/core-R6.md) "R6", R7 changes (design/notes/core-R7.md) "R7".
+// The R6 goal and halo values are not in the sim (it has no goals or hints); lastLightWave and zenDayWaves are. R7's
+// feastMultiplier, night pool weights and late decays are; wellFedScore is not.
 
 enum Tuning {
 
@@ -77,6 +78,11 @@ enum Tuning {
     static let feastRefund: Int = 1
     static let bigFeastCount: Int = 5
     static let bigFeastRefund: Int = 2
+    /// R7 (SCORE-R6 #3, founder call): a clean bite of ≥ bigFeastCount (a FEAST) scores × this on top of the chain
+    /// (TrapRules.bitePoints / feastBonus). At the same chain 5 bugs then out-score 4 bugs whose mean points per bug
+    /// are up to 50 / 16 = 3.1× higher (5 × 5 × 2 against 4 × 4), so R6's "FEAST +180 next to a QUAD +260" is now
+    /// +360 against +260. A stung bite is never a FEAST and scores × 1.
+    static let feastMultiplier: Double = 2.0
     static let scarabRefund: Int = 2
     static let ladybirdRefund: Int = 1
     /// Extra snaps lost per bee / bumblebee and per wasp in the bite.
@@ -114,11 +120,13 @@ enum Tuning {
     /// a 0.2 floor (was 0.97 / 0.6 and 0.98 / 0.5). R4: the floor is 0.2 (was 0.25): at 0.25 a sipping housefly
     /// (0.24 × 1.35 × 0.25 = 81 ms) never outran an 80 ms hand, and with R4's gated hunger nothing else ended a perfect
     /// run. At 0.2 every night bug but the scarab outruns 80 ms by about wave 70.
+    /// R7 (#14): 0.955 (was 0.96) and lingers × 0.91 (was 0.92): with the night pool's fireflies and crickets the
+    /// expert's longest runs sat near 6 min; the sim's expert p90 is now 330 s on 8 seeds (was 346 s), 332 s on 16.
     static let lateWaveStart: Int = 30
-    static let lateReactionDecay: Double = 0.96
+    static let lateReactionDecay: Double = 0.955
     static let lateReactionFloor: Double = 0.2
     /// R1: night lingers shrink the same way after lateWaveStart (floor lateLingerFloor).
-    static let lateLingerDecay: Double = 0.92
+    static let lateLingerDecay: Double = 0.91
     static let lateLingerFloor: Double = 0.2
 
     // MARK: Waves and the day (GAME-DESIGN §6)
@@ -199,6 +207,13 @@ enum Tuning {
     static let sizeDuskMax: Int = 4
     static let sizeNightMin: Int = 2
     static let sizeNightMax: Int = 5
+    /// R7 (SCORE-R6 #14): night is fireflies and crickets. At night the day bugs' pool weights (housefly, fruit fly,
+    /// gnat, bluebottle, grasshopper) are × nightDayBugWeight, and fireflies and crickets weigh these (R6: 3 and 2.5).
+    /// Over waves 23–90 the firefly is the commonest bug landing in the trap and the pair are ~45% of them (R6: 13%,
+    /// gnats first). Same draws, so the draw order never changes.
+    static let nightDayBugWeight: Double = 0.3
+    static let nightFireflyWeight: Double = 8
+    static let nightCricketWeight: Double = 6
     /// Crowd waves (everything lands close together) from this wave, with this chance.
     static let crowdFromWave: Int = 3
     static let crowdChance: Double = 0.45
@@ -256,6 +271,9 @@ enum Tuning {
     static let pilotStep: Double = 1.0 / 60.0
     /// … and at most this many fixed steps per display frame (after a long hitch the run falls behind, it never jumps).
     static let pilotMaxStepsPerFrame: Int = 6
+    /// R7 (SCORE-R6 #4): a resting bug's centre keeps its radius (a protected bug: its halo, haloScale × radius +
+    /// haloPad) plus this (pt) from every TrapSession.keepOut rect. Not in the sim (it has no keep-out).
+    static let keepOutMargin: Double = 8
 
     // MARK: Movement (ROUND-1 "Movement")
 
@@ -338,6 +356,11 @@ enum Tuning {
     /// A Zen Bog run grows the plant rank by this share of its bugs (rounded down per run); Feed and the Daily count
     /// every bug. The Bug Book and any-mode goals count Zen bugs in full.
     static let zenRankShare: Double = 0.25
+
+    /// R7: the "Well Fed" achievement's run score (Achievements.score10k), R6's 10,000 named. With the ×2 FEAST it still
+    /// sits above the casual median (~7,800) and at or below the expert's (~40,000), as docs/appstore/achievements.md
+    /// asks; BalanceTests checks it.
+    static let wellFedScore: Int = 10_000
 
     // MARK: Goals (R6, Goals.swift; not in the sim)
 

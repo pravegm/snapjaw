@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The App Store icon. R3 (REVIEW-2 #13 / juror P1-5): one idea, readable at 29 px. A Venus flytrap seen from 3/4
-/// above, half shut round a little fly who is peeking over the front lip, hands on the rim, eyes looking up at the
-/// jaw about to close.
+/// above, half shut round a little fly who is peeking over the front lip, eyes looking up at the jaw about to close.
+/// R7 (SCORE-R6 #18): the fly's two hands on the lip are gone (at 60 and 40 pt they read as two studs).
 ///
 /// R4 (REVIEW-3 #17): the same composition, made the game's own trap and fly.
 /// - The fly is the in-game **housefly** (`TrapArt.bugStyle(.housefly)`): a grey-blue body (#9AA5B5 → #575E6B →
@@ -113,8 +113,6 @@ enum AppIconPainter {
 
     /// R4: the fly's centre in the trap frame (its thorax; the head sits below it, peeking over the front lobe).
     static let flyCenter = CGPoint(x: -6, y: 0)
-    /// R4: the fly's hands on the lip, either side of it (trap-frame x offsets).
-    static let handOffsets: [CGFloat] = [-54, 54]
 
     // MARK: Paint
 
@@ -125,7 +123,6 @@ enum AppIconPainter {
         backLobe(&ctx)
         fly(&ctx)
         frontLobe(&ctx)
-        hands(&ctx)
     }
 
     // MARK: Helpers
@@ -175,16 +172,6 @@ enum AppIconPainter {
         p.addCurve(to: r.p3, control1: r.c1, control2: r.c2)
         p.closeSubpath()
         return p
-    }
-
-    /// The point on the front lip (trap frame) whose x is nearest `x` (the lip is gentle, so 60 samples is plenty).
-    static func lipPoint(nearX x: CGFloat) -> CGPoint {
-        var best = frontRim.point(0)
-        for i in 1...60 {
-            let p = frontRim.point(CGFloat(i) / 60)
-            if abs(p.x - x) < abs(best.x - x) { best = p }
-        }
-        return best
     }
 
     // MARK: Background and stem
@@ -260,7 +247,7 @@ enum AppIconPainter {
     }
 
     /// R4: the front lobe's shorter fringe, from the lip's margin down and out over the green outside of the leaf,
-    /// fanning to the sides. The middle (under the fly and its hands) stays bare, so nothing reads as teeth.
+    /// fanning to the sides. The middle (under the fly) stays bare, so nothing reads as teeth.
     static func fringe(_ c: inout GraphicsContext) {
         let spots: [CGFloat] = [0.07, 0.17, 0.27, 0.36, 0.64, 0.73, 0.83, 0.93]
         let maxLength: CGFloat = 78
@@ -394,23 +381,7 @@ enum AppIconPainter {
         }
     }
 
-    /// R6 (SCORE-R5 #18): the hands' light grey-blue, a step paler than the fly's lightest body tone.
-    static let handLight = Color(snapHex: 0xD4DCE6)
-
-    /// Two little hands gripping the front lip, either side of the fly. R6 (SCORE-R5 #18): at thumbnail size the two
-    /// dark grey (#575E6B) ovals with their dark drop shadows read as "nostrils" on the lime lip. They are now small
-    /// and pale (a light grey-blue lit from the upper left, `handLight` → `flyLight`), with only a faint green
-    /// shadow, so they sit on the margin as a highlight, never as two dark holes.
-    static func hands(_ ctx: inout GraphicsContext) {
-        let c = trapContext(ctx)
-        for dx in handOffsets {
-            let q = lipPoint(nearX: flyCenter.x + dx)
-            let h = CGPoint(x: q.x, y: q.y - 4)
-            c.fill(ellipse(CGPoint(x: h.x + 1, y: h.y + 3), 15, 10), with: .color(Color(snapHex: 0x5E8A2A, alpha: 0.18)))
-            let pale = Gradient(colors: [handLight, flyLight])
-            c.fill(ellipse(h, 15, 10), with: .radialGradient(pale, center: CGPoint(x: h.x - 5, y: h.y - 4),
-                                                             startRadius: 1, endRadius: 18))
-            c.fill(ellipse(CGPoint(x: h.x - 4, y: h.y - 4), 6, 3), with: .color(Color.white.opacity(0.45)))
-        }
-    }
+    // R7 (SCORE-R6 #18): the fly's two hands on the front lip are gone. R5's dark ovals read as "nostrils" and R6's
+    // pale ones still read as two silver studs on the lime lip at 60 and 40 pt. The fly's head sinking behind the
+    // front lobe already says "inside the trap", so the lip is one unbroken lime margin.
 }

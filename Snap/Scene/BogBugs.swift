@@ -54,6 +54,9 @@ final class BogBugNode {
     /// once (a new bug takes its first nudge at once).
     var nudge: CGPoint = .zero
     var nudged = false
+    /// R7 (#4): sitting (walking, sipping) on the last frame, and its footprint half-size (halo included).
+    var sitting = false
+    var footHalf: CGFloat = 0
     /// R6 (FEAST): this caught bug waits `gulpDelay` s (held in the closing jaws, over the closed trap) and is then
     /// gulped into the midrib; `gulped` once it is in.
     var feastGulp = false
@@ -174,6 +177,8 @@ final class BogBugNode {
         shadowOffset = .zero
         nudge = .zero
         nudged = false
+        sitting = false
+        footHalf = BogBugLayer.footprintHalf(s, radius: r)
         feastGulp = false
         gulpDelay = 0
         gulped = false
@@ -237,6 +242,30 @@ final class BogBugLayer {
         var m: CGFloat = 0
         for n in live.values { m = max(m, n.extentRatio) }
         return m
+    }
+
+    /// R7 (#4): Home's bog is decoration: every uncatchable bug there may be eased clear of Home's buttons (in play only
+    /// flying, uncatchable bugs are). Set by `BogScene`.
+    var decorative = false
+
+    /// R7 (#4): a bug the next bite could take: in the trap and a bite candidate (`TrapRules.isCandidate`, Core's own
+    /// rule). It is always drawn at its Core position.
+    static func isCatchable(_ b: BugState) -> Bool {
+        b.inTrap && TrapRules.isCandidate(b.activity, height: b.height)
+    }
+
+    /// R7 (#4, tests): bug `id`'s visual-only offset from its Core position now (zero for a catchable bug).
+    func nudge(_ id: Int) -> CGPoint? { live[id]?.nudge }
+
+    /// R7 (#4, tests, the CI probe): every sitting (walking, sipping) bug drawn now, as its footprint (halo included)
+    /// about where it is drawn (scene space, unshaken).
+    var sittingRects: [CGRect] {
+        var out: [CGRect] = []
+        for n in live.values where n.sitting && !n.root.isHidden && n.root.alpha > 0.01 {
+            let h = n.footHalf
+            out.append(CGRect(x: n.drawnPoint.x - h, y: n.drawnPoint.y - h, width: 2 * h, height: 2 * h))
+        }
+        return out
     }
 
     /// Bugs drawn with the white catch flash this frame (tests).
@@ -354,34 +383,54 @@ final class BogBugLayer {
     /// - of the canvas edge: its footprint (ring included) sits `edgeGap` inside. A `resting` bug (walking, sipping)
     ///   whose centre is on screen is pushed all the way in. A flying one is eased in (`edgePush`: nothing while its
     ///   centre is off screen, all of it once its centre is a footprint in), so a bug flying in never pops;
-    /// - of the midrib, when `resting` in the trap: its centre `creaseHalfWidth` + r + 16 off it (Core's own rule: a
-    ///   resting bug is never drawn on the hinge);
-    /// - of every rect in `keepOut` (the HUD's corners), when outside the trap: pushed out to the nearest side that
-    ///   stays on screen.
-    /// Pure (tests). Caught bugs never move.
+    /// - of the midrib, when `resting`: its centre `midribClearance` off it (Core's own rule, `creaseHalfWidth` + r +
+    ///   16, or more for a wide halo: R7 #4, so a halo never sits on the crease band, in the trap or beyond it);
+    /// - of every rect in `keepOut` (the HUD's plates; Home's buttons): pushed out to the nearest side that stays on
+    ///   screen (resting: and off the midrib), by `gap` (default `hudGap`) more outside the trap. R7 (#4): a bug in the
+    ///   trap is cleared of the plate itself too, and a centre still off the canvas is never pushed.
+    /// `prefer` (the last frame's nudge) keeps a bug going out the way it went. Pure (tests). Caught bugs never move.
     static func clearOffset(at p: CGPoint, half: CGFloat, radius r: CGFloat, resting: Bool, keepOut: [CGRect],
-                            canvas: CGSize, geometry g: TrapGeometry) -> CGPoint {
-        guard p.x.isFinite, p.y.isFinite else { return .zero }
+                            canvas: CGSize, geometry g: TrapGeometry, hudGap gap: CGFloat? = nil,
+                            prefer: CGPoint = .zero) -> CGPoint {
+        clearance(at: p, half: half, radius: r, resting: resting, keepOut: keepOut, canvas: canvas, geometry: g,
+                  hudGap: gap, prefer: prefer).offset
+    }
+
+    /// R7 (#4): `clearOffset`, and whether it found a clear spot: false when a keep-out has no way out that stays on
+    /// screen (and, resting, off the midrib), e.g. a bumblebee's halo in Home's button column. (Visual only: Core's
+    /// `TrapSession.keepOut` is the rule; this is for the uncatchable bugs the scene may still ease.)
+    static func clearance(at p: CGPoint, half: CGFloat, radius r: CGFloat, resting: Bool, keepOut: [CGRect],
+                          canvas: CGSize, geometry g: TrapGeometry, hudGap gap: CGFloat? = nil,
+                          prefer: CGPoint = .zero) -> (offset: CGPoint, clear: Bool) {
+        guard p.x.isFinite, p.y.isFinite else { return (.zero, true) }
+        let outsideGap = max(gap ?? hudGap, 0)
+        var isClear = true
         var d = CGPoint.zero
         let w = canvas.width, h = canvas.height
         let m = half + edgeGap
         d.x += edgePush(p.x, margin: m, resting: resting) - edgePush(w - p.x, margin: m, resting: resting)
         d.y += edgePush(p.y, margin: m, resting: resting) - edgePush(h - p.y, margin: m, resting: resting)
-        if resting && g.normalizedRadius(p) <= 1.05 {
-            let band = ScreenLayout.creaseHalfWidth + r + 16
+        // R7 (#4): a resting bug keeps its footprint (halo included) off the midrib band, in the trap or beyond it.
+        let band = midribClearance(half: half, radius: r)
+        if resting {
             let dx = p.x + d.x - g.center.x
             if abs(dx) < band {
                 let side: CGFloat = dx < 0 ? -1 : 1
                 d.x = g.center.x + side * band - p.x
             }
         }
-        // (The HUD never lies over the trap, so a bug in the trap is never pushed by it.)
-        let outside = g.normalizedRadius(p) > 1
-        for rect in keepOut where outside && !rect.isNull && rect.width > 0 && rect.height > 0 {
+        // R7 (#4): every keep-out (the HUD's plates, Home's buttons) clears the footprint: by `gap` more outside the
+        // trap, exactly in it (the trap's zone never moves; only the drawing does). A flyer whose centre is still off
+        // the canvas is left alone (it never pops on).
+        let inTrap = g.normalizedRadius(p) <= 1
+        let onCanvas = p.x >= 0 && p.x <= w && p.y >= 0 && p.y <= h
+        let pad = half + (inTrap ? 0 : outsideGap)
+        for rect in keepOut where onCanvas && !rect.isNull && rect.width > 0 && rect.height > 0 {
             let q = CGPoint(x: p.x + d.x, y: p.y + d.y)
-            let box = rect.insetBy(dx: -(half + hudGap), dy: -(half + hudGap))
+            let box = rect.insetBy(dx: -pad, dy: -pad)
             guard box.contains(q) else { continue }
-            // The nearest way out that keeps the footprint on screen.
+            // The nearest way out that keeps the footprint on screen (and, resting, off the midrib), favouring the way
+            // it went last frame (`prefer`), so a bug walking across a plate never flips sides.
             let ways = [CGPoint(x: box.minX - q.x, y: 0), CGPoint(x: box.maxX - q.x, y: 0),
                         CGPoint(x: 0, y: box.minY - q.y), CGPoint(x: 0, y: box.maxY - q.y)]
             var best: CGPoint?
@@ -389,7 +438,9 @@ final class BogBugLayer {
             for o in ways {
                 let t = CGPoint(x: q.x + o.x, y: q.y + o.y)
                 guard t.x >= m - 0.5, t.x <= w - m + 0.5, t.y >= m - 0.5, t.y <= h - m + 0.5 else { continue }
-                let len = abs(o.x) + abs(o.y)
+                if resting && abs(t.x - g.center.x) < band - 0.5 { continue }
+                var len = abs(o.x) + abs(o.y)
+                if o.x * prefer.x + o.y * prefer.y > 0 { len -= wayStickiness }
                 if len < bestLen {
                     bestLen = len
                     best = o
@@ -398,10 +449,21 @@ final class BogBugLayer {
             if let o = best {
                 d.x += o.x
                 d.y += o.y
+            } else {
+                isClear = false
             }
         }
-        return d
+        return (d, isClear)
     }
+
+    /// R7 (#4): how far a resting bug's centre keeps off the midrib line: Core's own rule (`creaseHalfWidth` + r + 16),
+    /// or further when its footprint (a bee's halo) is wider, so the halo never touches the crease band.
+    static func midribClearance(half: CGFloat, radius r: CGFloat) -> CGFloat {
+        ScreenLayout.creaseHalfWidth + max(r + 16, half + 2)
+    }
+
+    /// R7 (#4): how much shorter (points) the way out a bug took last frame counts, so it never flips sides mid-plate.
+    static let wayStickiness: CGFloat = 160
 
     func clear() {
         for (_, n) in live {
@@ -547,6 +609,7 @@ final class BogBugLayer {
         // shrinks and spins in, whole, and is gone.
         var sunk: CGFloat = 0
         if caughtT >= 0 {
+            n.sitting = false
             let start = n.catchPoint ?? CGPoint(x: b.position.x + n.nudge.x, y: b.position.y + n.nudge.y)
             if n.catchPoint == nil {
                 n.catchPoint = start
@@ -592,19 +655,34 @@ final class BogBugLayer {
                 h = n.catchHeight * (1 - sunk)
             }
         } else {
-            // R6 (#7): clear of the HUD's corners, the canvas edge and (resting) the midrib, eased so it never jumps.
-            let target = BogBugLayer.clearOffset(at: pos, half: BogBugLayer.footprintHalf(b.species, radius: r),
-                                                 radius: r, resting: walking || sipping, keepOut: keepOut,
-                                                 canvas: canvas, geometry: g)
-            if !n.nudged || reduceMotion {
-                n.nudge = target
+            // R7 (#4, the founder's follow-up): Core decides where bugs rest (`TrapSession.keepOut`, which the Scene
+            // feeds: `BogScene.coreKeepOut`), so the drawing is truthful. A catchable bug (in the trap and a bite
+            // candidate) is drawn exactly where Core has it: never nudged, never hidden. The R6 visual-only easing
+            // (clear of the HUD's plates and the canvas edge) is kept only for a flying bug that can't be caught, and
+            // for Home's decoration (`decorative`); any other bug eases back to its Core position.
+            let half = BogBugLayer.footprintHalf(b.species, radius: r)
+            let resting = walking || sipping
+            if BogBugLayer.isCatchable(b) {
+                n.nudge = .zero
                 n.nudged = true
             } else {
-                let k = BogBugLayer.nudgeRate
-                n.nudge = CGPoint(x: BogMath.approach(n.nudge.x, target.x, rate: k, dt: dt),
-                                  y: BogMath.approach(n.nudge.y, target.y, rate: k, dt: dt))
+                let eased = flying || decorative
+                let target = eased ? BogBugLayer.clearOffset(at: pos, half: half, radius: r, resting: resting,
+                                                             keepOut: keepOut, canvas: canvas, geometry: g,
+                                                             prefer: n.nudge) : CGPoint.zero
+                if !n.nudged || reduceMotion {
+                    n.nudge = target
+                    n.nudged = true
+                } else {
+                    let k = BogBugLayer.nudgeRate
+                    n.nudge = CGPoint(x: BogMath.approach(n.nudge.x, target.x, rate: k, dt: dt),
+                                      y: BogMath.approach(n.nudge.y, target.y, rate: k, dt: dt))
+                }
             }
             pos = CGPoint(x: pos.x + n.nudge.x, y: pos.y + n.nudge.y)
+            // (A walker still coming in from off the screen is not sitting yet.)
+            let p0 = b.position
+            n.sitting = resting && p0.x >= 0 && p0.x <= canvas.width && p0.y >= 0 && p0.y <= canvas.height
         }
         n.lastHeight = h
 
@@ -667,7 +745,8 @@ final class BogBugLayer {
             // R6 (#5): at night it blooms bigger and never blinks right out, so it reads in the trap.
             let blink = 0.55 + 0.45 * max(0, sin(t * 2.2 + ph))
             n.glow.alpha = min((0.35 + 0.65 * night) * (blink + 0.25 * night), 1) * alpha
-            n.glow.setScale(1 + 0.35 * night)
+            // R7 (#14): a bigger bloom at night (4 r × 1.45: inside the streak guard's 6 r).
+            n.glow.setScale(1 + 0.45 * night)
         case .goldenScarab:
             n.glow.alpha = (0.28 + 0.14 * sin(t * 2.6 + ph)) * alpha
         case .cricket:

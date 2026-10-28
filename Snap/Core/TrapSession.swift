@@ -155,6 +155,8 @@ struct SproutPerks: Equatable {
 // night telegraphed (TrapRules.nightCue) and the last light (Feed and the Daily: from Tuning.lastLightWave the hunger clock ticks
 // even with an empty or bee-held trap, so every run whose snaps run out ends), no newBest in Zen, and no "hungry" hint while a
 // protected bug's halo touches the trap.
+// R7 (design/notes/core-R7.md): one scoring function, TrapRules.bitePoints, with the FEAST multiplier (×2) inside a
+// clean bite of ≥ Tuning.bigFeastCount.
 // Mirrored by Session in tools/balance-sim.js (minus events, hints, telemetry and results).
 
 final class TrapSession {
@@ -295,6 +297,15 @@ final class TrapSession {
     private var fastestSnap: Double = 0
 
     private(set) var result: RunResult? = nil
+
+    /// R7 (SCORE-R6 #4): rects where no bug may rest, in the session's own coordinates (scene space: the
+    /// geometry.sceneSize the session was built with, the space of SpawnSpec, BugState.position and NectarDrop; y = 0
+    /// is the bottom edge, the walkers' edge). The Scene sets it from its hudKeepOut (HUD rects, Home buttons, edges);
+    /// empty (the default) changes nothing. Every resting spot (a landing, a wander, walk, hop or dart target, a sip
+    /// at a nectar drop, a bog sitter's perch) keeps its centre TrapRules.keepOutClearance(radius:protected:) from
+    /// every rect: spots are pushed out across the nearest edge (as offCrease pushes them off the midrib), and drops
+    /// that are too close are never picked. Set it before the bugs arrive (a change applies to the next spot chosen).
+    var keepOut: [CGRect] = []
 
     init(mode: RunMode, seed: UInt64, best: Int, geometry: TrapGeometry, options: SessionOptions) {
         self.mode = mode
@@ -669,7 +680,8 @@ final class TrapSession {
             b.mode = .cross
         } else if spec.landsInTrap {
             let d: NectarDrop? = m.nectarChance > 0 ? dropAt(spec.target) : nil
-            if let drop = d, reservedBy[drop.id] == nil {
+            // R7 (#4): a drop too close to a keep-out rect is never sipped; the bug lands near it instead.
+            if let drop = d, reservedBy[drop.id] == nil, !keptOut(Double(drop.position.x), Double(drop.position.y), b) {
                 reservedBy[drop.id] = id
                 b.dropID = drop.id
                 b.wantsNectar = true
@@ -726,7 +738,56 @@ final class TrapSession {
             let need: Double = Double(b.info.radius + o.info.radius) + Tuning.landSpacing
             worst = min(worst, hypot(q.0 - px, q.1 - py) - need)
         }
+        // R7 (#4): a spot too close to a keep-out rect loses to any spot clear of them all.
+        if keptOut(px, py, b) { return min(worst, 0) - 1e6 }
         return worst
+    }
+
+    // MARK: Keep-out (R7, SCORE-R6 #4)
+
+    /// R7: is (x, y) too close to a keep-out rect for this bug to rest there?
+    private func keptOut(_ x: Double, _ y: Double, _ b: Bug) -> Bool {
+        if keepOut.isEmpty { return false }
+        let c: Double = TrapRules.keepOutClearance(radius: b.info.radius, protected: b.species.isProtected)
+        return TrapRules.touchesKeepOut(keepOut, x, y, clearance: c)
+    }
+
+    /// R7: (x, y) moved out of the keep-out rects, the way offCrease moves a spot off the midrib: straight out across
+    /// the nearest edge of the rect it touches, to the bug's clearance beyond it. A candidate must be clear of every
+    /// rect and, in the trap (`maxR` non-nil), inside `maxR`, off the crease (TrapRules.creaseGap) and on `side`
+    /// (±1; 0 any); outside it (a bog sitter's perch), inside the scene. The nearest such candidate wins; with none,
+    /// (x, y) comes back unchanged and spotScore rejects it. No random draws, so an empty keepOut changes nothing.
+    private func pushedOut(_ x: Double, _ y: Double, _ b: Bug, maxR: Double?, side: Double) -> (Double, Double) {
+        if !keptOut(x, y, b) { return (x, y) }
+        let c: Double = TrapRules.keepOutClearance(radius: b.info.radius, protected: b.species.isProtected) + 0.01
+        let w: Double = Double(geometry.sceneSize.width)
+        let h: Double = Double(geometry.sceneSize.height)
+        let cx: Double = Double(geometry.center.x)
+        let gap: Double = TrapRules.creaseGap(radius: b.info.radius)
+        var found: (Double, Double)? = nil
+        var foundD: Double = Double.infinity
+        for raw in keepOut where !raw.isNull {
+            let r: CGRect = raw.standardized
+            if !TrapRules.touchesKeepOut([r], x, y, clearance: c - 0.01) { continue }
+            let cands: [(Double, Double)] = [(Double(r.minX) - c, y), (Double(r.maxX) + c, y),
+                                             (x, Double(r.minY) - c), (x, Double(r.maxY) + c)]
+            for q in cands {
+                if keptOut(q.0, q.1, b) { continue }
+                if let lim = maxR {
+                    if geometry.normalizedRadius(CGPoint(x: q.0, y: q.1)) > lim + 1e-9 { continue }
+                    if abs(q.0 - cx) < gap - 1e-9 { continue }
+                    if side != 0 && sideOf(q.0) != side { continue }
+                } else if q.0 < 0 || q.0 > w || q.1 < 0 || q.1 > h {
+                    continue
+                }
+                let d: Double = hypot(q.0 - x, q.1 - y)
+                if d < foundD {
+                    foundD = d
+                    found = q
+                }
+            }
+        }
+        return found ?? (x, y)
     }
 
     /// R4: +1 right of the midrib line (or on it), −1 left.
@@ -753,12 +814,20 @@ final class TrapSession {
         return TrapRules.offCrease(geometry, qx, qy, maxR: maxR, radius: radius, side: side)
     }
 
+    /// R7 (#4): clampIn (inside `maxR`, off the crease), then out of the keep-out rects (pushedOut).
+    private func clampClear(_ b: Bug, _ x: Double, _ y: Double, _ maxR: Double, _ side: Double) -> (Double, Double) {
+        let p: (Double, Double) = clampIn(x, y, maxR, b.info.radius, side)
+        if keepOut.isEmpty { return p }
+        let sd: Double = side != 0 ? side : sideOf(p.0)
+        return pushedOut(p.0, p.1, b, maxR: maxR, side: sd)
+    }
+
     /// A spot near (x, y), `dMin`…`dMax` away, inside `maxR` and off the crease, as clear of the other bugs as it can
     /// find. Every resting spot (landing, wander, hop, dart) comes from here or is a nectar drop. R4: `side` ±1 keeps
     /// it on that lobe (ground moves and the hover), 0 leaves it free (a spawn's spot: it flies in).
     private func findSpot(_ b: Bug, _ x: Double, _ y: Double, _ dMin: Double, _ dMax: Double,
                           _ maxR: Double, side: Double = 0) -> (Double, Double) {
-        var best: (Double, Double) = clampIn(x, y, maxR, b.info.radius, side)
+        var best: (Double, Double) = clampClear(b, x, y, maxR, side)
         var bestScore: Double = dMin <= 0 ? spotScore(b, best.0, best.1) : -Double.infinity
         if bestScore >= 0 { return best }
         var i: Int = 0
@@ -767,7 +836,7 @@ final class TrapSession {
             // R2: the search reaches at least this bug's own spacing need (radii are ×1.8).
             let reach: Double = Double(b.info.radius) * 2 + Tuning.landSpacing + 10
             let dd: Double = b.rng.between(max(dMin, 8), max(dMax, 20, reach))
-            let p: (Double, Double) = clampIn(x + cos(t) * dd, y + sin(t) * dd, maxR, b.info.radius, side)
+            let p: (Double, Double) = clampClear(b, x + cos(t) * dd, y + sin(t) * dd, maxR, side)
             let s: Double = spotScore(b, p.0, p.1)
             if s > bestScore {
                 bestScore = s
@@ -959,8 +1028,13 @@ final class TrapSession {
 
     /// Re-checks the spacing just before landing (others may have landed since the spawn).
     private func landingSpot(_ b: Bug) -> (Double, Double) {
-        if !b.landsInTrap { return (b.tx, b.ty) }
-        if b.dropID != nil { return (b.tx, b.ty) }
+        // R7 (#4): a bog sitter's perch (outside the trap) is pushed out of the keep-out rects too.
+        if !b.landsInTrap { return pushedOut(b.tx, b.ty, b, maxR: nil, side: 0) }
+        if b.dropID != nil {
+            if !keptOut(b.tx, b.ty, b) { return (b.tx, b.ty) }
+            // R7: keepOut was set after this drop was reserved: let it go and land near it instead.
+            freeDrop(b)
+        }
         if spotScore(b, b.tx, b.ty) >= 0 { return (b.tx, b.ty) }
         // R4: the hover never drifts low across the crease.
         return findSpot(b, b.tx, b.ty, 0, 50, Tuning.landMaxRadius, side: sideOf(b.tx))
@@ -1044,6 +1118,8 @@ final class TrapSession {
                 if retiring.contains(d.id) || reservedBy[d.id] != nil { continue }
                 // R4 (REVIEW-3 #14): never a walk across the crease to a drop on the other lobe.
                 if sideOf(Double(d.position.x)) != sideOf(b.x) { continue }
+                // R7 (#4): never a walk to a drop too close to a keep-out rect.
+                if keptOut(Double(d.position.x), Double(d.position.y), b) { continue }
                 let dd: Double = hypot(Double(d.position.x) - b.x, Double(d.position.y) - b.y)
                 if dd < bd {
                     bd = dd
@@ -1190,12 +1266,11 @@ final class TrapSession {
                 k += 1
             }
         }
-        var sum: Int = 0
-        for s in caught { sum += BugCatalog.info(s).points }
         // R3 (REVIEW-2 #8): a bite with a stinger in it scores ×1 and refunds nothing (no Feast, scarab or ladybird
-        // snaps); the sting cost stays. Eating a bee is never the best move.
+        // snaps); the sting cost stays. Eating a bee is never the best move. R7 (#3): TrapRules.bitePoints is the one
+        // scoring function (a clean FEAST of ≥ Tuning.bigFeastCount scores × Tuning.feastMultiplier).
         let mult: Double = stung ? 1 : TrapRules.chainMultiplier(chain)
-        let points: Int = Int((Double(sum * n) * mult).rounded())
+        let points: Int = TrapRules.bitePoints(caught, chain: chain, stung: stung)
         var feastBack: Int = 0
         if !stung {
             if n >= Tuning.bigFeastCount {
@@ -1333,6 +1408,48 @@ enum NightCue: String, Equatable, Sendable {
 }
 
 extension TrapRules {
+
+    /// R7 (SCORE-R6 #3, #10): THE scoring function, used by every mode (Feed, the Daily, the Zen Bog, attract, the
+    /// lesson): the species points summed × the bug count × the chain multiplier × feastBonus(count:stung:), rounded.
+    /// A bite with a stinger scores × 1 whatever the chain. BiteReport.points is this; snapshot.score and
+    /// RunResult.score are the sum of the run's BiteReport.points, so play and Results always agree.
+    static func bitePoints(_ caught: [BugSpecies], chain: Int, stung: Bool) -> Int {
+        let n: Int = caught.count
+        var sum: Int = 0
+        for s in caught { sum += BugCatalog.info(s).points }
+        let mult: Double = stung ? 1 : chainMultiplier(chain)
+        let raw: Double = Double(sum * n) * mult * feastBonus(count: n, stung: stung)
+        return Int(raw.rounded())
+    }
+
+    /// R7 (#3, founder call): the FEAST multiplier inside a bite's points: Tuning.feastMultiplier (×2) for a clean
+    /// bite of ≥ Tuning.bigFeastCount bugs, else 1. At the same chain 5 bugs then out-score 4 bugs whose mean points
+    /// per bug are up to 3.1× higher.
+    static func feastBonus(count: Int, stung: Bool) -> Double {
+        if stung || count < Tuning.bigFeastCount { return 1 }
+        return Tuning.feastMultiplier
+    }
+
+    /// R7 (SCORE-R6 #4): how far (pt) a resting bug's centre keeps from every TrapSession.keepOut rect: its radius
+    /// (a protected bug: its halo as the Scene draws it, radius × Tuning.haloScale + Tuning.haloPad) plus
+    /// Tuning.keepOutMargin.
+    static func keepOutClearance(radius: CGFloat, protected: Bool) -> Double {
+        let r: Double = Double(radius)
+        let body: Double = protected ? r * Tuning.haloScale + Tuning.haloPad : r
+        return body + Tuning.keepOutMargin
+    }
+
+    /// R7 (#4): does a circle of `clearance` round (x, y) reach into any of `rects` (closer than `clearance` to one,
+    /// or inside it)? Null rects are ignored.
+    static func touchesKeepOut(_ rects: [CGRect], _ x: Double, _ y: Double, clearance: Double) -> Bool {
+        for raw in rects where !raw.isNull {
+            let r: CGRect = raw.standardized
+            let qx: Double = min(max(x, Double(r.minX)), Double(r.maxX))
+            let qy: Double = min(max(y, Double(r.minY)), Double(r.maxY))
+            if hypot(x - qx, y - qy) < clearance { return true }
+        }
+        return false
+    }
 
     /// R6: the wave the bite rule's late factor uses. The Zen Bog's loops never reach the late night (its recipe wave,
     /// 1…Tuning.zenDayWaves); every other mode uses the real wave, as before.
