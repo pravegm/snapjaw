@@ -33,3 +33,17 @@
   **CI 40623216966: 253 tests green.** The trap now reads as a flytrap; the icon is a 3/4 trap with a fly.
 - Duo sim R2 run 40615925900 was inconclusive: only 6 hinge samples reached the app, and no trap lines. An
   investigator is on it.
+- R3 panel: juror 7, UX 7, feel 7, Duo 6 (prov.), fresh 7/7/6, icon 7, badges 7. QA-2: no P0; P1 = the hunger clock
+  ran with an empty or bee-only trap. No Release or App Review blockers.
+- Duo R3 run 40626586037: the simulator died twice mid-sweep (a rig flake; duo.sh now detects it: SIMULATOR FAIL →
+  INCONCLUSIVE). First real 951×669 frames of R3: the trap fills both halves, the midrib on the fold.
+- Round 4:
+  - hunger only while a catchable bug waits with no bee, night wilt 14, Sprout run 1 at 14 snaps with a calm first
+    morning;
+  - the face without peach, the green-backed closed trap, light by phase, the small snap glyph, and a 3/4 trap for
+    Results, the cover, the pose card and the badges;
+  - the free-sting toast in the hint slot, truthful snap counts, the chain explained, voice-steal fades, and the icon
+    fly in the game's colours.
+  - Sim: novice run 1 105 s, casual 147 s with 0 wilts, expert 3 wilts.
+  - CI fixes: an ambiguous `.nan`, a stale floor test, the cap rule, the face colour tolerance.
+  - **CI 40634463943: 283 tests green**, and all 43 frames froze on their moments.
