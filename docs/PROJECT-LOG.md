@@ -48,3 +48,18 @@
   - CI fixes: an ambiguous `.nan`, a stale floor test, the cap rule, the face colour tolerance.
   - **CI 40634463943: 283 tests green**, and all 43 frames froze on their moments.
 - Duo R4 run 40634483657: **SNAP PASS from the real hinge** (d 0.264 s: caught 2, escaped 4, one bee), REARM, CREEP and CLOSE-PAUSE PASS (paused at 42.8°, resumed at 120.1°). The simulator still died twice later (the rig).
+- R4 panel: juror 7, UX 8, feel 8, Duo 6 (prov.), fresh 7/6/7, icon 8, badges 7. The blockers it named: the pose
+  card, the plum-like release, "Out of snaps" over 1–2, and no hinge evidence.
+- First store run 40637893235: all four jobs green; the P01 hero ("Your Duo is a flytrap" on a framed Duo) is strong.
+  D02 caught the release frame, so it gets re-shot.
+- Round 5:
+  - the release stays crimson, one hero trap from the icon, a warmer dusk, "Missed!", pop collisions, airborne
+    flyers over the crease;
+  - the pose card rebuilt, the tired banner after the drop, the sting cost shown, "score" (not "protein"), varied
+    badges, the Daily share line;
+  - the Sprout taper (sim novice runs 1/2/3 = 101/100/90 s), bees pause hunger from their final approach, the
+    dry-snap clop;
+  - the CI Duo rig hardened (a fresh Duo per hinge launch, retries), the lesson and R4 Duo frames, open-after-bite
+    store shots.
+  - **CI 40645123693: 307 tests green.** All four R4 blockers are visibly fixed (frames 31, 14, 19, 20).
+- Ideas after 1.0: a relaxed mode that never runs out (a player asked).
