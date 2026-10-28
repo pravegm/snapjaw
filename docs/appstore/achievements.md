@@ -21,9 +21,9 @@
 | Score submission | Best score | Best score (the app submits only the day's one scored try) |
 | Score range (optional) | 0 – 10,000,000 | 0 – 10,000,000 |
 | Recurring settings | — | Start **Mon 2 Nov 2026, 00:00 UTC**; duration **1 day**; repeats every **1 day** |
-| What the app submits | `RunResult.score` (the protein total) of every finished **Feed** run (the Feed best, as Home shows it; Daily runs go to the Daily board only: `GameCenterManager.report`, 27 Oct) | `RunResult.score` of the **first scored Daily Bog** of the (UTC) day (`RunMode.daily(day:, scored: true)`) |
+| What the app submits | `RunResult.score` (the score) of every finished **Feed** run (the Feed best, as Home shows it; Daily runs go to the Daily board only: `GameCenterManager.report`, 27 Oct) | `RunResult.score` of the **first scored Daily Bog** of the (UTC) day (`RunMode.daily(day:, scored: true)`). **The Zen Bog submits nothing** (`GameCenterManager.report`, R6) |
 
-**Why "protein":** it's the game's own word for the score (GAME-DESIGN §5, Results: "protein, a big counting number"), so the board reads "Best Feast · 12,480 protein". **Why the range goes to 10 million:** one 7-bug bite at ×4 can be worth several thousand, and GAME-DESIGN §5 says a perfect player's run lasts 6–8 minutes; 10 million leaves room. **Never submit** attract or lesson scores.
+**Why "points":** since R5 the game's word is "score", never "protein" (Results shows "score" under the number), so the board reads "Best Feast · 12,480 points" (`tools/appstore/build-metadata.js` checks the suffix and pushes ` point` / ` points`). **Why the range goes to 10 million:** one 7-bug bite at ×5 can be worth several thousand, and GAME-DESIGN §5 says a perfect player's run lasts 6–8 minutes; 10 million leaves room. **Never submit** attract or lesson scores.
 
 **Why the Daily starts on Mon 2 Nov:** a few days after the tool first creates Game Center (runbook §3), so TestFlight testers (Game Center sandbox) see the board for weeks before launch. If the tool runs after 1 Nov, Claude moves the start date to the next day before pushing (whether App Store Connect accepts a start date in the past is unconfirmed: Swoop's note).
 
@@ -31,13 +31,13 @@
 
 ## Achievements (12, 575 points)
 
-**Which runs count:** a finished run whose `mode` is `.feed` or `.daily` (scored or practice). **Never** `.attract` or `.lesson` (First Bite's triple doesn't earn First Feast). The App calls `Achievements.earned(after: run, lifetimeBugs:, lifetimeSpared:, speciesFound:, alreadyEarned:)` once per finished run, with the three lifetime totals **already including this run** (`ProgressStore` updated first), and reports every returned id to Game Center.
+**Which runs count:** a finished run whose `mode` is `.feed` or `.daily` (scored or practice), and (R6) a **Zen Bog** run, which earns only the catching and lifetime ones: First Feast, Mouthful, Pure Gold, Here Be Dragonflies, Bee Kind, Every Bug in the Book and Bog Monarch. Zen never earns Four Times Hungry, Midnight Snack, Well Fed, Bee-Free Diet or Daily Diner (`Achievements.zenSkips`): they only mean something when snaps run out. **Never** `.attract` or `.lesson` (First Bite's triple doesn't earn First Feast). The App calls `Achievements.earned(after: run, lifetimeBugs:, lifetimeSpared:, speciesFound:, alreadyEarned:)` once per finished run, with the three lifetime totals **already including this run** (`ProgressStore` updated first), and reports every returned id to Game Center.
 
 | # | Achievement ID | Title | Pre-earned description | Earned description | Points | Hidden | Trigger (for Core: exact) |
 |---|---|---|---|---|---|---|---|
 | 1 | `snap.ach.feast` | First Feast | Catch 3 bugs or more in one bite. | Three in one gulp. A proper Feast. | 10 | No | `run.feasts >= 1` |
 | 2 | `snap.ach.bite5` | Mouthful | Catch 5 bugs or more in one bite. | Five bugs, one bite, no regrets. | 25 | No | `run.biggestBite >= 5` |
-| 3 | `snap.ach.chain4` | Four Times Hungry | Score a bite at x4: seven clean bites in a row. | The chain hit x4. Bite after bite after bite. | 50 | No | `run.longestChain >= 7` (the chain is ×1, ×1.5, ×2 … so the 7th clean bite in a row is the first scored at ×4, GAME-DESIGN §5; if Core's count differs, use the count at which a bite is first scored ×4) |
+| 3 | `snap.ach.chain4` | Four Times Hungry | Score a bite at x4: seven bites of 2+ bugs, without an empty snap or biting a bee. | The chain hit x4. Bite after bite after bite. | 50 | No | `run.longestChain >= Achievements.chainForX4` (= 7). Only a clean bite of **2 or more** bugs adds a step (`Tuning.chainMinBite`); a clean 1-bug bite holds the chain without a step; an empty snap or a stinger breaks it. The multiplier is ×1, ×1.5, ×2 … so the 7th 2+-bug bite of an unbroken chain is the first scored at ×4 (R6 fix: the old "seven clean bites in a row" was untrue, since 1-bug bites don't count) |
 | 4 | `snap.ach.scarab` | Pure Gold | Catch a Golden Scarab. | The rarest bug in the bog. Shiny. | 50 | No | `(run.caughtBySpecies["goldenScarab"] ?? 0) >= 1` |
 | 5 | `snap.ach.dragonfly` | Here Be Dragonflies | Catch a dragonfly. | It hovered. You timed it. | 25 | No | `(run.caughtBySpecies["dragonfly"] ?? 0) >= 1` |
 | 6 | `snap.ach.spare50` | Bee Kind | Spare 50 bees, bumblebees or wasps. | Fifty stripy visitors, all sent home. | 50 | No | `lifetimeSpared >= 50` (protected bugs that came into the trap and left uneaten: `RunResult.beesSpared` summed over every counted run) |
@@ -68,7 +68,7 @@ Rough reach from GAME-DESIGN §5–§6 (to be confirmed by `BalanceTests`' `SNAP
 - **The long tail:** Every Bug in the Book (needs the night bugs and the scarab), Bog Monarch.
 
 **Checks before the tool creates them** (descriptions and triggers can still change then; ids never): 
-- `Well Fed`: 10,000 protein should be above the casual pilot's median and at or below the expert's; if not, change the number in both descriptions and the trigger together (the title stays).
+- `Well Fed`: a 10,000 score should be above the casual pilot's median and at or below the expert's; if not, change the number in both descriptions and the trigger together (the title stays).
 - `Midnight Snack`: the casual pilot should reach wave 23 in at least a third of its runs. If casual runs end around wave 15, change the trigger to "reach dusk" (`run.waves >= 15`) and the descriptions to match, or keep it as a harder goal and raise it to 50 points.
 - `Bog Monarch`: `PlantRanks.threshold(11)` should take a few weeks of play (a suggestion for Core: about 5,000 lifetime bugs, at roughly 60–90 bugs per casual run). The achievement is only fair if the top rank is reachable without grinding for months.
 - `Four Times Hungry`: the casual pilot's median `longestChain` should be 3–5, the expert's ≥ 7.
@@ -89,7 +89,8 @@ Twelve 1024 × 1024 PNGs, one per achievement, opaque (no alpha channel), in the
 
 ## Implementation checklist (Core and App engineers)
 - [ ] `Achievements.all` has exactly these 12 ids, titles and details, in this order; the two leaderboard ids are `snap.best` and `snap.daily` (one constant each in `GameCenterManager`).
-- [ ] `earned(...)` returns only ids not in `alreadyEarned`, and only for `.feed` and `.daily` runs.
+- [x] `earned(...)` returns only ids not in `alreadyEarned`, only for `.feed`, `.daily` and `.zen` runs, and never `zenSkips` (or Daily Diner) for Zen (`Progression.swift`, R6).
+- [ ] **Core (R6):** `Achievements.chain4`'s detail in `Snap/Core/Progression.swift` still reads "Score a bite at x4: seven clean bites in a row." Change the detail (not the id) to the table's text, so the in-app list and Game Center agree.
 - [ ] Authenticate once at launch; if the player declines, never show the sign-in sheet again uninvited. Silent when signed out.
 - [ ] Banners never appear mid-run: queue them until the Results card.
 - [ ] Daily: submit only the first scored run of the (UTC) day to `snap.daily`; every finished Feed run to `snap.best` (matches `GameCenterManager.report` as first written, 27 Oct).

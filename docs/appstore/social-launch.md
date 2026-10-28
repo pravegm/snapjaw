@@ -17,12 +17,14 @@ The studio's rule is one launch a week, each with its own news: **Swoop** goes l
 | Wed 9 Dec | Clip: the bee. Two flies sipping, a bee lands among them, the hands wait… the bee leaves, then the snap | X, Bluesky, Mastodon, Threads |
 | Thu 10 Dec | Your own Daily Bog score ("beat this") | X, Bluesky, Mastodon |
 | Fri 11 Dec | Clip: the day turning to night, fireflies glowing on the lobes | same |
-| Sun 13 Dec | Clip: a gnat swarm and a fly in one bite, "FEAST ×5+" | same |
-| After that | A Daily Bog score or a Bug Book page a few times a week, on days the sister games don't post, if it's fun; stop if it isn't | — |
+| Sat 12 Dec | Screenshot: the Garden, a few flytraps grown ("Which would you grow first?") | X, Bluesky, Mastodon, Threads |
+| Sun 13 Dec | Clip: a gnat swarm and a fly in one bite: the big **FEAST** (the freeze, the gold burst, the banner, the gulps and the burp) | same |
+| Mon 14 Dec | Clip: a calm minute in the Zen Bog, sound on ("For when you'd rather not count snaps") | same |
+| After that | A Daily Bog Share line (with your streak), a Bug Book page or a newly grown flytrap a few times a week, on days the sister games don't post, if it's fun; stop if it isn't | — |
 
 ## 2. Launch-day posts (Tue 8 Dec)
 
-Counted with Node, with the link as 23 characters on X and Mastodon and as 40 on Bluesky and Threads: **X 263 / 280, Bluesky 271 / 300, Mastodon 442 / 500, Threads 179 / 500.** Recount with the real link before posting. Paste the text inside the quote blocks exactly, and always add the alt text.
+Counted with Node, with the link as 23 characters on X and Mastodon and as 40 on Bluesky and Threads: **X 263 / 280, Bluesky 271 / 300, Mastodon 489 / 500, Threads 264 / 500.** Recount with the real link before posting. Paste the text inside the quote blocks exactly, and always add the alt text.
 
 ### X (attach the 15 s clip)
 > Snapjaw is out.
@@ -50,29 +52,33 @@ Counted with Node, with the link as 23 characters on X and Mastodon and as 40 on
 >
 > On iPhone Duo the hinge is the trap: hold it open like a book and the halves are a Venus flytrap's lobes. Bugs land on the nectar; a short snap of about 22° catches everything inside. Wait for a crowd, since the score multiplies by the number of bugs. But a bee in the bite costs you a snap.
 >
+> Plus goals, 8 flytraps to grow and a Zen Bog.
+>
 > Tap to snap on any other iPhone. £1.99 / $1.99, no ads, no IAP, no tracking.
 >
 > [App Store link]
 > #iPhoneDuo #iOSDev #IndieDev
 
 ### Threads (attach the clip)
-> Made a game where your iPhone Duo is a Venus flytrap. Snap it a little shut on a crowd of bugs, and never eat a bee. Snapjaw is out today: [App Store link]
+> Made a game where your iPhone Duo is a Venus flytrap. Snap it a little shut on a crowd of bugs, and never eat a bee. Then grow 8 flytraps, chase goals, keep a Daily streak or just relax in the Zen Bog. Snapjaw is out today: [App Store link]
 
 ### r/iPhoneDuo (only if the rules allow a launch post; otherwise the megathread)
 **Title:** [Dev] I turned the Duo into a Venus flytrap: Snapjaw is out
 > Developer here, so this is self-promo. Snapjaw is a book-pose game: the two halves are a flytrap's lobes and the hinge is the midrib. Bugs land inside to sip nectar, and you close the phone about 22° to bite. That's measured from however you naturally hold it (no target angle), the bite fires at 22° so there's no point going further, and it never asks you to close it or lay it flat.
 >
-> It's really a patience game: crowds multiply the score, snaps are limited, and a bee in the bite costs you. The score and snaps sit on the half that stays sharp when the Duo blurs one side as a fold starts from flat (Settings → HUD on the left if yours is the other one).
+> It's really a patience game: crowds multiply the score, snaps are limited, and a bee in the bite costs you. The score and snaps sit on the half that stays sharp when the Duo blurs one side as a fold starts from flat (Settings → Score on the left if yours is the other one).
 >
-> £1.99/$1.99, no ads, no IAP, no data collected. There's a Daily Bog with the same bugs for everyone, so post your score here if you like.
+> Beyond the runs: three goals at a time that grow your plant, a Garden of 8 flytraps to unlock (cosmetic only), and a Zen Bog that never ends.
+>
+> £1.99/$1.99, no ads, no IAP, no data collected. There's a Daily Bog with the same bugs for everyone and a streak, so post your Share line here if you like.
 >
 > Happy to answer anything about the snap detection. Link in the comments, per the rules.
 
 ### Daily Bog post format (any day)
-> Snapjaw Daily Bog: [your score] protein. Best bite: [n] bugs. Bees spared: [n]. Beat that.
+> Snapjaw Daily Bog #[n] · [score] · biggest bite [n] · 🔥 [n] days 🪤 Beat that.
 > [App Store link]
 
-Type the numbers from the Results card (there's no Share button in 1.0). If a Share button is added later, use its exact text instead.
+Tap **Share** on the Daily Bog's results: it gives exactly the first line ("Snapjaw Daily Bog #301 · 4,210 · biggest bite 6 · 🔥 4 days 🪤"; the streak part only once you have one). Add "Beat that." and the link yourself.
 
 ---
 
@@ -101,11 +107,12 @@ Apple's rules: 15–30 s; captures of the app only (**no hands, no people, no de
 |---|---|---|
 | 00.0–03.0 | Bugs landing on the nectar across both lobes. **Poster frame 00:01.5** | **Your Duo is a *flytrap*** |
 | 03.0–07.0 | A crowd gathering, gold rings | **Wait for a *crowd*** |
-| 07.0–10.0 | The bite: "TRIPLE ×3", "Feast! +1 snap" | **One bite. *CHOMP!*** |
+| 07.0–10.0 | The bite: a big FEAST, the banner and the gulps | **Wait for a crowd. *FEAST!*** |
 | 10.0–14.0 | A bee lands among the flies, "Bee! Wait…", it leaves | **Never eat a *bee*** |
 | 14.0–18.0 | Dusk: moths and a dragonfly | **From morning to *night*** |
 | 18.0–21.0 | Night: fireflies | **Fireflies light the *night*** |
-| 21.0–25.0 | "Your trap is tired", the Results card | **One more *go*?** |
+| 21.0–23.0 | The Garden, flytraps grown | **Grow *8 flytraps*** |
+| 23.0–25.0 | The Results card, goals ticked | **One more *go*?** |
 
 ---
 

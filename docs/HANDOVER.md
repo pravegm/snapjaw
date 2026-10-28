@@ -4,20 +4,33 @@
 **Snapjaw — "Feed the flytrap. Spare bees."** Your fifth Duo game. £1.99, no ads, no in-app purchases, no data
 collected, rated 4+.
 - Hold the Duo open like a book: the two halves are a Venus flytrap's lobes, and the hinge is its midrib.
-- Bugs fly in and land to sip nectar.
-- **Snap the phone a little shut** (about 22° from however you hold it; never flat, never fully shut) to catch
-  everything in the trap that's slower than your snap. Then open it again.
-- Wait for a crowd: score = points × bugs caught × chain. A Feast (3+ bugs) earns snaps back.
-- **Never eat a bee.** Bees and wasps cost snaps. Snaps are your lives.
+- Bugs fly in and land to sip nectar. **Never eat a bee:** bees love nectar too, and a bee or wasp in the bite costs snaps.
+- **Choose your moment.** Wait for a crowd, then **snap the phone a little shut** (about 22° from however you hold it;
+  never flat, never fully shut) to catch everything in the trap that's slower than your snap. Then open it again.
+- **Score** = points × bugs caught × chain. Only clean bites of 2+ bugs grow the chain, up to **×5**; a 1-bug bite
+  holds it, an empty snap or a bee breaks it.
+- **Snaps are your lives:** 10 to start (14, 13, 12 in your first three Feed runs), at most **14** held. A Feast (3+
+  bugs) earns one back; a big **FEAST** (5+ bugs) is an event (freeze, gold burst, banner, gulps, a special CHOMP)
+  and earns two.
 - **Hunger.** If you dawdle while a catchable bug sits uneaten, the trap wilts a snap.
 - **The day.** It runs morning → noon → dusk → night, with 16 species to collect in the Bug Book (golden scarab,
-  dragonflies, fireflies at night).
+  dragonflies, fireflies at night). Late in the night the bugs get fast, so every run ends.
+- **New in Round 6 (the reasons to come back):**
+  - **Goals:** three at a time from a pool of 39, on Home and in the pause menu, ticked live; each one grows the plant
+    rank and is replaced, with a bonus for all three in one run;
+  - **the Garden:** 8 cosmetic flytraps (Classic, Red Dragon, B52, Sawtooth, Shark Tooth, Fused Tooth, Cupped Trap,
+    Golden Glow), unlocked by rank and by three special goals;
+  - **Zen Bog:** a relaxed mode that never ends (no snaps running out, no wilts, bees cost only the chain), no
+    leaderboard, End from the pause menu;
+  - **Daily streak + Share:** the Daily Bog counts the days in a row, and Share sends one line with the score and
+    streak.
 - **Also in:**
-  - a Daily Bog, the same for everyone, with a share line;
-  - 12 plant ranks;
+  - a Daily Bog, the same for everyone, one scored try a day;
+  - 12 plant ranks, grown by bugs and goals;
   - Game Center: 2 leaderboards and 12 achievements, with badges drawn;
   - a 7-step First Bite tutorial;
-  - tap-to-snap on non-Duo iPhones.
+  - tap-to-snap on non-Duo iPhones;
+  - Settings: Sound, Haptics, Respect silent switch, **Score on the left**, Reduce motion, Replay First Bite.
 
 ## Why this idea
 - The market check is in `research/01-market.md`.
@@ -63,11 +76,11 @@ collected, rated 4+.
 5. **§3:** turn on Game Center, then run the "App Store Connect tool" workflow (plan, then push). It fills in the whole
    listing.
 6. **§4:** run the **TestFlight** workflow (2 clicks) and install it on your Duo.
-7. **§5:** the 15-step Duo test (about 15 min). Tell me how the snap feels, whether the halves blur, and the sound and
-   haptics. That's what I tune next.
+7. **§5:** the 18-step Duo test (about 20 min). Tell me how the snap feels, whether the halves blur, the sound and
+   haptics, and how the big FEAST, goals, the Garden and the Zen Bog feel. That's what I tune next.
 
-After that, the runbook plans a launch in early December. It sits between Brim (17 Nov) and Hush (1 Dec), with the
-fallback 12 Jan. It can go sooner: once your Duo test is good, Snapjaw can be submitted with "release on approval".
+After that, the runbook plans a launch in early December. It comes the week after Hush (1 Dec), which follows Brim
+(17 Nov), with the fallback 12 Jan. It can go sooner: once your Duo test is good, Snapjaw can be submitted with "release on approval".
 Your call.
 
 ## Known open items

@@ -24,7 +24,7 @@ There's no tracking question once you choose "No". For the record, Snapjaw doesn
 | **Rating prompt** (if added) | No | Apple's `requestReview` |
 | **Support through GitHub issues** | No | Happens on GitHub, outside the app, under GitHub's privacy statement; covered by the policy |
 | **Progress, scores, Bug Book, plant rank, achievements, Daily Bog tries, settings** | No | Stored only on the device (`ProgressStore`, `SettingsStore`, UserDefaults). Never transmitted |
-| **A Daily share button** (not in the design; `metadata.md` §11 ask 7) | No, if added the iOS way | Text handed to the share sheet only on tap; the policy gains a "Sharing" paragraph first |
+| **The Daily Share button** (built: `ResultsView` `ShareLink`, scored Daily only; `metadata.md` §11 ask 7) | No | One line of text (`AppRules.dailyShareText`: bog number, score, biggest bite, streak) handed to the iOS share sheet only on tap; the app sends nothing. The policy's "Sharing your Daily Bog score" paragraph says so (28 Oct) |
 
 **The limit to watch:** if a future version ever sends anything to our own server (Game Center IDs, analytics, a remote daily seed, online ghosts), this answer and the privacy manifest change **before** that build ships.
 

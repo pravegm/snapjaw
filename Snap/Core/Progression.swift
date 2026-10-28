@@ -64,7 +64,7 @@ enum Achievements {
 
     static let feast = def("feast", "First Feast", "Catch 3 bugs or more in one bite.")
     static let bite5 = def("bite5", "Mouthful", "Catch 5 bugs or more in one bite.")
-    static let chain4 = def("chain4", "Four Times Hungry", "Score a bite at x4: seven clean bites in a row.")
+    static let chain4 = def("chain4", "Four Times Hungry", "Score a bite at x4: seven bites of 2+ bugs, without an empty snap or biting a bee.")
     static let scarab = def("scarab", "Pure Gold", "Catch a Golden Scarab.")
     static let dragonfly = def("dragonfly", "Here Be Dragonflies", "Catch a dragonfly.")
     static let spare50 = def("spare50", "Bee Kind", "Spare 50 bees, bumblebees or wasps.")

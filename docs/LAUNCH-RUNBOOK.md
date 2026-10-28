@@ -22,7 +22,7 @@ A few words used below:
 | Tue 27 – Fri 30 Oct | Add the 4 GitHub secrets (10 minutes) | §2 |
 | When Claude says "first green build" (about Thu 29 Oct – Mon 2 Nov) | Turn on Game Center, then run the App Store Connect tool twice (plan, then push). This also sends the featuring nomination | §3 |
 | When Claude says the game is ready to try (early November) | Run the TestFlight build (2 clicks) and install it | §4 |
-| The same day or weekend | The 15-step Duo test (about 15 minutes), then send Claude your notes | §5 |
+| The same day or weekend | The 18-step Duo test (about 20 minutes), then send Claude your notes | §5 |
 | Until about Fri 27 Nov | Claude tunes from your notes; you repeat §4–§5 on each new build | §5 |
 | **Tue 17 Nov** | **Brim's launch day.** No Snapjaw work today | — |
 | **Sat 28 – Sun 29 Nov** | The four clicks only you can do, and a check of what the robot filled in (one evening) | §6a–b |
@@ -173,7 +173,7 @@ This one run fills in: the name, subtitle, description, keywords, promotional te
 
 ---
 
-## §5. The Duo test: 15 steps, about 15 minutes
+## §5. The Duo test: 18 steps, about 20 minutes
 
 **Why:** the snap is the whole product, and only your Duo can tell us whether it fires when your hands expect it to, whether the CHOMP feels good, and whether anything ever fires by itself. Do this on the first TestFlight build and again on each new one.
 
@@ -185,17 +185,20 @@ This one run fills in: the name, subtitle, description, keywords, promotional te
 | 2 | First Bite starts. Hold it like a book until the lesson moves on | It passes the pose step by itself within a second or two |
 | 3 | A fat fly lands and sips. Snap: close the halves a little, briskly, then open again | **CHOMP.** How far did you close before it bit: **tiny / about right / too far**? Did it bite **when you expected**, or late? |
 | 4 | **Start recording.** Carry on through the lesson: "Open up", "Quick snaps catch more", the bee (wait for it to leave), the triple | Each step makes sense. On the slow-close step, the flies leave and the hint says "Snap it — quick!" |
-| 5 | Feed (from Home). Play one whole run, catching what you can. **Time it** from the first bug to "Your trap is tired" | Note the time, the score (protein), and roughly how many snaps you made |
-| 6 | Second run: this time **wait for crowds** of 3 or more and spare every bee | Did a Feast feel great? Did waiting feel tense in a good way? Did a bee ever sneak into a bite you didn't mean? |
+| 5 | Feed (from Home). Play one whole run, catching what you can. **Time it** from the first bug to "Your trap is tired" | Note the time, the score, and roughly how many snaps you made. Your first run starts with 14 snaps (the row holds at most 14), the next two with 13 and 12, then 10 |
+| 6 | Second run: this time **wait for crowds** of 3 or more and spare every bee. Try for a bite of **5 or more** | Did a Feast feel great? A 5-bug bite should be a big **FEAST**: a short freeze, a gold burst, a big "FEAST!" banner, the bugs gulped one by one, two snaps refilling and a deeper CHOMP with a burp. Did the chain chip climb with each bite of 2+ bugs (×1.5, ×2 … up to ×5)? Did waiting feel tense in a good way? Did a bee ever sneak into a bite you didn't mean? |
 | 7 | **Ghost check.** Mid-run, hold the Duo still for 10 seconds, then shift your grip and re-settle your hands without meaning to snap | **Nothing should bite by itself.** Count any bites you didn't mean |
 | 8 | **Start recording.** Try snapping from three rests: nearly flat, a normal book, and quite folded (an L shape and a bit more open) | The snap should feel the **same size** from each. Did one of them feel harder, or bite too easily? |
 | 9 | **Blur test.** Open the Duo completely flat, start a run, and make your first snap from flat. Then do it again from a relaxed book | Did one half of the screen blur? Which half (left or right), for about how long? Were the score and snaps on the **sharp** half? Did you see "Bend it a little, like a book"? |
 | 10 | Mid-run, close the Duo much further (well past an L shape) and hold it 2 seconds; open it again. Then close it fully, look at the outer screen, and reopen | The run **pauses** with a card asking you to open it, and carries on when you do. What does the outer screen show? Did closing ever cost you snaps or bite something? |
 | 11 | **Start recording.** Turn the Duo upright (portrait), like a normal phone | A card shows how to hold it like a book |
-| 12 | Play the **Daily Bog** once, then open the **Bug Book** | One counted try, then "practice". New pages show the bugs you caught, with their jokes |
-| 13 | Flip the **silent switch on**, play a few seconds, then open **Settings** and try Sound, Haptics, **Respect silent switch**, **HUD on the left** and **Reduce motion** | Sound on silent? Do the switches work? Does the HUD move to the left half? |
+| 12 | Play the **Daily Bog** once, then open the **Bug Book** | One counted try, then "practice". The results show your streak (🔥 1 day) and a **Share** button: tap it and check the line ("Snapjaw Daily Bog #… · score · biggest bite … · 🔥 1 day 🪤"), then cancel. New Bug Book pages show the bugs you caught, with their jokes |
+| 13 | Flip the **silent switch on**, play a few seconds, then open **Settings** and try **Sound**, **Haptics**, **Respect silent switch**, **Score on the left** and **Reduce motion** | Sound on silent? Do the switches work? With Score on the left on, do the score and snaps move to the left half? |
 | 14 | During any run, close your eyes for a few seconds and listen | Can you hear **where** a bug is (left or right)? Do you feel a tick when one lands? |
 | 15 | Play **5 runs in a row** | Then note: is the Duo **warm**? Hands or wrists tired? Did you want "one more go"? |
+| 16 | **Goals.** On Home, read the **Goals** card (three goals). Play until one is done | A "Goal done!" toast during the run, then the Results card ticks it, shows "+n growth" and the rank bar grows. Back on Home, a new goal has taken its place. In the pause menu, the goals show this run's progress |
+| 17 | **Garden.** Home → **Garden**. Pick any flytrap you have unlocked (a new install has only Classic; Red Dragon comes at the rank Nibbler, 90 bugs), then play a few seconds | Locked ones are dark silhouettes with their rule ("Reach …" or "Goal: …"). The one you picked is the trap in play, on Home and on Results. Snaps and bites feel exactly the same |
+| 18 | **Zen Bog.** Home → **Zen Bog**. Play 2 minutes, bite a bee once on purpose, then pause → **End** | No snaps row and nothing wilts; the bee costs no snap (only the chain). End shows Results with "bugs caught", no best and no leaderboard. Did it feel calm? |
 
 **Send Claude this (copy, fill in, paste in chat), plus the recordings and any screenshots:**
 ```
@@ -205,16 +208,19 @@ Snapjaw build [number from TestFlight], iPhone Duo, iOS [version]
 3  Closed before it bit: [tiny / about right / too far]   Bit when I expected: [yes / late / early]
 4  Lesson made sense: [yes/no, where not]   Slow close made the flies leave: [yes/no]
 5  Run 1: time [ ] min, score [ ], snaps about [ ]
-6  Feast feels great 1-5 [ ]   Waiting feels tense (good) 1-5 [ ]   Bee snuck into a bite: [never / once / often]
+6  Feast feels great 1-5 [ ]   Big FEAST (5+) feels like an event 1-5 [ ]   Waiting feels tense (good) 1-5 [ ]   Bee snuck into a bite: [never / once / often]
 7  Bites I didn't mean while holding still or shifting grip: [ ]
 8  Snap felt the same from flat / book / folded: [yes / no: which felt different]
 9  Half that blurred: [left/right/none]  for about [ ] s   HUD on the sharp half: [yes/no]
 10 Deep close paused and resumed: [yes/no]   Outer screen showed: [ ]   Closing cost me: [nothing / snaps / a bite]
 11 Portrait card: [yes/no]
-12 Daily one try then practice: [yes/no]   Bug Book pages filled: [yes/no]
-13 Sound on silent: [yes/no]   Switches work: [yes/no]   HUD moved left: [yes/no]
+12 Daily one try then practice: [yes/no]   Streak + Share line right: [yes/no]   Bug Book pages filled: [yes/no]
+13 Sound on silent: [yes/no]   Switches work: [yes/no]   Score on the left moved it: [yes/no]
 14 Could hear where bugs were: [yes/no]   Felt landing ticks: [yes/no]
 15 Warm after 5 runs: [no / a little / hot]   Want one more go 1-5 [ ]
+16 Goal toast + Results tick + growth: [yes/no]   New goal on Home: [yes/no]
+17 Garden pick shows in play / Home / Results: [yes/no]   Felt the same: [yes/no]
+18 Zen: no snaps row, no wilts, free bee: [yes/no]   End to Results: [yes/no]   Calm 1-5 [ ]
 Scores 1-5: CHOMP sound [ ] / CHOMP haptic [ ] (too weak / right / too strong) / snap feels physical [ ] / comfort [ ]
 Comfort (hand or wrist tired? ever had to close further or faster than felt natural?):
 Best moment:
@@ -304,8 +310,8 @@ IDs can never be changed once created. These are the exact values (the same as `
 
 | Leaderboard ID | Type | Reference name | Display name | Score format | Suffix | Sort | Submission |
 |---|---|---|---|---|---|---|---|
-| `snap.best` | **Classic** | Best feast | Best Feast | Integer | ` protein` (singular and plural) | High to Low | Best score |
-| `snap.daily` | **Recurring**: start **Mon 2 Nov 2026 at 00:00 UTC**, lasts **1 day**, repeats every **1 day** | Daily Bog | Daily Bog | Integer | ` protein` | High to Low | Best score |
+| `snap.best` | **Classic** | Best feast | Best Feast | Integer | ` point` / ` points` | High to Low | Best score |
+| `snap.daily` | **Recurring**: start **Mon 2 Nov 2026 at 00:00 UTC**, lasts **1 day**, repeats every **1 day** | Daily Bog | Daily Bog | Integer | ` point` / ` points` | High to Low | Best score |
 
 **Achievements** (none hidden, none can be earned more than once, each with its 1024 × 1024 badge drawn by the app):
 
@@ -313,7 +319,7 @@ IDs can never be changed once created. These are the exact values (the same as `
 |---|---|---|---|---|
 | `snap.ach.feast` | First Feast | Catch 3 bugs or more in one bite. | Three in one gulp. A proper Feast. | 10 |
 | `snap.ach.bite5` | Mouthful | Catch 5 bugs or more in one bite. | Five bugs, one bite, no regrets. | 25 |
-| `snap.ach.chain4` | Four Times Hungry | Score a bite at x4: seven clean bites in a row. | The chain hit x4. Bite after bite after bite. | 50 |
+| `snap.ach.chain4` | Four Times Hungry | Score a bite at x4: seven bites of 2+ bugs, without an empty snap or biting a bee. | The chain hit x4. Bite after bite after bite. | 50 |
 | `snap.ach.scarab` | Pure Gold | Catch a Golden Scarab. | The rarest bug in the bog. Shiny. | 50 |
 | `snap.ach.dragonfly` | Here Be Dragonflies | Catch a dragonfly. | It hovered. You timed it. | 25 |
 | `snap.ach.spare50` | Bee Kind | Spare 50 bees, bumblebees or wasps. | Fifty stripy visitors, all sent home. | 50 |
@@ -321,7 +327,7 @@ IDs can never be changed once created. These are the exact values (the same as `
 | `snap.ach.monarch` | Bog Monarch | Reach the top plant rank: Bog Monarch. | All hail the hungriest plant in the bog. | 100 |
 | `snap.ach.night` | Midnight Snack | Keep your trap going until night falls. | Fed from breakfast to midnight. | 25 |
 | `snap.ach.daily` | Daily Diner | Finish a scored Daily Bog. | Same bog as everyone else today. | 15 |
-| `snap.ach.score10k` | Well Fed | Score 10,000 protein in one run. | Ten thousand protein. Delicious. | 75 |
+| `snap.ach.score10k` | Well Fed | Score 10,000 in one run. | Ten thousand points. Delicious. | 75 |
 | `snap.ach.nobees` | Bee-Free Diet | Catch 30 bugs in one run without biting a bee or wasp. | Thirty bugs, and not one bee in the mix. | 50 |
 | | | | **Total** | **575** (of 1,000 allowed) |
 

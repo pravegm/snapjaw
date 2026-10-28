@@ -60,9 +60,10 @@ const achievements = rows.map(r => {
   return { vendorIdentifier: id, referenceName: tGB, points: parseInt(r[5], 10), showBeforeEarned: !hidden, repeatable: false,
     localizations: { 'en-GB': loc(tGB, bGB, aGB), 'en-US': loc(tUS, bUS, aUS) }, image: `tools/appstore/badges/${id}.png` };
 });
-for (const s of ['`snap.best`', '`snap.daily`', '`Best feast`', '`Daily Bog`', '`Best Feast`', '` protein` / ` protein`',
+for (const s of ['`snap.best`', '`snap.daily`', '`Best feast`', '`Daily Bog`', '`Best Feast`', '` point` / ` points`',
                  '0 – 10,000,000', 'Start **Mon 2 Nov 2026, 00:00 UTC**; duration **1 day**; repeats every **1 day**']) need(ach, s, 'achievements.md');
-const lbLoc = (n) => ({ name: n, formatterSuffix: ' protein', formatterSuffixSingular: ' protein' });
+// R5/R6: the word is "score" (suffix "points"), never "protein" (achievements.md, Format suffix row).
+const lbLoc = (n) => ({ name: n, formatterSuffix: ' points', formatterSuffixSingular: ' point' });
 const leaderboards = [
   { vendorIdentifier: 'snap.best', referenceName: 'Best feast', defaultFormatter: 'INTEGER', scoreSortType: 'DESC', submissionType: 'BEST_SCORE',
     scoreRangeStart: 0, scoreRangeEnd: 10000000, recurrence: null, localizations: { 'en-GB': lbLoc('Best Feast'), 'en-US': lbLoc('Best Feast') } },
@@ -84,7 +85,13 @@ for (const r of rbRows) {
 }
 if (rbRows.length !== achievements.length) problems.push(`runbook has ${rbRows.length} achievements, achievements.md ${achievements.length}`);
 
-const FRAMES = ['01-book-hero', '02-feast', '03-bee', '04-last-snap', '05-dusk', '06-night', '07-bug-book', '08-results', '09-daily', '10-first-bite'];
+// R6 storyboard (ci/store-scenarios.txt, ci/duo-store-scenarios.txt: the source of truth for names and captions).
+const FRAMES = ['01-book-hero', '02-feast', '03-bee', '04-garden', '05-night', '06-goals', '07-bug-book', '08-zen', '09-results', '10-first-bite'];
+for (const [file, prefix] of [['ci/store-scenarios.txt', 'P'], ['ci/duo-store-scenarios.txt', 'D']]) {
+  let names = []; try { names = rd(file).split('\n').filter(l => new RegExp('^' + prefix + '\\d\\d-').test(l)).map(l => l.split('|')[0]); } catch (e) { problems.push(file + ' missing'); }
+  const want = FRAMES.map(n => prefix + n);
+  if (names.join() !== want.join()) problems.push(`${file} frames ${JSON.stringify(names)} != ${JSON.stringify(want)}`);
+}
 const screenshots = {
   _comment: 'store.yml (to be ported from Swoop) artifacts store-69 (6.9", 2868x1320), store-63 (6.3", 2622x1206: the required "Dynamic Island, medium" slot, the APP_IPHONE_61 class) and store-duo (inner 2853x2007), all landscape. Frames P01-P10 / D01-D10 in screenshots.md order. Until a store run exists (DEFAULT_STORE_RUN in asc.yml), validate reports them as gaps and push skips them.',
   APP_IPHONE_67: FRAMES.map(n => `store-69/P${n}.png`),
@@ -144,6 +151,11 @@ for (const a of achievements) { const t = a.localizations['en-GB'].name; if (c(t
 const banned = /smash|squish|squash|\bkill|splat|fold to /i;
 for (const [k, v] of [['name', name], ['subtitle', subtitle], ['promo', promo], ['descGB', descGB], ['descUS', descUS], ['keywords', keywords], ['notes', notes], ['nomDesc', nomDesc], ['nomNotes', nomNotes.replace('Squish, ', '')]]) if (banned.test(v)) problems.push(`${k} has a banned word: ${v.match(banned)[0]}`);
 for (const a of achievements) for (const x of Object.values(a.localizations['en-GB'])) if (banned.test(x)) problems.push('banned word in ' + a.vendorIdentifier);
+// R6: the untrue R5 claims (SCORE-R5 §4 #3) must never come back.
+const stale = /protein|HUD on the left|to (×|x)4\b|12 at most|max(imum)? 12|up to 12 snaps|seven clean bites in a row/i;
+for (const [k, v] of [['promo', promo], ['descGB', descGB], ['descUS', descUS], ['notes', notes], ['nomDesc', nomDesc], ['nomNotes', nomNotes], ['whatsNew', whatsNew]]) if (stale.test(v)) problems.push(`${k} repeats an untrue claim: ${v.match(stale)[0]}`);
+for (const a of achievements) for (const x of Object.values(a.localizations['en-GB'])) if (stale.test(x)) problems.push('untrue claim in ' + a.vendorIdentifier + ': ' + x);
+for (const lb of leaderboards) for (const l of Object.values(lb.localizations)) if (stale.test(l.formatterSuffix + l.formatterSuffixSingular)) problems.push('leaderboard suffix says protein: ' + lb.vendorIdentifier);
 
 fs.writeFileSync(path.join(root, 'docs/appstore/asc-metadata.json'), JSON.stringify(meta, null, 2) + '\n');
 console.log({ name: c(name), subtitle: c(subtitle), promo: c(promo), descGB: c(descGB), descUS: c(descUS), kwBytes: b(keywords), notesBytes: b(notes),

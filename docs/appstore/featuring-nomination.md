@@ -18,7 +18,7 @@ If the launch moves (the fallback is Tue 12 Jan 2027), tell Claude: the Publish 
 |---|---|---|
 | Nomination Name | `Snapjaw - App Launch - iPhone Duo Venus flytrap game` | 52 / 60 |
 | Nomination Type | **App Launch** | — |
-| Description | the block below | **925 / 1,000** |
+| Description | the block below | **971 / 1,000** |
 | Publish Date | **Specific day: 2026-12-08** | — |
 | Related Apps | Snapjaw only (auto-filled). Don't add Squish, Brim, Swoop or Hush: they have their own nominations | up to 10 |
 | Platforms | iOS | — |
@@ -34,7 +34,7 @@ Snapjaw turns iPhone Duo into a Venus flytrap. Hold the Duo open like a book: th
 
 It's a game of choosing, not hitting. Wait for a crowd and catch them all in one bite, for a score multiplied by the number of bugs, but bees love nectar too and must never be eaten. Snaps are the resource, and big bites earn them back. Every run passes from morning to night with new bugs, from houseflies to dragonflies and fireflies, and a Bug Book of 16 species to fill.
 
-A First Bite lesson teaches by doing. A Daily Bog that's the same for everyone, 12 plant ranks and Game Center. Other iPhones play by tapping. Every sound, from the CHOMP to the frogs, is synthesized in the app. No ads, no in-app purchases, no data collected.
+Three goals at a time grow your plant through 12 ranks, and a Garden of 8 flytraps rewards them. A Daily Bog with a streak, a Zen Bog that never ends, a First Bite lesson and Game Center. Other iPhones play by tapping. Every sound is synthesized in the app. No ads, no in-app purchases, no data collected.
 ```
 
 ### Helpful Details
@@ -48,7 +48,7 @@ Optimized for iPhone Duo: built for book pose on the inner display. Public iOS 2
 - **The difference from the free toys, without naming them:** "a game of choosing, not hitting", crowds, bees to spare, a snap economy. Never "smash".
 - **Built for the real device:** a relative snap that follows the player's own pose, the HUD on the sharp half, the bite decided at 22° so nobody is tempted to close it further. Editors look for apps that handle the Duo's quirks, not just its hinge.
 - **Craft:** synthesized sound, a lesson that teaches by doing.
-- **Replayability:** endless runs through a day cycle, the Daily Bog, the Bug Book, plant ranks, Game Center.
+- **Replayability (R6):** goals that grow the plant, the Garden of 8 flytraps, the Daily streak, the Zen Bog, endless runs through a day cycle, the Bug Book, plant ranks, Game Center.
 - **Reach:** tap to snap on other iPhones (iOS 18 or later). No VoiceOver claim, because that label isn't earned (`accessibility.md`).
 - **No ads:** the last line.
 
