@@ -93,7 +93,8 @@ struct RootView: View {
                     .padding(.vertical, 12)
                     .background(Capsule().fill(SnapTheme.surfaceRaised))
                     .overlay(Capsule().stroke(SnapTheme.lime.opacity(0.3), lineWidth: 1))
-                    .position(x: canvas.width / 2, y: max(safe.top, 12) + 40)
+                    // On the HUD page in play, never across the crease.
+                    .position(x: toastX(canvas, safe: safe, pose: pose, fold: fold), y: max(safe.top, 12) + 40)
                     .transition(.opacity)
                     .allowsHitTesting(false)
             }
@@ -124,6 +125,12 @@ struct RootView: View {
     }
 
     // MARK: - Pose and canvas
+
+    private func toastX(_ canvas: CGSize, safe: EdgeInsets, pose: AppPose, fold: Bool) -> CGFloat {
+        guard pose == .play else { return canvas.width / 2 }
+        let layout = ScreenLayout.make(viewSize: canvas, hasFold: fold, hudOnLeft: controller.hudOnLeft)
+        return AppCanvas(size: canvas, insets: safe, layout: layout).hudPage.midX
+    }
 
     private func isDuoLike(_ canvas: CGSize) -> Bool {
         controller.hingeSeen || AppRules.looksLikeDuoInner(canvas) || controller.forcedPose != nil

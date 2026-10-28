@@ -286,6 +286,18 @@ while IFS='|' read -r -u 3 name args wait caption expect col6 col7; do
     echo "screenshot failed: $name"; fails=$((fails+1))
     printf '%s\tscreenshot-failed\t-\t%s\t%s\n' "$name" "$froze" "$exp" >> "$INDEX"
   fi
+  # The app writes Documents/badges/<id>.png for the `badges` scenario (Game Center achievement images, rendered from
+  # SwiftUI). They land in $OUT/badges/ (the `screenshots` artifact's badges/ folder, which asc.yml collects).
+  if [[ "$args" == *badges* ]]; then
+    data=$(to 30 xcrun simctl get_app_container "$UDID" "$BUNDLE" data 2>/dev/null || true)
+    if [[ -n "$data" && -d "$data/Documents/badges" ]]; then
+      mkdir -p "$OUT_ABS/badges"
+      cp "$data/Documents/badges/"*.png "$OUT_ABS/badges/" 2>/dev/null || echo "warning: $name: no PNGs in Documents/badges"
+      echo "badges: $(ls "$OUT_ABS/badges" | wc -l | tr -d ' ') PNGs"
+    else
+      echo "warning: $name: no Documents/badges folder"
+    fi
+  fi
   grep -E "SNAP-" "$applog" | tail -5 || true
 done 3< "$SCENARIOS"
 

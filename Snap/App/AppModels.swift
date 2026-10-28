@@ -25,15 +25,24 @@ enum AppInputKind: String, Equatable {
     case hinge, touch, pilot, fixed
 }
 
+/// What the hint plate says: one of Core's hints, or one of the App's own (R3).
+enum HUDHint: Equatable {
+    case trap(TrapHint)
+    /// The first wave of a run: "Snap the halves together" on a Duo, "Tap to snap" on phones (ROUND-3 founder call).
+    case foldInput
+    /// Sprout's free first sting: "Bees cost a snap!" (REVIEW-2 #9).
+    case beesCost
+}
+
 /// The HUD values (one value, published only when it changes).
 struct HUDValues: Equatable {
     var score = 0
     var best = 0
     var snapsLeft = 0
-    var snapsMax = 12
+    var snapsMax = 14
     var chain = 0
     var chainMultiplier = 1.0
-    var hint: TrapHint?
+    var hint: HUDHint?
     /// The run-start line ("Wait for a crowd. Spare bees."), shown for a beat when no hint is up.
     var banner: String?
     /// "Your trap is tired."
@@ -51,6 +60,16 @@ struct HUDValues: Equatable {
     var stings = 0
     /// The lesson's pointer rings (scene space).
     var lessonTargets: [LessonTarget] = []
+    /// R3: 3 s before a snap wilts (Core's `hungry` until the next bite or wilt): the draining glyph pulses crimson and
+    /// the numeral ticks red.
+    var hungry = false
+    /// R3 (REVIEW-2 #12): the lesson shows the snaps row from step 3, and rings it on its last card.
+    var lessonSnaps = false
+    var ringSnaps = false
+    /// R3 (REVIEW-2 #12): the first Feast's flying glyph is labelled once ("+1 snap").
+    var snapGain: String?
+    /// R3 (Scene #14): the scene's crimson sting flash is crossing the row (`BogScene.snapsRowFlashing`).
+    var rowFlashing = false
 }
 
 /// A bug the lesson points at (a pulsing ring, and an arrow from the card).

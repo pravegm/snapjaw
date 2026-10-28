@@ -17,6 +17,11 @@ import UIKit
 /// R2: hunger speaks too (`hungry`: a stomach rumble and its haptic; `wilted`: a soft droop and a weak haptic), and
 /// every haptic cue of one frame plays as one merged pattern.
 ///
+/// R3: a sting's verdict follows its "Bzzt!": a sting that cost snaps (`stung` cost ≥ 1) plays the descending
+/// two-note loss blip with a heavier sting haptic; a free one (every sting of the frame cost 0: the first bee of
+/// Sprout's run 1) plays a gentle "oops" instead. The chain's first `chainUp` at ×5 flares once (a bright rising
+/// chord), and the wilt's droop is two sad little sighs.
+///
 /// Battery: with `idle` set (menus), or after `idleDelay` s with no play and no events, the engines idle by themselves
 /// (the haptic player stops, the audio engine naps once quiet). A playing frame, an event, a menu sound or Home's
 /// creaking trap wakes them. If the frames stop without a `silence()` (the app went away), a watchdog fades the
@@ -46,8 +51,8 @@ final class FeedbackDirector: FeedbackSink {
     static let warnAt: Float = 0.75
     static let tiredAt: Float = 0.9
     static let newBestAt: Float = 0.6
-    /// After a wilt (s): the last-snap knocks or the tired yawn wait for the droop.
-    static let afterWiltAt: Float = 0.7
+    /// After a wilt (s): the last-snap knocks or the tired yawn wait for the droop (R3: its two sighs).
+    static let afterWiltAt: Float = FeelSoundBook.wiltLength
     /// Caught bugs past this many get the light crunch (QA-1 #4: voices for the reward sounds).
     static let fullCrunches = 4
 
@@ -147,6 +152,12 @@ final class FeedbackDirector: FeedbackSink {
     /// Hunger cues played (rumbles, droops), for diagnostics and tests.
     private(set) var rumbles = 0
     private(set) var droops = 0
+    /// R3 moments played: the loss blips (stings that cost snaps), the free first bee's "oops", the chain's ×5 flare.
+    private(set) var lossBlips = 0
+    private(set) var oopses = 0
+    private(set) var flares = 0
+    /// The multiplier of the last `chainUp` (1 after a break), so the ×5 flare plays once per climb.
+    private var lastChainMultiplier: Double = 1
     /// Haptic patterns built (one per frame with cues, after merging), for diagnostics and tests.
     private(set) var hapticPatterns = 0
 
@@ -307,14 +318,31 @@ final class FeedbackDirector: FeedbackSink {
         var biting = false
         var stung = false
         var wilting = false
+        var stingCost = 0
         for event in events {
             switch event {
             case .snapped: biting = true
-            case .stung: stung = true
+            case .stung(_, _, let cost):
+                stung = true
+                stingCost += max(cost, 0)
             case .wilted: wilting = true
             default: break
             }
         }
+        // R3: the sting's verdict (the loss blip or the "oops") waits for the last "Bzzt!" played to be spat out.
+        var verdictAt: Float = 0
+        if stung {
+            var index = 0
+            for event in events {
+                guard case .stung(_, let species, _) = event else { continue }
+                guard index < Self.maxStingsPerFrame else { break }
+                let delay: Float = biting ? FeelSoundBook.stingAt + 0.12 * Float(index) : 0
+                verdictAt = max(verdictAt, FeelSoundBook.stingVerdictAt(species, delay: delay))
+                index += 1
+            }
+        }
+        // A costly sting's blip must be over before the chain's "bwoop" (and the warnings) speak.
+        let afterLoss: Float = stingCost > 0 ? verdictAt + FeelSoundBook.lostLength : 0
         frameCues = []
         defer { flushHaptics() }
         var caught = 0
@@ -368,11 +396,11 @@ final class FeedbackDirector: FeedbackSink {
                     audio.play(FeelSoundBook.whiff(pan: pan(of: id), delay: delay, dice: &dice))
                 }
                 escaped += 1
-            case .stung(let id, let species, _):
+            case .stung(let id, let species, let cost):
                 if stings < Self.maxStingsPerFrame {
                     let delay: Float = biting ? FeelSoundBook.stingAt + 0.12 * Float(stings) : 0
                     audio.play(FeelSoundBook.sting(species, pan: pan(of: id), delay: delay, dice: &dice))
-                    playHaptic(FeelHapticBook.sting(at: Double(delay)))
+                    playHaptic(FeelHapticBook.sting(at: Double(delay), heavy: cost > 0))
                 }
                 stings += 1
             case .feast(let count, let snapsBack):
@@ -382,12 +410,24 @@ final class FeedbackDirector: FeedbackSink {
                 let delay: Float = biting ? FeelSoundBook.luckyAt : 0
                 audio.play(FeelSoundBook.lucky(species, delay: delay, dice: &dice))
                 playHaptic(FeelHapticBook.lucky(at: Double(delay)))
-            case .chainUp(let count, _):
+            case .chainUp(let count, let multiplier):
                 let delay: Float = biting ? FeelSoundBook.chainAt : 0
                 audio.play(FeelSoundBook.chainUp(count: count, delay: delay, dice: &dice))
+                // R3: the first step at ×5 flares once (a one-off per climb; a break or a lower step re-arms it).
+                let value = multiplier.isFinite ? multiplier : 1
+                let top = FeelSoundBook.flareMultiplier - 1e-6
+                if value >= top && lastChainMultiplier < top {
+                    flares += 1
+                    let at = delay + FeelSoundBook.flareAfter
+                    audio.play(FeelSoundBook.chainFlare(delay: at, dice: &dice))
+                    playHaptic(FeelHapticBook.chainFlare(at: Double(at)))
+                }
+                lastChainMultiplier = value
             case .chainBroken:
+                lastChainMultiplier = 1
                 var delay: Float = biting ? Self.chainBrokenAt : 0
                 if biting && stung { delay += 0.3 }
+                delay = max(delay, afterLoss)
                 audio.play(FeelSoundBook.chainBroken(delay: delay, dice: &dice))
             case .rearmed:
                 audio.play(FeelSoundBook.rearmPluck(dice: &dice))
@@ -396,7 +436,8 @@ final class FeedbackDirector: FeedbackSink {
                 audio.play(FeelSoundBook.spared(species, dice: &dice))
                 playHaptic(FeelHapticBook.spared)
             case .lastSnap:
-                let delay: Float = biting ? Self.warnAt : (wilting ? Self.afterWiltAt : 0)
+                var delay: Float = biting ? Self.warnAt : (wilting ? Self.afterWiltAt : 0)
+                delay = max(delay, afterLoss)
                 audio.play(FeelSoundBook.lastSnap(delay: delay))
                 playHaptic(FeelHapticBook.lastSnap(at: Double(delay)))
             case .hungry:
@@ -410,13 +451,26 @@ final class FeedbackDirector: FeedbackSink {
                 audio.play(FeelSoundBook.wilted(dice: &dice))
                 playHaptic(FeelHapticBook.wilted())
             case .tired:
-                let delay: Float = biting ? Self.tiredAt : (wilting ? Self.afterWiltAt : 0)
+                var delay: Float = biting ? Self.tiredAt : (wilting ? Self.afterWiltAt : 0)
+                delay = max(delay, afterLoss)
                 audio.play(FeelSoundBook.tired(delay: delay))
                 playHaptic(FeelHapticBook.tired(at: Double(delay)))
             case .newBest:
                 let delay: Float = biting ? Self.newBestAt : 0
                 audio.play(FeelSoundBook.newBest(delay: delay))
                 playHaptic(FeelHapticBook.newBest(at: Double(delay)))
+            }
+        }
+        // R3: the sting's verdict, once per frame, after the last "Bzzt!".
+        if stung {
+            if stingCost > 0 {
+                lossBlips += 1
+                audio.play(FeelSoundBook.snapLost(cost: stingCost, delay: verdictAt, dice: &dice))
+                playHaptic(FeelHapticBook.snapLost(at: Double(verdictAt)))
+            } else {
+                oopses += 1
+                audio.play(FeelSoundBook.oops(delay: verdictAt, dice: &dice))
+                playHaptic(FeelHapticBook.oops(at: Double(verdictAt)))
             }
         }
     }

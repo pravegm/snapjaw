@@ -79,6 +79,8 @@ enum FeelSoundBook {
     static let gulpAt: Float = 0.34
     /// Home's title trap chomps a little smaller than a real bite.
     static let homeChompScale: Float = 0.8
+    /// R3: bites of up to this many bugs get the small-bite "nom" (sound) and a firmer floor (haptic).
+    static let smallBite = 2
 
     /// The squelch tail's length: 120 ms + 60 ms per bug caught (ROUND-1), capped at 8 bugs.
     static func squelchLength(caught: Int) -> Float {
@@ -99,6 +101,7 @@ enum FeelSoundBook {
     ///    60 ms per bug, denser and wetter with more bugs (a big bite adds a low slosh);
     /// 6. the **gulp** 0.34 s later: a nasal "mm", a 140 → 90 Hz formant blip, and a swallow.
     /// Weight grows with the bite (thump and thwack +5 % per extra bug). Everything shifts by the same ±4 % pitch.
+    /// R3: a 1–2 bug bite adds a "nom" after the hit-stop (`smallBite`), so a small bite still has weight.
     static func chomp(caught: Int, dice: inout FeelDice, scale: Float = 1) -> [FeelSynthCommand] {
         let n = min(max(caught, 0), 8)
         guard n > 0 else { return drySnap(dice: &dice, scale: scale) }
@@ -136,6 +139,13 @@ enum FeelSoundBook {
         if n >= 3 {
             commands.append(.noise(FeelNoiseSpec(.lowPass, cutoff: 700 * k, to: 250 * k, sweep: 0.15, q: 1,
                                                  attack: 0.01, decay: 0.08, gain: 0.12 * s, delay: hitStop + 0.02)))
+        }
+        // R3: a small bite still has weight. A 1–2 bug bite gets a "nom" right after the hit-stop: a 230 → 150 Hz
+        // harmonic-rich body in the band a phone speaker really plays, so a single fly lands as a proper mouthful.
+        if n <= smallBite {
+            commands.append(.tone(FeelToneSpec(start: 230 * k, end: 150 * k, glide: 0.06, duration: 0.14,
+                                               attack: 0.003, decay: 0.045, gain: 0.13 * s, harmonics: 5,
+                                               delay: hitStop)))
         }
         // 6. The gulp.
         commands.append(.tone(FeelToneSpec(start: 140 * k, end: 90 * k, glide: 0.09, duration: 0.17, attack: 0.012,
@@ -332,6 +342,38 @@ enum FeelSoundBook {
         return commands
     }
 
+    /// R3: the chain's top step (×5 at step 8) flares once: `chainUp` with a multiplier at or above this.
+    static let flareMultiplier: Double = 5
+    /// The flare starts this long after the chain's own two-note step.
+    static let flareAfter: Float = 0.1
+
+    /// The chain reached ×5: a bright rising chord, once. A fast C6–E6–G6–C7 chime roll spreading left to right over a
+    /// soft held C major shimmer, and two glints at the top. Bright but light: it lands after the gulp, never on the
+    /// CHOMP's impact, and each voice stays small.
+    static func chainFlare(delay: Float = 0, dice: inout FeelDice) -> [FeelSynthCommand] {
+        let at: Float = delay.isFinite ? max(delay, 0) : 0
+        let roll: [Float] = [c6, e6, g6, c7]
+        var commands: [FeelSynthCommand] = []
+        for (index, f) in roll.enumerated() {
+            let last = index == roll.count - 1
+            commands.append(.ring(FeelRingSpec(.chime, fundamental: f, partials: 3, decay: last ? 0.9 : 0.55,
+                                               brightness: 0.4, gain: last ? 0.055 : 0.045,
+                                               delay: at + 0.035 * Float(index), seed: dice.seed32(),
+                                               pan: -0.3 + 0.2 * Float(index))))
+        }
+        let shimmer: [Float] = [c5, e5, g5]
+        for (index, f) in shimmer.enumerated() {
+            commands.append(.tone(FeelToneSpec(start: f, duration: 0.8, attack: 0.04, decay: 0.35, gain: 0.022,
+                                               harmonics: 2, vibratoRate: 5.5 + 0.4 * Float(index),
+                                               vibratoDepth: 0.006, delay: at)))
+        }
+        commands.append(.ring(FeelRingSpec(.glass, fundamental: e7, partials: 2, decay: 0.3, brightness: 0.3,
+                                           gain: 0.03, delay: at + 0.16, seed: dice.seed32(), pan: 0.3)))
+        commands.append(.ring(FeelRingSpec(.glass, fundamental: d7, partials: 2, decay: 0.25, brightness: 0.3,
+                                           gain: 0.022, delay: at + 0.24, seed: dice.seed32(), pan: -0.3)))
+        return commands
+    }
+
     // MARK: Bees and wasps
 
     /// The "Bzzt!" lands this long after the bite (after the teeth).
@@ -345,21 +387,18 @@ enum FeelSoundBook {
                       dice: inout FeelDice) -> [FeelSynthCommand] {
         let base: Float
         let harmonics: Int
-        let zaps: Int
+        let zaps = stingZaps(species)
         switch species {
         case .wasp:
             base = 300
             harmonics = 9
-            zaps = 2
         case .bumblebee:
             base = 160
             harmonics = 7
-            zaps = 1
         case .housefly, .gnat, .fruitFly, .bluebottle, .ant, .ladybird, .grasshopper, .moth, .mosquito, .dragonfly,
              .firefly, .cricket, .goldenScarab, .bee:
             base = 220
             harmonics = 7
-            zaps = 1
         }
         let k = dice.float(0.97, 1.03)
         var commands: [FeelSynthCommand] = []
@@ -385,6 +424,66 @@ enum FeelSoundBook {
         commands.append(.drop(FeelDropSpec(frequency: 900, chirp: 0.5, decay: 0.025, gain: 0.05, delay: spit + 0.02,
                                            pan: pan)))
         return commands
+    }
+
+    /// How many "Bzzt!"s a protected bug zaps (a wasp twice).
+    static func stingZaps(_ species: BugSpecies) -> Int {
+        switch species {
+        case .wasp: return 2
+        case .housefly, .gnat, .fruitFly, .bluebottle, .ant, .ladybird, .grasshopper, .moth, .mosquito, .dragonfly,
+             .firefly, .cricket, .goldenScarab, .bee, .bumblebee:
+            return 1
+        }
+    }
+
+    /// R3: the sting's verdict (the loss blip or the "oops") lands this long after the spit.
+    static let verdictAfterSpit: Float = 0.1
+
+    /// When a sting that starts at `delay` is over (its "ptoo" spat): the verdict lands here.
+    static func stingVerdictAt(_ species: BugSpecies, delay: Float) -> Float {
+        let start: Float = delay.isFinite ? max(delay, 0) : 0
+        return start + spitAfter + 0.14 * Float(stingZaps(species) - 1) + verdictAfterSpit
+    }
+
+    /// The loss blip's two notes, `lostSpacing` apart; the whole blip is over after `lostLength`.
+    static let lostSpacing: Float = 0.12
+    static let lostLength: Float = 0.32
+
+    /// R3: a sting that cost snaps says "you lost something": a short descending two-note blip after the "Bzzt!".
+    /// Hollow square-ish blips (odd harmonics) doubled on the marimba, A5 then a fourth down to E5; a wasp's two
+    /// snaps fall a fifth, to D5. Clear and small, never louder than the CHOMP.
+    static func snapLost(cost: Int = 1, delay: Float = 0, dice: inout FeelDice) -> [FeelSynthCommand] {
+        let at: Float = delay.isFinite ? max(delay, 0) : 0
+        let k = dice.float(0.99, 1.01)
+        let low: Float = cost >= 2 ? d5 : e5
+        let notes: [Float] = [a5 * k, low * k]
+        var commands: [FeelSynthCommand] = []
+        for (index, f) in notes.enumerated() {
+            let last = index == notes.count - 1
+            let t = at + lostSpacing * Float(index)
+            commands.append(.tone(FeelToneSpec(start: f, end: f * 0.97, glide: 0.06, duration: last ? 0.16 : 0.09,
+                                               attack: 0.002, decay: last ? 0.06 : 0.035, gain: 0.07, harmonics: 2,
+                                               delay: t, odd: true)))
+            commands.append(.ring(FeelRingSpec(.marimba, fundamental: f, partials: 3, decay: last ? 0.2 : 0.1,
+                                               brightness: 0.35, gain: 0.05, delay: t, seed: dice.seed32())))
+        }
+        return commands
+    }
+
+    /// R3: the free first bee (cost 0, "Bees cost a snap!"): a gentle "oops" after the usual "Bzzt!". A soft round
+    /// scoop up a fifth (a little gasp), then a light marimba note and a glint that end high: a warning, nothing lost.
+    static func oops(delay: Float = 0, dice: inout FeelDice) -> [FeelSynthCommand] {
+        let at: Float = delay.isFinite ? max(delay, 0) : 0
+        let k = dice.float(0.98, 1.02)
+        return [
+            .tone(FeelToneSpec(start: 392 * k, end: 587.33 * k, glide: 0.07, duration: 0.13, attack: 0.012,
+                               decay: 0.05, gain: 0.05, harmonics: 2, vibratoRate: 7, vibratoDepth: 0.01,
+                               delay: at)),
+            .ring(FeelRingSpec(.marimba, fundamental: d6 * k, partials: 3, decay: 0.16, brightness: 0.3, gain: 0.045,
+                               delay: at + 0.11, seed: dice.seed32())),
+            .ring(FeelRingSpec(.glass, fundamental: g6 * k, partials: 2, decay: 0.12, brightness: 0.3, gain: 0.02,
+                               delay: at + 0.13, seed: dice.seed32())),
+        ]
     }
 
     /// A bee (bumblebee, wasp) left the trap uneaten: a happy little rising hum and a soft chime. Kindness rewarded.
@@ -564,19 +663,29 @@ enum FeelSoundBook {
         return commands
     }
 
-    /// A snap wilted (no catching bite for the phase's wilt time): a soft, sinking droop. A gentle falling sigh
-    /// (G4 → G3 over 0.5 s, a little vibrato), a leafy rustle settling, and one soft low marimba note at the bottom.
+    /// When the wilt's second sigh starts, and when the whole droop has settled (s after the wilt).
+    static let wiltSecondSigh: Float = 0.24
+    static let wiltLength: Float = 0.9
+
+    /// A snap wilted ("Too slow! −1 snap"). R3: clearer and sadder, still cute: a tiny sad two-note "aww-www". A short
+    /// G4 that sags a little, then a longer E4 sliding down to B3 with a wobbly vibrato (the leaf flopping), a leafy
+    /// rustle settling under it, a little falling drip off the leaf tip, and one soft low marimba plop at the bottom.
     /// Softer than the last-snap knocks.
     static func wilted(delay: Float = 0, dice: inout FeelDice) -> [FeelSynthCommand] {
         let k = dice.float(0.98, 1.02)
         let at: Float = delay.isFinite ? max(delay, 0) : 0
+        let second = at + wiltSecondSigh
         return [
-            .tone(FeelToneSpec(start: 392 * k, end: 196 * k, glide: 0.5, duration: 0.65, attack: 0.03, decay: 0.28,
-                               gain: 0.06, harmonics: 3, vibratoRate: 5, vibratoDepth: 0.012, delay: at)),
-            .noise(FeelNoiseSpec(.bandPass, cutoff: 1400 * k, to: 350 * k, sweep: 0.5, q: 0.9, attack: 0.04,
-                                 decay: 0.18, gain: 0.035, delay: at)),
+            .tone(FeelToneSpec(start: 392 * k, end: 370 * k, glide: 0.18, duration: 0.22, attack: 0.02, decay: 0.09,
+                               gain: 0.06, harmonics: 3, vibratoRate: 5, vibratoDepth: 0.008, delay: at)),
+            .tone(FeelToneSpec(start: 329.63 * k, end: 246.94 * k, glide: 0.42, duration: 0.6, attack: 0.03,
+                               decay: 0.26, gain: 0.065, harmonics: 3, vibratoRate: 6, vibratoDepth: 0.02,
+                               delay: second)),
+            .noise(FeelNoiseSpec(.bandPass, cutoff: 1400 * k, to: 350 * k, sweep: 0.6, q: 0.9, attack: 0.04,
+                                 decay: 0.2, gain: 0.035, delay: at)),
+            .drop(FeelDropSpec(frequency: 700 * k, chirp: 0.6, decay: 0.03, gain: 0.035, delay: second + 0.38)),
             .ring(FeelRingSpec(.marimba, fundamental: 130.81 * k, partials: 3, decay: 0.3, brightness: 0.3, gain: 0.05,
-                               delay: at + 0.5, seed: dice.seed32())),
+                               delay: second + 0.46, seed: dice.seed32())),
         ]
     }
 
@@ -703,12 +812,14 @@ enum FeelSoundBook {
         70 + 70 * FeelMath.clamp01(closure / Tuning.snapDepth)
     }
 
-    /// The marimba voices for a chain: 1, then one more at chains of 2, 4 and 6.
+    /// The marimba voices for a chain: 1, then one more at chains of 2, 4 and 6, and (R3) a fifth, the bright chime
+    /// double, at 8 (the ×5 top step).
     static func musicVoices(chain: Int) -> Float {
         var voices: Float = 1
         if chain >= 2 { voices += 1 }
         if chain >= 4 { voices += 1 }
         if chain >= 6 { voices += 1 }
+        if chain >= 8 { voices += 1 }
         return voices
     }
 

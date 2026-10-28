@@ -17,7 +17,12 @@ struct SessionOptions: Equatable {
     var startSnaps: Int? = nil
     /// R2 hunger (GAME-DESIGN §5): snaps wilt without a catching bite. Only runs whose snaps run out ever wilt, so
     /// the lesson and attract never do; false switches it off for a feed run too (tests, tools).
+    /// R3 (REVIEW-2 #9): the App passes false for a Sprout's first run ("Sprout run 1 never wilts").
     var hunger: Bool = true
+    /// R3 (REVIEW-2 #9): the run's first bite with a stinger in it costs no extra snap (its `stung` events carry
+    /// cost 0 and its BiteReport.snapsLost is 0; the bite still scores ×1, refunds nothing and breaks the chain).
+    /// The App passes true for a Sprout's first run and shows "Bees cost a snap!" on that `stung(cost: 0)`.
+    var freeFirstSting: Bool = false
 
     init(snapsRunOut: Bool = true, waves: Bool = true, stingCosts: Bool = true) {
         self.snapsRunOut = snapsRunOut
@@ -50,6 +55,10 @@ struct SessionOptions: Equatable {
 // with no catching bite for the phase's wilt time (Tuning.wilt*), a snap wilts (`wilted`), and `hungry` fires
 // Tuning.hungryWarning s before. Chain: a clean bite of ≥ 2 adds a step, a clean 1-bug bite holds, a dry snap or a
 // stinger breaks it.
+// R3 (design/notes/core-R3.md): no bug rests within creaseHalfWidth + radius + 16 pt of the midrib line (findSpot →
+// TrapRules.offCrease; nectar drops sit ≥ 80 pt off it). The hunger clock (18/16/14/12 s) runs only from the first
+// in-trap landing of a catchable bug after a catching bite (and after the start). A bite with a stinger scores ×1 and
+// refunds nothing. SessionOptions.freeFirstSting waives the first stinger bite's cost (Sprout run 1).
 // Mirrored by Session in tools/balance-sim.js (minus events, hints, telemetry and results).
 
 final class TrapSession {
@@ -156,6 +165,11 @@ final class TrapSession {
     /// R2 hunger: 0 just fed … 1 a snap wilts. Grows by dt / (the current phase's wilt time).
     private var hunger: Double = 0
     private var hungrySent: Bool = false
+    /// R3 (REVIEW-2 #7): the hunger clock runs only from the first in-trap landing of a catchable bug after a catching
+    /// bite (and after the start of the run): empty-trap time is not the player's fault.
+    private var hungerRunning: Bool = false
+    /// R3 (REVIEW-2 #9): SessionOptions.freeFirstSting has been spent.
+    private var freeStingUsed: Bool = false
     private var score: Int = 0
     private var chain: Int = 0
     private var lastInput: TrapInput = TrapInput()
@@ -356,7 +370,7 @@ final class TrapSession {
         }
         for b in bugs { updateBug(b, h) }
         bugs.removeAll { (b: Bug) -> Bool in b.gone }
-        if isPlaying && wilts { tickHunger(h) }
+        if isPlaying && wilts && hungerRunning { tickHunger(h) }
         if case .tired(let e) = phase {
             let ne: Double = e + h
             if ne >= Tuning.tiredSeconds {
@@ -371,7 +385,8 @@ final class TrapSession {
     }
 
     /// R2 hunger (GAME-DESIGN §5): no catching bite for the phase's wilt time wilts one snap and restarts the timer;
-    /// `hungry` fires once per cycle Tuning.hungryWarning s before. A wilt can tire the trap.
+    /// `hungry` fires once per cycle Tuning.hungryWarning s before. A wilt can tire the trap. R3: only called while
+    /// the clock runs (`hungerRunning`); after a wilt it keeps running.
     private func tickHunger(_ h: Double) {
         let w: Double = TrapSession.wiltSeconds(dayPhase)
         hunger += h / w
@@ -544,19 +559,26 @@ final class TrapSession {
         return worst
     }
 
-    private func clampIn(_ px: Double, _ py: Double, _ maxR: Double) -> (Double, Double) {
+    /// Inside `maxR`, then (R3, REVIEW-2 #5) off the crease by TrapRules.creaseGap(radius:).
+    private func clampIn(_ px: Double, _ py: Double, _ maxR: Double, _ radius: CGFloat) -> (Double, Double) {
         let r: Double = geometry.normalizedRadius(CGPoint(x: px, y: py))
-        if r <= maxR || r == 0 { return (px, py) }
-        let k: Double = maxR / r
-        let cx: Double = Double(geometry.center.x)
-        let cy: Double = Double(geometry.center.y)
-        return (cx + (px - cx) * k, cy + (py - cy) * k)
+        var qx: Double = px
+        var qy: Double = py
+        if r > maxR && r != 0 {
+            let k: Double = maxR / r
+            let cx: Double = Double(geometry.center.x)
+            let cy: Double = Double(geometry.center.y)
+            qx = cx + (px - cx) * k
+            qy = cy + (py - cy) * k
+        }
+        return TrapRules.offCrease(geometry, qx, qy, maxR: maxR, radius: radius)
     }
 
-    /// A spot near (x, y), `dMin`…`dMax` away, inside `maxR`, as clear of the other bugs as it can find.
+    /// A spot near (x, y), `dMin`…`dMax` away, inside `maxR` and off the crease, as clear of the other bugs as it can
+    /// find. Every resting spot (landing, wander, hop, dart) comes from here or is a nectar drop.
     private func findSpot(_ b: Bug, _ x: Double, _ y: Double, _ dMin: Double, _ dMax: Double,
                           _ maxR: Double) -> (Double, Double) {
-        var best: (Double, Double) = clampIn(x, y, maxR)
+        var best: (Double, Double) = clampIn(x, y, maxR, b.info.radius)
         var bestScore: Double = dMin <= 0 ? spotScore(b, best.0, best.1) : -Double.infinity
         if bestScore >= 0 { return best }
         var i: Int = 0
@@ -565,7 +587,7 @@ final class TrapSession {
             // R2: the search reaches at least this bug's own spacing need (radii are ×1.8).
             let reach: Double = Double(b.info.radius) * 2 + Tuning.landSpacing + 10
             let dd: Double = b.rng.between(max(dMin, 8), max(dMax, 20, reach))
-            let p: (Double, Double) = clampIn(x + cos(t) * dd, y + sin(t) * dd, maxR)
+            let p: (Double, Double) = clampIn(x + cos(t) * dd, y + sin(t) * dd, maxR, b.info.radius)
             let s: Double = spotScore(b, p.0, p.1)
             if s > bestScore {
                 bestScore = s
@@ -780,6 +802,8 @@ final class TrapSession {
         b.height = 0
         b.el = 0
         b.landedInTrap = b.landsInTrap && geometry.contains(b.point)
+        // R3 (REVIEW-2 #7): the first catchable bug to land in the trap starts the hunger clock.
+        if b.landedInTrap && !b.species.isProtected { hungerRunning = true }
         out.append(.bugLanded(id: b.id, species: b.species, position: b.point, inTrap: b.landedInTrap))
         if !b.landsInTrap || b.motion.style == .darter {
             startPause(b)
@@ -967,30 +991,49 @@ final class TrapSession {
         snapsMade += 1
         lastBiteTime = time
         let n: Int = caught.count
-        // R2 hunger: any catch feeds the trap (a dry snap or a bee-only bite does not).
+        let stung: Bool = !stingers.isEmpty
+        // R2 hunger: any catch feeds the trap (a dry snap or a bee-only bite does not). R3 (REVIEW-2 #7): and stops
+        // the clock until the next catchable bug lands in the trap.
         if n >= 1 {
             hunger = 0
             hungrySent = false
+            hungerRunning = false
+        }
+        // R3 (REVIEW-2 #9): the first stinger bite of a run with freeFirstSting costs nothing extra.
+        if stung && options.freeFirstSting && !freeStingUsed {
+            freeStingUsed = true
+            lost = 0
+            var k: Int = 0
+            while k < perBug.count {
+                if case .stung(let id, let sp, _) = perBug[k] { perBug[k] = .stung(id: id, species: sp, cost: 0) }
+                k += 1
+            }
         }
         var sum: Int = 0
         for s in caught { sum += BugCatalog.info(s).points }
-        let mult: Double = TrapRules.chainMultiplier(chain)
+        // R3 (REVIEW-2 #8): a bite with a stinger in it scores ×1 and refunds nothing (no Feast, scarab or ladybird
+        // snaps); the sting cost stays. Eating a bee is never the best move.
+        let mult: Double = stung ? 1 : TrapRules.chainMultiplier(chain)
         let points: Int = Int((Double(sum * n) * mult).rounded())
         var feastBack: Int = 0
-        if n >= Tuning.bigFeastCount {
-            feastBack = Tuning.bigFeastRefund
-        } else if n >= Tuning.feastCount {
-            feastBack = Tuning.feastRefund
+        if !stung {
+            if n >= Tuning.bigFeastCount {
+                feastBack = Tuning.bigFeastRefund
+            } else if n >= Tuning.feastCount {
+                feastBack = Tuning.feastRefund
+            }
         }
         var lucky: [BugSpecies] = []
         var luckyBack: Int = 0
-        for s in caught {
-            if s == .goldenScarab {
-                luckyBack += Tuning.scarabRefund
-                lucky.append(s)
-            } else if s == .ladybird {
-                luckyBack += Tuning.ladybirdRefund
-                lucky.append(s)
+        if !stung {
+            for s in caught {
+                if s == .goldenScarab {
+                    luckyBack += Tuning.scarabRefund
+                    lucky.append(s)
+                } else if s == .ladybird {
+                    luckyBack += Tuning.ladybirdRefund
+                    lucky.append(s)
+                }
             }
         }
         let back: Int = feastBack + luckyBack
@@ -998,7 +1041,9 @@ final class TrapSession {
         bugsCaught += n
         for s in caught { caughtBySpecies[s.rawValue, default: 0] += 1 }
         stings += stingers.count
-        if n >= Tuning.feastCount { feasts += 1 }
+        // R3: a Feast is a clean bite of ≥ feastCount (a stung bite gets no Feast, so no `feast` event either).
+        let feast: Bool = n >= Tuning.feastCount && !stung
+        if feast { feasts += 1 }
         if n == 0 && stingers.isEmpty { drySnaps += 1 }
         bestBitePoints = max(bestBitePoints, points)
         biggestBite = max(biggestBite, n)
@@ -1010,7 +1055,7 @@ final class TrapSession {
         lastBite = report
         out.append(.snapped(report))
         out.append(contentsOf: perBug)
-        if n >= Tuning.feastCount { out.append(.feast(count: n, snapsBack: feastBack)) }
+        if feast { out.append(.feast(count: n, snapsBack: feastBack)) }
         for s in lucky { out.append(.luckySnap(species: s)) }
         // R2 chain rule (GAME-DESIGN §5): a clean bite of ≥ 2 adds a step; a clean 1-bug bite holds the chain (no
         // event); a dry snap or a stinger breaks it.

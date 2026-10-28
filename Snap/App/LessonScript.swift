@@ -62,6 +62,8 @@ struct LessonScript: Equatable {
     static let openDwell: Double = 0.8
     /// The bee leaves after this long on its drop (REVIEW-1 #9: 3 s was gone before it could be learned).
     static let beeLinger: Double = 6
+    /// R3 (REVIEW-2 #18): two flies sip beside the bee (the temptation), and stay a little longer than it.
+    static let beeFlyLinger: Double = 10
     /// A bitten bee is let go and flies off; the next bee comes after this, and the old one's leaving never counts.
     static let stungBeeExit: Double = 2.4
 
@@ -235,7 +237,10 @@ struct LessonScript: Equatable {
         switch s {
         case .firstSnap: return [.spawn(.housefly, slot: 0, linger: .infinity)]
         case .tooSlow: return [.spawn(.housefly, slot: 1, linger: .infinity), .spawn(.housefly, slot: 2, linger: .infinity)]
-        case .bee: return [.spawn(.bee, slot: 0, linger: Self.beeLinger)]
+        case .bee:
+            // The bee first, so it gets the drop nearest its slot; a fly sips beside it, another on the other lobe.
+            return [.spawn(.bee, slot: 0, linger: Self.beeLinger), .spawn(.housefly, slot: 1, linger: Self.beeFlyLinger),
+                    .spawn(.housefly, slot: 2, linger: Self.beeFlyLinger)]
         case .triple:
             return [.spawn(.housefly, slot: 3, linger: .infinity), .spawn(.housefly, slot: 4, linger: .infinity),
                     .spawn(.housefly, slot: 5, linger: .infinity)]
@@ -254,7 +259,11 @@ struct LessonScript: Equatable {
             return (0..<need).map { k -> Action in .spawn(.housefly, slot: 1 + k, linger: .infinity) }
         case .bee:
             warning = nil
-            return i.liveBees == 0 ? [.spawn(.bee, slot: 0, linger: Self.beeLinger)] : []
+            var cast: [Action] = i.liveBees == 0 ? [.spawn(.bee, slot: 0, linger: Self.beeLinger)] : []
+            for k in 0..<max(2 - i.liveFlies, 0) {
+                cast.append(.spawn(.housefly, slot: 1 + k, linger: Self.beeFlyLinger))
+            }
+            return cast
         case .triple:
             let need = max(3 - i.liveFlies, 0)
             return (0..<need).map { k -> Action in .spawn(.housefly, slot: 3 + k, linger: .infinity) }
@@ -337,8 +346,13 @@ struct LessonScript: Equatable {
     func display(touch: Bool, hasPose: Bool) -> LessonDisplay {
         LessonDisplay(step: step.rawValue, stepOf: Self.stepLabel(step, touch: touch, hasPose: hasPose),
                       line: Self.line(step, touch: touch), praise: praise, warning: warning,
-                      allowsSkip: allowsSkip, isFinal: step == .done)
+                      allowsSkip: allowsSkip, isFinal: step == .done, showsSnaps: Self.showsSnaps(step),
+                      showsClap: !touch && step == .firstSnap)
     }
+
+    /// R3 (REVIEW-2 #12): the snaps row is on screen from step 3 (the re-arm step; on touch, the two-fly step) to
+    /// the last card, which rings it. Pure; tested.
+    static func showsSnaps(_ s: Step) -> Bool { s.rawValue >= Step.openAgain.rawValue }
 
     /// One sentence per step (GAME-DESIGN §8). Pure; tested (≤ 8 words each).
     static func line(_ s: Step, touch: Bool) -> String {
@@ -363,4 +377,8 @@ struct LessonDisplay: Equatable {
     var warning: String?
     var allowsSkip: Bool
     var isFinal: Bool
+    /// The snaps row shows (R3, REVIEW-2 #12).
+    var showsSnaps = false
+    /// Step 2 on a hinge: the card shows the 160° → 138° clap (ROUND-3 founder call).
+    var showsClap = false
 }

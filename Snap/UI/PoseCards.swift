@@ -82,75 +82,64 @@ struct PoseCard: View {
     }
 }
 
-/// A Duo seen from the front: it turns from upright to sideways, then opens like a book, the two halves a crimson
-/// flytrap's lobes with pale teeth, and snaps a little shut. On a loop; still under Reduce Motion and in demo captures.
+/// A Duo seen from the front, its halves showing the play trap's two lobes (`TrapArt`, REVIEW-2 #24): it turns from
+/// upright to sideways, opens like a book to 160°, then claps to 138° and opens again, twice (ROUND-3 founder call),
+/// with the hinge angle drawn from the top under it. On a loop; still at the clap under Reduce Motion and in demo
+/// captures.
 struct BookPoseDrawing: View {
     var reduceMotion = false
 
     static let loop: Double = 4.4
+    /// The intro (turn and open) takes this long; the clap loop follows.
+    static let introEnd: Double = 1.8
+    /// Demo captures hold the clearest moment: turned, open, mid-clap at 138°.
+    static let stillTime: Double = introEnd + DuoClapDiagram.stillTime
 
-    /// Demo captures hold the clearest moment (turned and open).
     private var still: Bool { reduceMotion || AppTrace.enabled }
+
+    /// θ at `t` s into the loop: half open while it turns, opening to 160°, then the clap. Pure; tested.
+    static func theta(at t: Double) -> Double {
+        let x = t.isFinite ? t.truncatingRemainder(dividingBy: loop) : 0
+        if x < introEnd {
+            let openIn = ease(min(max((x - 1.2) / 0.6, 0), 1))
+            return 100 + (DuoClapDiagram.openAngle - 100) * openIn
+        }
+        return DuoClapDiagram.theta(at: x - introEnd)
+    }
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: still)) { context in
-            let t = still ? 2.4 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.loop)
+            let t = still ? Self.stillTime
+                          : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.loop)
             let turn = Self.ease(min(max((t - 0.3) / 0.9, 0), 1))
-            let openIn = Self.ease(min(max((t - 1.4) / 0.6, 0), 1))
-            let snap = Self.ease(min(max((t - 3.0) / 0.12, 0), 1)) * (1 - Self.ease(min(max((t - 3.4) / 0.4, 0), 1)))
-            let fold = 18 * openIn + 26 * snap
+            let th = Self.theta(at: t)
+            let clapT = t - Self.introEnd
+            let arrows = t >= Self.introEnd ? DuoClapDiagram.arrows(at: clapT) : 0
             ZStack {
                 Circle()
                     .fill(SnapTheme.moss.opacity(0.65))
-                    .frame(width: 240, height: 240)
-                HStack(spacing: 3) {
-                    half(left: true)
-                        .rotation3DEffect(.degrees(fold), axis: (x: 0, y: 1, z: 0), anchor: .trailing,
-                                          perspective: 0.5)
-                    half(left: false)
-                        .rotation3DEffect(.degrees(-fold), axis: (x: 0, y: 1, z: 0), anchor: .leading,
-                                          perspective: 0.5)
+                    .frame(width: 250, height: 250)
+                VStack(spacing: 8) {
+                    ZStack {
+                        DuoFoldView(theta: th, arrows: arrows)
+                            .frame(width: 200, height: 141)
+                        // A fly sipping on the right lobe: the clap is for it (gone once the trap shuts).
+                        BugPortrait(species: .housefly)
+                            .frame(width: 30, height: 30)
+                            .offset(x: 46, y: -6)
+                            .opacity(turn * (th > 150 ? 1 : 0))
+                    }
+                    .rotationEffect(.degrees(-90 * (1 - turn)))
+                    FoldAngleGlyph(theta: th)
+                        .frame(width: 160, height: 34)
+                        .opacity(turn)
                 }
-                .frame(width: 196, height: 136)
-                .rotationEffect(.degrees(-90 * (1 - turn)))
-                // A fly sipping on the right lobe: the clap is for it (shown once the phone is open).
-                BugPortrait(species: .housefly)
-                    .frame(width: 34, height: 34)
-                    .offset(x: 46, y: -8)
-                    .opacity(openIn * (1 - snap))
             }
         }
         .accessibilityHidden(true)
     }
 
-    private static func ease(_ x: Double) -> Double { 1 - pow(1 - x, 3) }
-
-    private func half(left: Bool) -> some View {
-        ZStack {
-            UnevenRoundedRectangle(topLeadingRadius: left ? 20 : 4, bottomLeadingRadius: left ? 20 : 4,
-                                   bottomTrailingRadius: left ? 4 : 20, topTrailingRadius: left ? 4 : 20,
-                                   style: .continuous)
-                .fill(Color(snapHex: 0x2F6A2C))
-            UnevenRoundedRectangle(topLeadingRadius: left ? 15 : 3, bottomLeadingRadius: left ? 15 : 3,
-                                   bottomTrailingRadius: left ? 3 : 15, topTrailingRadius: left ? 3 : 15,
-                                   style: .continuous)
-                .fill(LinearGradient(colors: left ? [Color(snapHex: 0xD23048), Color(snapHex: 0x7A0C26)]
-                                                  : [Color(snapHex: 0x7A0C26), Color(snapHex: 0xD23048)],
-                                     startPoint: .leading, endPoint: .trailing))
-                .padding(6)
-            // Teeth along the outer edge.
-            VStack(spacing: 7) {
-                ForEach(0..<6, id: \.self) { _ in
-                    Capsule()
-                        .fill(SnapTheme.limeLight)
-                        .frame(width: 16, height: 4)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: left ? .leading : .trailing)
-            .offset(x: left ? -10 : 10)
-        }
-        .frame(width: 96, height: 136)
-    }
+    static func ease(_ x: Double) -> Double { 1 - pow(1 - x, 3) }
 }
 
 /// A regular iPhone turning from upright to sideways. On a loop; still under Reduce Motion and in demo captures.
@@ -195,10 +184,13 @@ struct CoverCard: View {
     /// One line for "open to carry on" everywhere (the closing card says it too: REVIEW-1-ux P2 #14).
     static let carryOn = "Open it up to carry on"
 
-    static func title(midRun: Bool) -> String { midRun ? carryOn : "Open it like a book" }
+    /// R3 (REVIEW-2 #24): the promised "Open it up to carry on" on the cover, with the run's score mid-run.
+    static func title(midRun: Bool) -> String { carryOn }
     static func detail(midRun: Bool) -> String {
         midRun ? "Your trap is waiting, jaws open." : "Bugs are gathering in the bog."
     }
+    /// "1,174 so far" (mid-run). Pure; tested.
+    static func scoreLine(_ score: Int) -> String { AppRules.formatted(max(score, 0)) + " so far" }
 
     var body: some View {
         let midRun = controller.isLiveRun
@@ -213,7 +205,7 @@ struct CoverCard: View {
                     VStack(spacing: 16) {
                         // The play trap, drawn by the scene's own code (one art language, REVIEW-1 #12).
                         TrapArtImage()
-                            .frame(width: side, height: side * 0.7)
+                            .frame(width: side, height: side * 0.74)
                             .shadow(color: Color.black.opacity(0.6), radius: 18, y: 6)
                             .padding(.top, 8)
                         Text(Self.title(midRun: midRun))
@@ -225,9 +217,14 @@ struct CoverCard: View {
                             .foregroundStyle(SnapTheme.mist)
                             .multilineTextAlignment(.center)
                         if midRun {
-                            Text("Protein " + AppRules.formatted(controller.hud.values.score))
+                            Text(Self.scoreLine(controller.hud.values.score))
                                 .font(SnapType.number(34))
                                 .foregroundStyle(SnapTheme.gold)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                            Text("protein")
+                                .font(SnapType.body(false))
+                                .foregroundStyle(SnapTheme.mist)
                         } else if store.data.bestFeed > 0 {
                             Text("Best feast " + AppRules.formatted(store.data.bestFeed))
                                 .font(SnapType.headline(false))

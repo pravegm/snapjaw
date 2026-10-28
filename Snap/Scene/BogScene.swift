@@ -12,8 +12,8 @@ import UIKit
 /// - world (camera punch: scaled about the scene centre)
 ///   - shaker (the bite's shake)
 ///     - backdrop (z 0: the cached bog with a 24 pt bleed, the trap's shadow) · light tint (z 5, multiply: bog only)
-///     - jaws (z 10: two lobes with their green backs, the day overlay, the midrib, the slam jaw at 13.5, the teeth at
-///       14, the fold band at 1)
+///     - jaws (z 10: the trap's shadow at 2, two lobes with their thin backs, the day overlay and the rim light, the
+///       midrib at 13, the teeth at 14, the closed trap at 16.5 (the bite's hold), the fold band at 1)
 ///     - surface (z 15: nectar drops, trigger hairs) · decals (z 16: nectar glistens)
 ///     - haze (z 21, add) · dew twinkles and night fireflies (z 21.5)
 ///     - bug shadows (z 22) · landing ripples (z 23) · bugs (z 30) · nectar night glow (z 41)
@@ -65,8 +65,17 @@ final class BogScene: SKScene {
     /// The slam's level (0 open … 1 shut) and the drawn closure (0…1).
     var jawSlam: CGFloat { jaws.slamLevel }
     var drawnClosure01: CGFloat { jaws.drawnClosure }
-    /// The lobes' x scale (1 open, 0.85 at the snap depth, 0.6 mid-bite).
+    /// The lobes' x scale (1 open, 0.85 at the snap depth, `TrapArt.slamSqueeze` mid-bite).
     var lobeScale: CGFloat { jaws.lobeScale }
+    /// R3 (#17): the lobes' y scale (the hunger droop, 0.95 at its deepest).
+    var lobeYScale: CGFloat { jaws.lobeYScale }
+    /// R3 (#1): the closed trap's opacity (1 in the bite's hold).
+    var closedTrapAlpha: CGFloat { jaws.closedAlpha }
+    /// R3 (#1): the frame of everything the trap draws now (scene space, unshaken): it never leaves the open trap's.
+    var trapDrawnFrame: CGRect { jaws.drawnFrame }
+    /// R3 (#10): the rim light's alpha on the lobes, and the day's overlay colour on them.
+    var rimLightAlpha: CGFloat { jaws.rimLightAlpha }
+    var lobeOverlayColor: RGBA { light.lobeTintRGBA }
     /// How hungry the trap looks (0 … 1).
     var hungerDroop: CGFloat { jaws.droop }
     /// The day's overlay on the lobes (≤ 0.25: the trap keeps its crimson).
@@ -93,6 +102,11 @@ final class BogScene: SKScene {
     var glyphsLanded: Int { economy.landedCount }
     var glyphCracking: Bool { economy.cracking }
     var glyphWilting: Bool { economy.wilting }
+    /// R3 (#14) for the App: add this to `snapshot.snapsLeft` for the numeral the HUD shows, so it changes when each
+    /// glyph lands (−1 per Feast glyph still in the air) and only after a sting's crack has shown (+cost for 0.15 s).
+    var snapsShownOffset: Int { economy.shownOffset }
+    /// R3 (#14): the snaps row's crimson sting flash is showing.
+    var snapsRowFlashing: Bool { economy.rowFlashing }
     /// True during the bite's 50 ms hit-stop.
     var inHitStop: Bool { hitStop > 0 }
     var nightLevel: CGFloat { light.night }
@@ -297,7 +311,16 @@ final class BogScene: SKScene {
         if let c = drawnClosure, c.isFinite { closure = c }
         jaws.update(fxDt: fxDt, closure01: TrapArt.closure01(closure), tired: BogScene.tiredness(s.phase),
                     hunger: CGFloat(s.hunger), time: wallTime, night: light.night, dusk: light.dusk,
-                    tint: light.lobeTint, tintAlpha: light.lobeTintAlpha)
+                    tint: light.lobeTint, tintAlpha: light.lobeTintAlpha, rim: light.rimTint,
+                    rimAlpha: light.rimAlpha)
+        // R3 (#1): the nectar, the hairs and the glistens ride the bite's squeeze (about the midrib) and sink under the
+        // closed trap, so nothing is left lying on the bog outside it.
+        let k = jaws.slamScale
+        for n in [surface.root, surface.glowRoot, effects.decalRoot] {
+            n.xScale = k
+            n.position = CGPoint(x: g.center.x * (1 - k), y: 0)
+        }
+        surface.glowRoot.alpha = 1 - jaws.slamLevel
         surface.update(nectar: s.nectar, bugs: s.bugs, time: wallTime, dt: holding ? 0 : wallDt, night: light.night)
         bugs.update(s.bugs, time: wallTime, dt: wallDt, geometry: g, night: light.night, tint: light.bugTint,
                     tintAmount: light.bugTintAmount, reduceMotion: reduceMotion, squeeze: jaws.lobeScale,
@@ -365,6 +388,8 @@ final class BogScene: SKScene {
         var dry = false
         var best = false
         var wilted = false
+        var chained = false
+        var broken = false
         let tint = light.envTint
 
         for e in events {
@@ -430,9 +455,9 @@ final class BogScene: SKScene {
                 lucky.append(species)
             case .chainUp:
                 // The chain step is the HUD chip's bump (App), never a line on the lobe (R2 #18).
-                break
+                chained = true
             case .chainBroken:
-                break
+                broken = true
             case .rearmed:
                 jaws.rearm()
             case .beeSpared:
@@ -452,6 +477,7 @@ final class BogScene: SKScene {
             }
         }
 
+        var heroSaidStung = false
         // The bite's one hero callout, above the crowd that was caught, on the side with most catches, clear of the
         // crease; the snaps it won fly to the HUD's row.
         if let r = bite, !caughtPoints.isEmpty {
@@ -465,18 +491,33 @@ final class BogScene: SKScene {
             a = CGPoint(x: a.x / CGFloat(caughtPoints.count), y: a.y / CGFloat(caughtPoints.count))
             let side = left == right ? sideOf(a.x) : (left > right ? -1 : 1)
             let n = r.caught.count
+            let stung = !r.stingers.isEmpty
             let hero = feasted || n >= 3
-            let label = BogScene.heroLabel(count: n, points: r.points)
-            var size: CGFloat = hero ? 48 : (n >= 2 ? 40 : 44)
+            // R3 (#8): a bite with a stinger scores ×1 and says so ("Stung! · +172").
+            let label = stung ? BogScene.stungLabel(points: r.points) : BogScene.heroLabel(count: n, points: r.points)
+            // R3 (#15): every catch pop is big (≥ 28 pt even when it must shrink to fit) and pops with an overshoot.
+            var size: CGFloat = hero ? 48 : (n >= 2 ? 40 : 36)
             let rise: CGFloat = hero ? 30 : 44
-            let extra = CGFloat(lucky.count) * 32
+            // A clean bite that keeps the chain going without growing it says so ("×1.5 held").
+            let held = !stung && !broken && !chained && r.chainMultiplier > 1.001
+            let extra = CGFloat(lucky.count + (held ? 1 : 0)) * 32
             let pt = placePop(label, size: &size, near: CGPoint(x: a.x, y: a.y + 2 * caughtRadius + 20), side: side,
-                              hero: hero, rise: rise, minY: extra)
+                              hero: hero, rise: rise, minY: extra, minSize: BogScene.minCatchPop)
             pops.pop(label, at: pt, size: size, fill: BogPaint.ui(pal.gold), stroke: BogPaint.ui(pal.ink), rise: rise,
-                     life: hero ? 1.5 : 1.15, hero: hero)
+                     life: hero ? 1.5 : 1.2, hero: hero)
+            heroSaidStung = stung
             var y = pt.y - size * 0.55 - 16
+            if held {
+                var hs: CGFloat = 28
+                let text = BogScene.heldLabel(r.chainMultiplier)
+                let hp = placePop(text, size: &hs, near: CGPoint(x: pt.x, y: y), side: side, hero: false, rise: 30,
+                                  minSize: 24)
+                pops.pop(text, at: hp, size: hs, fill: BogPaint.ui(TrapArt.sipRing), stroke: BogPaint.ui(pal.ink),
+                         rise: 30, delay: 0.1, life: 1.2)
+                y -= 32
+            }
             for sp in lucky {
-                var ls: CGFloat = 26
+                var ls: CGFloat = 28
                 let text = BogScene.luckyLabel(sp)
                 let lp = placePop(text, size: &ls, near: CGPoint(x: pt.x, y: y), side: side, hero: false, rise: 30)
                 pops.pop(text, at: lp, size: ls, fill: BogPaint.ui(TrapArt.sipRing), stroke: BogPaint.ui(pal.ink),
@@ -490,16 +531,28 @@ final class BogScene: SKScene {
                 economy.fly(count: r.snapsBack, from: a, to: snapsAnchor)
             }
         }
-        // "Bzzt!" above the bee (y + 2r + 20), on its own half; the snap it cost cracks on the HUD's row.
+        // "Bzzt!" above the bee's ring (R3 #14: never over the bee; under the ring when there's no room above), on
+        // its own half; the snap it cost cracks on the HUD's row under a crimson flash.
         for (p, species, cost) in stings {
             var size: CGFloat = 40
-            let text = species == .wasp ? "Stung!" : "Bzzt!"
+            let text = species == .wasp && !heroSaidStung ? "Stung!" : "Bzzt!"
             let r = bugs.radius(species)
-            let c = placePop(text, size: &size, near: CGPoint(x: p.x, y: p.y + 2 * r + 20), side: sideOf(p.x),
-                             hero: false, rise: 36)
-            pops.pop(text, at: c, size: size, fill: BogPaint.ui(RGBA(hex: 0xFFD23A)), stroke: BogPaint.ui(pal.ink),
-                     rise: 36)
-            if cost > 0 { economy.crack(at: snapsAnchor) }
+            let ring = r * TrapArt.protectedRingScale + 4
+            let over = 1 + BogPops.overshoot(hero: false)
+            var box = BogPops.measure(text, size: size)
+            var c = placePop(text, size: &size, near: CGPoint(x: p.x, y: p.y + ring + 8 + box.height * over / 2),
+                             side: sideOf(p.x), hero: false, rise: 36)
+            box = BogPops.measure(text, size: size)
+            let overlaps = c.y - box.height * over / 2 < p.y + ring && abs(c.x - p.x) < box.width * over / 2 + ring
+            let yellow = BogPaint.ui(RGBA(hex: 0xFFD23A))
+            if overlaps {
+                c = placePop(text, size: &size, near: CGPoint(x: p.x, y: p.y - ring - 14 - box.height * over / 2),
+                             side: sideOf(p.x), hero: false, rise: 8)
+                pops.pop(text, at: c, size: size, fill: yellow, stroke: BogPaint.ui(pal.ink), rise: 8)
+            } else {
+                pops.pop(text, at: c, size: size, fill: yellow, stroke: BogPaint.ui(pal.ink), rise: 36)
+            }
+            if cost > 0 { economy.crack(at: snapsAnchor, cost: cost) }
         }
         if dry && bite != nil {
             effects.puff(from: CGPoint(x: g.center.x, y: g.center.y - g.b * 0.6),
@@ -507,14 +560,14 @@ final class BogScene: SKScene {
                          color: UIColor(white: 0.85, alpha: 1), size: 34)
         }
         if wilted {
-            // A small in-world "wilted −1" just above the snaps row, and the glyph droops off it.
+            // R3 (#15): "Too slow! −1 snap", a crimson tag just over the snaps row, and the glyph droops off it.
             let anchor = snapsAnchor
-            var size: CGFloat = 24
+            var size: CGFloat = 28
             let text = BogScene.wiltedLabel
-            let p = placePop(text, size: &size, near: CGPoint(x: anchor.x, y: anchor.y + 48), side: sideOf(anchor.x),
-                             hero: false, rise: 22, inTrap: false)
-            pops.pop(text, at: p, size: size, fill: BogPaint.ui(RGBA(hex: 0xD9E4C2)), stroke: BogPaint.ui(pal.ink),
-                     rise: 22, life: 1.4)
+            let p = placePop(text, size: &size, near: CGPoint(x: anchor.x + 60, y: anchor.y + 46),
+                             side: sideOf(anchor.x), hero: false, rise: 18, inTrap: false, minSize: 20)
+            pops.pop(text, at: p, size: size, fill: BogPaint.ui(BogScene.wiltColor), stroke: BogPaint.ui(pal.ink),
+                     rise: 18, life: 1.6)
             economy.wilt(at: anchor)
         }
         if best {
@@ -539,7 +592,7 @@ final class BogScene: SKScene {
     /// `creaseClear` from the crease band and inside the trap (or the canvas when `inTrap` is false), with room above
     /// for its rise and below for `minY` of lines under it (QA-1 #23). `size` shrinks if the text can't fit.
     private func placePop(_ text: String, size: inout CGFloat, near p: CGPoint, side: Int, hero: Bool, rise: CGFloat,
-                          minY: CGFloat = 0, inTrap: Bool = true) -> CGPoint {
+                          minY: CGFloat = 0, inTrap: Bool = true, minSize: CGFloat = 12) -> CGPoint {
         let g = layout.geometry
         let over = 1 + BogPops.overshoot(hero: hero)
         let w = layout.size.width, h = layout.size.height
@@ -556,7 +609,11 @@ final class BogScene: SKScene {
         let avail = max(hi - lo, 40)
         var box = BogPops.measure(text, size: size)
         if box.width * over > avail {
-            size = max((size * avail / (box.width * over)).rounded(.down), 12)
+            // Shrink to fit, but never under `minSize` unless even that would cross the crease (the crease wins).
+            let fit = max((size * avail / (box.width * over)).rounded(.down), 12)
+            var next = max(fit, min(minSize, size))
+            if BogPops.measure(text, size: next).width * over > avail { next = fit }
+            size = next
             box = BogPops.measure(text, size: size)
         }
         let half = box.width * over / 2
@@ -595,8 +652,18 @@ final class BogScene: SKScene {
         s == .goldenScarab ? "Golden!" : "Lucky!"
     }
 
-    /// The hunger wilt's pop.
-    static let wiltedLabel = "wilted −1"
+    /// The hunger wilt's pop (R3 #15: says what happened and what it cost).
+    static let wiltedLabel = "Too slow! −1 snap"
+    /// Its crimson.
+    static let wiltColor = RGBA(hex: 0xFF4D5E)
+    /// R3 (#15): the smallest a catch pop is ever drawn (points, before its overshoot).
+    static let minCatchPop: CGFloat = 28
+
+    /// R3 (#8): a bite with a stinger in it: "Stung! · +172" (it scored ×1).
+    static func stungLabel(points: Int) -> String { "Stung! · +\(number(points))" }
+
+    /// R3 (#15): a clean bite that kept the chain without growing it: "×1.5 held".
+    static func heldLabel(_ m: Double) -> String { "\(multiplier(m)) held" }
 
     /// "×1.5", "×2".
     static func multiplier(_ m: Double) -> String {

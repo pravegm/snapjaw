@@ -272,7 +272,7 @@ struct FeelBed: Sendable, Equatable {
     // Music: the plucked-marimba loop (96 bpm, C major pentatonic).
     /// 0…1 level.
     var music: Float = 0
-    /// 1…4: how many voices play (the chain adds them at 2, 4, 6).
+    /// 1…5: how many voices play (the chain adds them at 2, 4, 6 and, R3, 8).
     var musicVoices: Float = 1
 
     /// True when any continuous layer is audible (the engine stays awake for it).
@@ -499,6 +499,8 @@ final class FeelSynth: @unchecked Sendable {
     /// The bog loop: 96 bpm, eighth notes, a 32-step loop (4 bars), C major pentatonic.
     static let musicBPM: Float = 96
     static let musicSteps = 32
+    /// The loop's voices (R3: a fifth, the chime double, joins at a chain of 8).
+    static let musicVoiceCount = 5
     /// Buzz slot glides: the level's time constant (≈ 80 ms to fade in or out) and the pan's.
     static let buzzLevelTau: Float = 0.027
     static let buzzPanTau: Float = 0.06
@@ -854,8 +856,9 @@ final class FeelSynth: @unchecked Sendable {
 
     // MARK: The marimba loop
 
-    /// Semitones from C5 (523.25 Hz) for voice `voice` (0 melody, 1 bass, 2 counter, 3 sparkle) at step `step` of the
-    /// 32-step loop (four bars: C, Am, Dm, G), or nil for a rest. Every note is in C major pentatonic (C D E G A).
+    /// Semitones from C5 (523.25 Hz) for voice `voice` (0 melody, 1 bass, 2 counter, 3 sparkle, 4 the R3 chime
+    /// double) at step `step` of the 32-step loop (four bars: C, Am, Dm, G), or nil for a rest. Every note is in C
+    /// major pentatonic (C D E G A).
     /// A switch, not an array: no lazy global initialisation on the audio thread.
     static func musicNote(voice: Int, step: Int) -> Int? {
         switch voice {
@@ -908,6 +911,10 @@ final class FeelSynth: @unchecked Sendable {
             case 2: return 31     // G7
             default: return 26    // D7
             }
+        case 4:
+            // R3, the ×5 top step: the melody doubled an octave up on a bright chime (always pentatonic).
+            guard let melody = musicNote(voice: 0, step: step) else { return nil }
+            return melody + 12
         default:
             return nil
         }
@@ -920,7 +927,7 @@ final class FeelSynth: @unchecked Sendable {
         musicStep = (musicStep + 1) % FeelSynth.musicSteps
         let level = min(max(bed.music, 0), 1)
         let voicesOn = bed.musicVoices
-        for voice in 0..<4 {
+        for voice in 0..<FeelSynth.musicVoiceCount {
             guard voicesOn >= Float(voice) + 0.5 else { break }
             guard let note = FeelSynth.musicNote(voice: voice, step: musicStep) else { continue }
             let f = 523.25 * pow(2, Float(note) / 12)
@@ -935,6 +942,9 @@ final class FeelSynth: @unchecked Sendable {
             case 2:
                 start(.ring(FeelRingSpec(.marimba, fundamental: f, partials: 3, decay: 0.18, brightness: 0.3,
                                          gain: 0.03 * level, seed: UInt32(musicStep * 3 + 2), pan: 0.3)))
+            case 4:
+                start(.ring(FeelRingSpec(.chime, fundamental: f, partials: 3, decay: 0.2, brightness: 0.3,
+                                         gain: 0.018 * level, seed: UInt32(musicStep * 11 + 5))))
             default:
                 start(.ring(FeelRingSpec(.glass, fundamental: f, partials: 2, decay: 0.06, brightness: 0.25,
                                          gain: 0.012 * level, seed: UInt32(musicStep + 11), pan: -0.3)))
@@ -1157,7 +1167,8 @@ final class FeelSynth: @unchecked Sendable {
         clean.dripRate = bed.dripRate.isFinite ? min(max(bed.dripRate, 0), 50) : 0
         clean.crickets = unit(bed.crickets)
         clean.music = unit(bed.music)
-        clean.musicVoices = bed.musicVoices.isFinite ? min(max(bed.musicVoices, 1), 4) : 1
+        let mostVoices = Float(FeelSynth.musicVoiceCount)
+        clean.musicVoices = bed.musicVoices.isFinite ? min(max(bed.musicVoices, 1), mostVoices) : 1
         return clean
     }
 

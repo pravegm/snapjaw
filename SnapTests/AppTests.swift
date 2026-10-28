@@ -266,6 +266,19 @@ struct DemoTests {
         #expect(!ProgressRules.canPlayScoredDaily(late, today: 298))
         #expect(ProgressRules.canPlayScoredDaily(late, today: 299))
         #expect(DemoPresets.progress(.fresh, today: 299) == ProgressData())
+        // REVIEW-2 #19: the Bug Book's counts vary (not "Caught 27" on every page) and add up to the lifetime.
+        #expect(Set(late.caught.values).count > 6)
+        #expect(late.caught.values.reduce(0, +) == late.lifetimeBugs)
+        #expect(Set(mid.caught.values).count > 3)
+    }
+
+    @Test @MainActor func badgesScreen() {
+        #expect(DemoMode.parse("screen=badges").screen == .badges)
+        // One image per Game Center achievement, named by its id.
+        #expect(GameCenterManager.achievementIDs.count == 12)
+        #expect(Set(GameCenterManager.achievementIDs).count == 12)
+        #expect(GameCenterManager.achievementIDs == Achievements.all.map(\.id))
+        #expect(BadgeExport.side == 1024)
     }
 }
 #endif
@@ -435,15 +448,20 @@ struct LessonTests {
     @Test func eatingTheBeeRepeatsTheStep() {
         var s = LessonScript(start: .bee)
         let first = s.update(LessonScript.Input(time: 0, hasHinge: true))
-        #expect(first == [.spawn(.bee, slot: 0, linger: LessonScript.beeLinger)])
+        // REVIEW-2 #18: the bee comes first (the drop nearest its slot), with two flies sipping beside it.
+        #expect(first.first == .spawn(.bee, slot: 0, linger: LessonScript.beeLinger))
+        let fly = LessonScript.Action.spawn(.housefly, slot: 1, linger: LessonScript.beeFlyLinger)
+        #expect(first.contains(fly))
+        #expect(first.count == 3)
         let sting: [TrapEvent] = [.snapped(report(caught: [], stingers: [.bee])),
                                   .stung(id: 1, species: .bee, cost: 0)]
-        _ = s.update(LessonScript.Input(time: 2, hasHinge: true, events: sting, liveBees: 0))
+        _ = s.update(LessonScript.Input(time: 2, hasHinge: true, events: sting, liveFlies: 2, liveBees: 0))
         #expect(s.warning != nil)
         // The bitten bee's leaving is not a spare.
-        _ = s.update(LessonScript.Input(time: 2.5, hasHinge: true, events: [.beeSpared(species: .bee)], liveBees: 0))
+        _ = s.update(LessonScript.Input(time: 2.5, hasHinge: true, events: [.beeSpared(species: .bee)], liveFlies: 2,
+                                        liveBees: 0))
         #expect(s.praise == nil)
-        let again = s.update(LessonScript.Input(time: 4.5, hasHinge: true, liveBees: 0))
+        let again = s.update(LessonScript.Input(time: 4.5, hasHinge: true, liveFlies: 2, liveBees: 0))
         #expect(again == [.spawn(.bee, slot: 0, linger: LessonScript.beeLinger)])
         _ = s.update(LessonScript.Input(time: 9, hasHinge: true, events: [.beeSpared(species: .bee)], liveBees: 0))
         #expect(s.praise != nil)
@@ -500,6 +518,88 @@ struct WordsTests {
         }
         #expect(AppRules.hintText(.quick, touch: true) == nil)
         #expect(AppRules.hintText(.beeInside, touch: true) != nil)
+        for text in AppRules.allHintCopy {
+            #expect(text.split(separator: " ").count <= 6)
+        }
+    }
+
+    /// ROUND-3 founder call: the fold is the input on a Duo; phones keep the tap.
+    @Test func foldInputWords() {
+        #expect(AppRules.hudHintText(.foldInput, touch: false) == "Snap the halves together")
+        #expect(AppRules.hudHintText(.foldInput, touch: true) == "Tap to snap")
+        #expect(AppRules.hudHintText(.beesCost, touch: true) == "Bees cost a snap!")
+        #expect(AppRules.hudHintIsWarning(.beesCost))
+        #expect(!AppRules.hudHintIsWarning(.foldInput))
+        #expect(AppRules.hudHintText(.trap(.crowd), touch: false) == "Now!")
+        #expect(AppRules.allHintCopy.contains("Snap the halves together"))
+        #expect(AppRules.allHintCopy.contains("Tap to snap"))
+        #expect(AppRules.hintText(.lastSnap, touch: false) == "Last snap! Make it count")
+        #expect(HomeView.foldCaption == "Snap it shut a little")
+    }
+
+    @Test func foldHintShowsOnTheFirstWaveOnly() {
+        #expect(AppRules.showsFoldHint(mode: .feed, wave: 1, snapsMade: 0, time: 3, after: 2.6, coreHint: nil))
+        #expect(AppRules.showsFoldHint(mode: .daily(day: 3, scored: true), wave: 0, snapsMade: 0, time: 3, after: 2.6,
+                                       coreHint: nil))
+        // Not over the run-start line, not after the first snap, not past wave 1, never over Core's hints.
+        #expect(!AppRules.showsFoldHint(mode: .feed, wave: 1, snapsMade: 0, time: 1, after: 2.6, coreHint: nil))
+        #expect(!AppRules.showsFoldHint(mode: .feed, wave: 1, snapsMade: 1, time: 3, after: 2.6, coreHint: nil))
+        #expect(!AppRules.showsFoldHint(mode: .feed, wave: 2, snapsMade: 0, time: 3, after: 2.6, coreHint: nil))
+        #expect(!AppRules.showsFoldHint(mode: .feed, wave: 1, snapsMade: 0, time: 3, after: 2.6, coreHint: .crowd))
+        #expect(!AppRules.showsFoldHint(mode: .lesson, wave: 1, snapsMade: 0, time: 3, after: 2.6, coreHint: nil))
+        #expect(!AppRules.showsFoldHint(mode: .attract, wave: 1, snapsMade: 0, time: 3, after: 2.6, coreHint: nil))
+    }
+
+    /// REVIEW-2 #9: Sprout's first Feed run never wilts and its first bee is free, with the toast.
+    @Test func sproutFirstRun() {
+        #expect(AppRules.isSproutFirstRun(mode: .feed, runs: 0, lifetimeBugs: 0))
+        #expect(!AppRules.isSproutFirstRun(mode: .feed, runs: 1, lifetimeBugs: 0))
+        #expect(!AppRules.isSproutFirstRun(mode: .feed, runs: 0, lifetimeBugs: PlantRanks.threshold(1)))
+        #expect(!AppRules.isSproutFirstRun(mode: .daily(day: 3, scored: true), runs: 0, lifetimeBugs: 0))
+        #expect(!AppRules.isSproutFirstRun(mode: .lesson, runs: 0, lifetimeBugs: 0))
+        var options = SessionOptions()
+        GameController.applyFirstRun(true, to: &options)
+        #expect(!options.hunger)
+        #expect(options.freeFirstSting)
+        var normal = SessionOptions()
+        GameController.applyFirstRun(false, to: &normal)
+        #expect(normal == SessionOptions())
+        #expect(AppRules.isFreeSting(.stung(id: 1, species: .bee, cost: 0), mode: .feed))
+        #expect(!AppRules.isFreeSting(.stung(id: 1, species: .bee, cost: 1), mode: .feed))
+        #expect(!AppRules.isFreeSting(.stung(id: 1, species: .bee, cost: 0), mode: .lesson))
+        #expect(!AppRules.isFreeSting(.drySnap, mode: .feed))
+        #expect(AppRules.snapGainText(1) == "+1 snap")
+        #expect(AppRules.snapGainText(2) == "+2 snaps")
+    }
+
+    @Test func lessonShowsTheSnapsFromStepThree() {
+        #expect(!LessonScript.showsSnaps(.firstSnap))
+        #expect(LessonScript.showsSnaps(.openAgain))
+        #expect(LessonScript.showsSnaps(.tooSlow))
+        #expect(LessonScript.showsSnaps(.done))
+        let clap = LessonScript(start: .firstSnap).display(touch: false, hasPose: true)
+        #expect(clap.showsClap)
+        #expect(!LessonScript(start: .firstSnap).display(touch: true, hasPose: false).showsClap)
+        #expect(LessonFinalCard.snapsLine == "These are your snaps")
+    }
+
+    /// The clap diagrams loop 160° → 138° → 160° and hold the clap for a still frame.
+    @Test func clapAngles() {
+        #expect(DuoClapDiagram.theta(at: 0) == DuoClapDiagram.openAngle)
+        #expect(DuoClapDiagram.theta(at: DuoClapDiagram.stillTime) == DuoClapDiagram.shutAngle)
+        #expect(DuoClapDiagram.theta(at: DuoClapDiagram.loop - 0.01) == DuoClapDiagram.openAngle)
+        #expect(DuoClapDiagram.openAngle == 160)
+        #expect(DuoClapDiagram.shutAngle == 138)
+        #expect(DuoClapDiagram.arrows(at: DuoClapDiagram.stillTime) == 1)
+        #expect(DuoClapDiagram.arrows(at: 0) == 0)
+        #expect(BookPoseDrawing.theta(at: BookPoseDrawing.stillTime) == DuoClapDiagram.shutAngle)
+        for i in 0..<100 {
+            let t = Double(i) * 0.05
+            let th = DuoClapDiagram.theta(at: t)
+            #expect(th >= DuoClapDiagram.shutAngle - 0.001 && th <= DuoClapDiagram.openAngle + 0.001)
+        }
+        #expect(SnapsRow.tick(at: 10.0) > 1.2)
+        #expect(abs(SnapsRow.tick(at: 10.5) - 1) < 1e-9)
     }
 
     @Test func numbers() {
@@ -573,8 +673,17 @@ struct WordsTests {
         #expect(AppRules.bestBiteText(bugs: 1, points: 10) == "1 bug · 10")
         #expect(AppRules.bestBiteText(bugs: 0, points: 0) == "–")
         #expect(AppRules.chainText(longest: 0) == "–")
-        #expect(AppRules.chainText(longest: 1).hasSuffix("(1 bite)"))
+        #expect(AppRules.chainText(longest: 1) == AppRules.multiplierText(TrapRules.chainMultiplier(1)) + " · 1 big bite")
         #expect(AppRules.chainText(longest: 2).hasPrefix(AppRules.multiplierText(TrapRules.chainMultiplier(2))))
+        #expect(AppRules.chainText(longest: 2).hasSuffix("· 2 big bites"))
+        // REVIEW-2 #24: "An 8-bug FEAST", "New best! was 3,200".
+        #expect(AppRules.article(8) == "An")
+        #expect(AppRules.article(11) == "An")
+        #expect(AppRules.article(5) == "A")
+        #expect(AppRules.story(makeRun(biggest: 8)).hasPrefix("An 8-bug FEAST"))
+        #expect(AppRules.story(makeRun(biggest: 6)).hasPrefix("A 6-bug FEAST"))
+        #expect(AppRules.previousBestText(3_200) == "was 3,200")
+        #expect(AppRules.previousBestText(0) == nil)
         #expect(AppRules.shortName(.goldenScarab) == "Scarab")
         #expect(AppRules.shortName(.housefly) == "Housefly")
         #expect(AppRules.rankHint(lifetimeBugs: 0) == "Catch \(PlantRanks.threshold(1)) bugs to grow")
@@ -595,7 +704,14 @@ struct WordsTests {
     @Test func cardCopy() {
         #expect(PoseCard.title(isDuo: true) == "Hold it open like a book")
         #expect(CoverCard.title(midRun: true) == "Open it up to carry on")
+        #expect(CoverCard.title(midRun: false) == "Open it up to carry on")
+        #expect(CoverCard.scoreLine(1_174) == "1,174 so far")
         #expect(ClosingCard.title == CoverCard.title(midRun: true))
+        // REVIEW-2 #20: no debug line in Settings, a hinge readout only on TestFlight with a hinge.
+        #expect(!SettingsView.showsDiagnostics(channel: .debug, hasHinge: true))
+        #expect(!SettingsView.showsDiagnostics(channel: .appStore, hasHinge: true))
+        #expect(!SettingsView.showsDiagnostics(channel: .testFlight, hasHinge: false))
+        #expect(SettingsView.showsDiagnostics(channel: .testFlight, hasHinge: true))
         #expect(DailyView.status(canPlay: true, record: nil).contains("One scored try"))
         var d = ProgressData()
         d.spared = ["bee": 4]
@@ -661,8 +777,11 @@ struct LayoutTests {
         #expect(c.isFoldClear(l.pause))
         #expect(l.pause.minX >= c.foldMaxX)
         #expect(l.snaps.minX >= c.foldMaxX - tolerance)
-        #expect(l.score.maxX <= l.pause.minX)
+        // R3: the score in the top outer corner, the pause button under it; the hint on the inner top.
+        #expect(l.pause.minY >= l.score.maxY)
         #expect(l.hint.maxY <= l.snaps.minY)
+        #expect(l.hint.maxX <= l.score.minX)
+        #expect(l.back.minY < l.pause.minY)
     }
 
     @Test func hudOnTheLeftMirrors() {
@@ -671,7 +790,12 @@ struct LayoutTests {
         #expect(!l.trailing)
         #expect(l.pause.maxX <= c.foldMinX)
         #expect(c.isFoldClear(l.pause))
-        #expect(l.score.minX >= l.pause.maxX)
+        #expect(l.score.maxX <= c.foldMinX)
+        #expect(l.pause.minY >= l.score.maxY)
+        #expect(l.hint.minX >= l.score.maxX)
+        let right = HUDLayout.make(duo())
+        // Mirrored: the score hugs the left edge as it hugs the right one.
+        #expect(abs(l.score.minX - (c.size.width - right.score.maxX)) < 2)
     }
 
     @Test func phoneCanvasIsWider() {
@@ -685,28 +809,94 @@ struct LayoutTests {
         #expect(l.snaps.maxY <= size.height - 21)
     }
 
+    /// REVIEW-2 #11, #23: every snap the trap can hold, in rows of seven; "14" never clips (REVIEW-1 #3).
     @Test func snapsRowSlots() {
-        #expect(SnapsRow.slots(left: 3, max: 12) == Tuning.startSnaps)
-        #expect(SnapsRow.slots(left: 12, max: 12) == 12)
-        // "12" never clips: the numeral has its own box, and 11–12 glyphs use the small size (REVIEW-1 #3).
-        #expect(HUDLayout.glyphSize(slots: 12) < HUDLayout.glyphSize(slots: 10))
+        #expect(HUDLayout.slotCount == min(Tuning.maxSnaps, 14))
         #expect(HUDLayout.snapNumeralW >= 28)
-        #expect(HUDLayout.snapsWidth(slots: 12, rows: 2) < HUDLayout.snapsWidth(slots: 12, rows: 1))
+        for c in [duo(), duo(hudLeft: true)] {
+            let l = HUDLayout.make(c)
+            #expect(l.snapRows == (HUDLayout.slotCount + 6) / 7)
+            #expect(l.snapRowRects.count == l.snapRows)
+            #expect(l.glyph >= HUDLayout.glyphMin)
+            for i in 0..<HUDLayout.slotCount {
+                let p = l.glyphCenter(i)
+                let row = l.snapRowRects[min(i / 7, l.snapRowRects.count - 1)]
+                #expect(row.insetBy(dx: -0.5, dy: -0.5).contains(p))
+                #expect(!l.numeral.insetBy(dx: 1, dy: 1).contains(p))
+            }
+            #expect(l.snaps.contains(l.numeral))
+            // The Scene's anchor: the top row's first glyph (its row flash runs 90 pt right of it).
+            #expect(l.anchor(snapsLeft: 10) == l.glyphCenter(0))
+            #expect(l.snapRowRects[0].contains(l.anchor(snapsLeft: 0)))
+        }
     }
 
-    /// REVIEW-1 #14: at 951 × 669 (both HUD sides) the score, chain chip, snaps and hint stay off the trap's face.
+    /// REVIEW-1 #14: at 951 × 669 (both HUD sides) the score, chain chip and snaps stay off the trap's face.
     @Test func hudStaysOffTheTrapOnTheDuo() {
         for left in [false, true] {
             let c = duo(hudLeft: left)
             let l = HUDLayout.make(c)
-            for rect in [l.score, l.chain, l.snaps, l.hint] {
+            for rect in l.ciliaRects {
                 #expect(c.minTrapRadius(rect) >= HUDLayout.clearRadius - 0.005)
             }
-            #expect(l.snapRows == 1)
             #expect(l.hint.width >= HUDLayout.hintMin)
-            // The hint sits below the thumbs' band, off it.
+            // The hint sits off the thumbs' band and the crease.
             #expect(!c.inThumbZone(l.hint))
+            #expect(!c.inThumbZone(l.lessonHint))
         }
+    }
+
+    /// REVIEW-2 #4 (REVIEW-2-duo P0 4): at 951 × 669 on both HUD sides, the snaps rows, the numeral, the chain chip and
+    /// the score are ≥ 8 pt clear of the cilia tips and the green back (the Scene's own `TrapArt.teeth`).
+    @Test func hudClearsTheCiliaOnTheDuo() {
+        for left in [false, true] {
+            let c = duo(hudLeft: left)
+            let outline = c.trapOutline()
+            #expect(outline.count > 700)
+            let l = HUDLayout.make(c)
+            for rect in l.ciliaRects {
+                #expect(AppCanvas.clearance(rect, from: outline) >= AppCanvas.ciliaClear)
+            }
+        }
+    }
+
+    @Test func outlineHelpers() {
+        let pts = [CGPoint(x: 10, y: 10), CGPoint(x: 40, y: 12), CGPoint(x: 90, y: 50)]
+        #expect(AppCanvas.outlineReach(pts, y0: 0, y1: 20, right: true) == 40)
+        #expect(AppCanvas.outlineReach(pts, y0: 0, y1: 20, right: false) == 10)
+        #expect(AppCanvas.outlineReach(pts, y0: 60, y1: 80, right: true) == nil)
+        let r = CGRect(x: 50, y: 0, width: 10, height: 10)
+        #expect(near(AppCanvas.clearance(r, from: [CGPoint(x: 70, y: 5)]), 10))
+        #expect(AppCanvas.clearance(r, from: [CGPoint(x: 55, y: 5)]) == 0)
+        #expect(near(AppCanvas.clearance(r, from: [CGPoint(x: 63, y: 14)]), 5))
+    }
+
+    /// REVIEW-2 #3: every hint line fits its plate (≤ 3 lines, no word cut) at both plate widths, on the Duo and on a
+    /// phone, either HUD side, in play and in the lesson.
+    @Test func everyHintFitsBothPlates() {
+        let phone = CGSize(width: 874, height: 402)
+        let canvases = [duo(), duo(hudLeft: true),
+                        AppCanvas(size: phone, insets: EdgeInsets(top: 0, leading: 62, bottom: 21, trailing: 62),
+                                  layout: ScreenLayout.make(viewSize: phone, hasFold: false)),
+                        AppCanvas(size: phone, insets: EdgeInsets(top: 0, leading: 62, bottom: 21, trailing: 62),
+                                  layout: ScreenLayout.make(viewSize: phone, hasFold: false, hudOnLeft: true))]
+        for c in canvases {
+            let l = HUDLayout.make(c)
+            for plate in [l.hint, l.lessonHint] {
+                #expect(plate.width >= HUDLayout.hintMin)
+                let f = HintFit.font(compact: c.isCompact)
+                for text in AppRules.allHintCopy {
+                    #expect(HintFit.fits(text, plateWidth: plate.width, compact: c.isCompact))
+                    // The plate's box holds the lines it wraps to.
+                    let lines = CGFloat(HintFit.lines(text, plateWidth: plate.width, compact: c.isCompact))
+                    #expect(lines * f.lineHeight + 14 <= plate.height + 0.5)
+                }
+            }
+        }
+        // The old cut line is gone.
+        #expect(!AppRules.allHintCopy.contains("Last snap — make it count"))
+        #expect(HintFit.lines("Snap the halves together", plateWidth: 1_000, compact: false) == 1)
+        #expect(!HintFit.fits("Supercalifragilisticexpialidocious", plateWidth: 150, compact: true))
     }
 
     /// REVIEW-1 #11: nothing the HUD draws in play crosses the crease, on either side.
@@ -728,10 +918,11 @@ struct LayoutTests {
                           layout: ScreenLayout.make(viewSize: size, hasFold: false))
         let l = HUDLayout.make(c)
         #expect(l.snapRows == 2)
-        #expect(c.minTrapRadius(l.snaps) >= HUDLayout.clearRadius)
-        #expect(c.minTrapRadius(l.score) >= HUDLayout.clearRadius)
-        #expect(c.minTrapRadius(l.chain) >= HUDLayout.clearRadius)
+        for rect in l.ciliaRects {
+            #expect(c.minTrapRadius(rect) >= HUDLayout.clearRadius)
+        }
         #expect(l.hint.width >= HUDLayout.hintMin)
+        #expect(!c.inThumbZone(l.hint))
     }
 
     @Test func scenePointInvertsScreenPoint() {
@@ -741,7 +932,7 @@ struct LayoutTests {
         #expect(near(back.x, p.x))
         #expect(near(back.y, p.y))
         let l = HUDLayout.make(c)
-        let g = l.firstGlyphCenter(slots: 12)
+        let g = l.glyphCenter(0)
         #expect(l.snaps.contains(g))
     }
 
@@ -756,7 +947,7 @@ struct LayoutTests {
 
     @Test func bugBookHeaderClearsTheBackButton() {
         let c = duo()
-        let pause = HUDLayout.make(c).pause
+        let pause = HUDLayout.make(c).back
         let h = BugBookView.headerHeight(compact: false, pauseMaxY: pause.maxY, top: c.top)
         #expect(c.top - 8 + h >= pause.maxY)
     }
@@ -823,6 +1014,21 @@ struct TallyTests {
         #expect(DemoMode.parse("freezeOn=wilted").freezeOn == .wilted)
     }
 
+    @Test func shownSnapsFollowTheFlyingGlyphs() {
+        #expect(AppRules.shownSnaps(10, offset: -1, max: 14) == 9)
+        #expect(AppRules.shownSnaps(9, offset: 1, max: 14) == 10)
+        #expect(AppRules.shownSnaps(0, offset: -2, max: 14) == 0)
+        #expect(AppRules.shownSnaps(14, offset: 2, max: 14) == 14)
+    }
+
+    @Test func badgeTiersAndSubjects() {
+        var gold = 0
+        for a in Achievements.all where BadgePainter.tier(for: a.id) == .gold { gold += 1 }
+        #expect(gold >= 3 && gold <= 6)
+        #expect(BadgePainter.species(for: Achievements.scarab.id) == [.goldenScarab])
+        #expect(BadgePainter.species(for: Achievements.spare50.id).allSatisfy(\.isProtected))
+    }
+
     @Test func tallyIgnoresHunger() {
         var t = RunTally()
         t.note(.hungry(secondsLeft: 3))
@@ -859,10 +1065,26 @@ struct TallyTests {
         ]
         let s = TrapSnapshot(bugs: bugs)
         #expect(AppRules.liveClaims([1: 10, 3: 11, 7: 12], snapshot: s) == [1: 10])
+        // R3: with a bee in play only the bee is pointed at.
         let targets = AppRules.lessonTargets(s)
-        #expect(targets.count == 2)
-        #expect(targets.first?.sipping == true)
-        #expect(targets.last?.bee == true)
+        #expect(targets.count == 1)
+        #expect(targets.first?.bee == true)
+        let flies = AppRules.lessonTargets(TrapSnapshot(bugs: [bugs[0], bugs[2]]))
+        #expect(flies.count == 1)
+        #expect(flies.first?.sipping == true)
+    }
+
+    @Test func lessonPrefersInnerDrops() {
+        let g = ScreenLayout(hasFold: true).geometry
+        // A rim drop right on the slot's spot, and an inner one further off: the inner one wins.
+        let spot = AppRules.lessonSpot(slot: 0, geometry: g).target
+        let rimX = g.center.x - g.a * 0.92
+        let drops = [NectarDrop(id: 1, position: CGPoint(x: rimX, y: g.center.y), radius: 10),
+                     NectarDrop(id: 2, position: CGPoint(x: spot.x + 60, y: spot.y + 40), radius: 10)]
+        #expect(g.normalizedRadius(drops[0].position) > AppRules.lessonInnerRadius)
+        #expect(AppRules.lessonSpot(slot: 0, geometry: g, nectar: drops, taken: []).drop == 2)
+        // A rim drop only when no inner one is free.
+        #expect(AppRules.lessonSpot(slot: 0, geometry: g, nectar: drops, taken: [2]).drop == 1)
     }
 
     @Test func drawnClosureIsClamped() {

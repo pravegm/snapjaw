@@ -7,7 +7,7 @@ import UIKit
 // Unknown keys are ignored. Every line CI greps starts with `SNAP-` (never rename them).
 //
 // Keys (design/ROUND-1.md "Demo mode")
-// - `screen=home|play|results|book|settings|lesson|pose|cover|icon|daily`
+// - `screen=home|play|results|book|settings|lesson|pose|cover|icon|daily|badges`
 //     home      Home (the title trap follows the hinge, or holds at `closure=`).
 //     play      straight into a run of `mode` (default feed). Implied by `mode=` without `screen`.
 //     results   the Results screen for `mode`: a REAL run of it played headless at launch by the pilot (`pilot=`,
@@ -15,9 +15,13 @@ import UIKit
 //     book / settings / daily   those pages.
 //     lesson    the First Bite lesson (at `lessonStep=`, default 1).
 //     pose      force the pose card "Hold it open like a book" (over a run of `mode` if given, else Home).
-//     cover     force the cover-display card ("Open to carry on").
+//     cover     force the cover-display card ("Open it up to carry on" and the score): a run of `mode` (default
+//               feed) is played headless for 24 s first by the pilot (default casual), so the score is real.
 //     icon      render the app icon (AppIconArt) to Documents/AppIcon-1024.png (`SNAP-T icon ok 1024x1024`,
 //               `SNAP-ICON <path>`) and show it full screen. `SNAP_ICON=1` in the environment does the same.
+//     badges    R3: render the 12 Game Center achievement images, 1024 × 1024 opaque PNGs, to
+//               Documents/badges/<id>.png, one `SNAP-BADGE <id> <path>` line each, then `SNAP-T badges done <n>`
+//               (Home shows meanwhile).
 // - `mode=feed|daily|attract`     the run mode (`daily` = today's scored try; `attract`: snaps never run out).
 // - `seed=<n>`                    the run seed (default 7 for feed/attract, so frames are stable; daily = today's).
 // - `pilot=novice|casual|expert|perfect`   Core's TrapPilot drives the trap. Without it `screen=play` takes the real
@@ -49,7 +53,7 @@ import UIKit
 
 struct DemoMode: Equatable {
     enum Screen: String, Equatable, CaseIterable {
-        case home, play, results, book, settings, lesson, pose, cover, icon, daily
+        case home, play, results, book, settings, lesson, pose, cover, icon, daily, badges
     }
     enum ModeKey: String, Equatable { case feed, daily, attract }
     enum Freeze: String, Equatable, CaseIterable {
@@ -230,14 +234,19 @@ enum DemoPresets {
         let edible = found.filter { !$0.isProtected }
         let protected = found.filter { $0.isProtected }
         if !edible.isEmpty {
-            let share = max(data.lifetimeBugs / (2 * edible.count), 1)
-            var left = data.lifetimeBugs
-            for (i, s) in edible.enumerated() {
-                let n = i == 0 ? max(data.lifetimeBugs - share * (edible.count - 1), 1) : share
-                let count = min(n, max(left, 1))
-                data.caught[s.rawValue] = count
-                left -= count
+            // Varied counts (REVIEW-2 #19: not "Caught 27" on every page): common bugs many, rare ones few, and the
+            // total is exactly the lifetime.
+            let weights: [Double] = edible.enumerated().map { pair -> Double in
+                let base = 1 / (1 + 0.55 * Double(pair.offset))
+                let wobble = 1 + 0.18 * Double((pair.offset * 37 + 11) % 5) / 4
+                let rare: Double = pair.element == .goldenScarab ? 0.15 : (pair.element == .dragonfly ? 0.4 : 1)
+                return base * wobble * rare
             }
+            let total = max(weights.reduce(0, +), 0.0001)
+            var counts = weights.map { max(Int(Double(data.lifetimeBugs) * $0 / total), 1) }
+            let over = counts.reduce(0, +) - data.lifetimeBugs
+            counts[0] = max(counts[0] - over, 1)
+            for (i, s) in edible.enumerated() { data.caught[s.rawValue] = counts[i] }
         }
         data.lifetimeSpared = protected.isEmpty ? p.runs : p.runs * 2
         for (i, s) in protected.enumerated() {
@@ -330,5 +339,44 @@ enum IconExport {
         }
         guard let flat = image.cgImage else { return nil }
         return SnapPNG.encode(flat)
+    }
+}
+
+// MARK: - Game Center badges (`screen=badges`, R3)
+
+@MainActor
+enum BadgeExport {
+    /// Game Center achievement images: 1024 × 1024 (tools/appstore/badges.swift checks it).
+    static let side: CGFloat = 1024
+
+    /// Renders every achievement's AchievementBadge to Documents/badges/<id>.png (opaque RGB, no alpha), printing
+    /// `SNAP-BADGE <id> <path>` per image and `SNAP-T badges done <n>` at the end (Swoop's `screen=badges`).
+    static func renderAll() {
+        guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            AppTrace.t("SNAP-T badges done 0 (no Documents directory)")
+            return
+        }
+        let directory = documents.appendingPathComponent("badges", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var written = 0
+        for id in GameCenterManager.achievementIDs {
+            let renderer = ImageRenderer(content: AchievementBadge(id: id, side: side).frame(width: side, height: side))
+            renderer.proposedSize = ProposedViewSize(width: side, height: side)
+            renderer.scale = 1
+            renderer.isOpaque = true
+            guard let cgImage = renderer.cgImage, let data = IconExport.opaquePNG(cgImage, side: side) else {
+                AppTrace.t("SNAP-T badges failed \(id): no image")
+                continue
+            }
+            let url = directory.appendingPathComponent("\(id).png")
+            do {
+                try data.write(to: url)
+                written += 1
+                AppTrace.t("SNAP-BADGE \(id) \(url.path)")
+            } catch {
+                AppTrace.t("SNAP-T badges failed \(id): \(error.localizedDescription)")
+            }
+        }
+        AppTrace.t("SNAP-T badges done \(written)")
     }
 }

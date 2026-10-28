@@ -6,7 +6,7 @@ import Foundation
 // Nothing is hard-coded elsewhere in Core. tools/balance-sim.js mirrors the balance-relevant values in its `T` table
 // (same names) and the detector values in its `D` table: KEEP THEM IDENTICAL. R1 tuning (design/notes/core-R1.md)
 // changed some GAME-DESIGN starting values; each change is marked "R1". R2 changes (design/notes/core-R2.md) are
-// marked "R2".
+// marked "R2", R3 changes (design/notes/core-R3.md) "R3".
 
 enum Tuning {
 
@@ -54,7 +54,8 @@ enum Tuning {
     // MARK: Snaps, score and chain (GAME-DESIGN §5)
 
     static let startSnaps: Int = 10
-    static let maxSnaps: Int = 12
+    /// R3 (REVIEW-2 #23): two rows of 7, so a Sprout's 12-snap start never caps an early Feast away.
+    static let maxSnaps: Int = 14
     static let snapCost: Int = 1
     /// Caught ≥ feastCount: +feastRefund; caught ≥ bigFeastCount: +bigFeastRefund (instead).
     static let feastCount: Int = 3
@@ -68,17 +69,20 @@ enum Tuning {
     static let waspCost: Int = 2
     /// Each productive clean snap adds this to the multiplier, up to the max.
     static let chainStep: Double = 0.5
-    static let chainMaxMultiplier: Double = 4
+    /// R3 (REVIEW-2 #22): ×5, reached at the 8th step (×1, ×1.5 … ×4 at 6 … ×5 at 8).
+    static let chainMaxMultiplier: Double = 5
     /// R2 chain rule (GAME-DESIGN §5): only a clean bite of at least this many adds a step; a clean 1-bug bite holds.
     static let chainMinBite: Int = 2
 
     // MARK: Hunger (R2, GAME-DESIGN §5 "Hunger")
 
-    /// Seconds without a catching bite before a snap wilts, by day phase.
-    static let wiltMorning: Double = 15
-    static let wiltNoon: Double = 14
-    static let wiltDusk: Double = 12
-    static let wiltNight: Double = 10
+    /// Seconds without a catching bite before a snap wilts, by day phase. R3 (REVIEW-2 #7): 18/16/14/12 (was
+    /// 15/14/12/10), and the clock only runs from the first in-trap landing of a catchable bug after a catching bite
+    /// (and after the start), so empty-trap time never counts.
+    static let wiltMorning: Double = 18
+    static let wiltNoon: Double = 16
+    static let wiltDusk: Double = 14
+    static let wiltNight: Double = 12
     /// `hungry` fires (and the hint shows) this many seconds before a wilt.
     static let hungryWarning: Double = 3
 
@@ -90,12 +94,14 @@ enum Tuning {
     /// An arriving bug is in the bite only below this height.
     static let catchableHeight: Double = 0.6
     /// After this wave reactions × lateReactionDecay per wave (floor lateReactionFloor).
+    /// R3: the late night is the run-ender now, not hunger: reactions × 0.96 per wave to a 0.25 floor and lingers
+    /// × 0.92 to a 0.2 floor, so even an 80 ms hand is outrun around wave 60–100 (was 0.97 / 0.6 and 0.98 / 0.5).
     static let lateWaveStart: Int = 30
-    static let lateReactionDecay: Double = 0.97
-    static let lateReactionFloor: Double = 0.6
+    static let lateReactionDecay: Double = 0.96
+    static let lateReactionFloor: Double = 0.25
     /// R1: night lingers shrink the same way after lateWaveStart (floor lateLingerFloor).
-    static let lateLingerDecay: Double = 0.98
-    static let lateLingerFloor: Double = 0.5
+    static let lateLingerDecay: Double = 0.92
+    static let lateLingerFloor: Double = 0.2
 
     // MARK: Waves and the day (GAME-DESIGN §6)
 
@@ -117,9 +123,10 @@ enum Tuning {
     static let nectarRadiusMax: Double = 16
     static let nectarClusterMin: Int = 2
     static let nectarClusterMax: Int = 3
-    /// A cluster's drops sit on a ring of this radius (pt) round its centre, evenly spaced.
-    static let nectarRingMin: Double = 40
-    static let nectarRingMax: Double = 48
+    /// A cluster's drops sit on a ring of this radius (pt) round its centre, evenly spaced. R3 (REVIEW-2 #16): 24–30
+    /// (was 40–48), so a cluster's 2–3 drops read as one group (cluster mates 42–60 pt apart, other clusters > 100).
+    static let nectarRingMin: Double = 24
+    static let nectarRingMax: Double = 30
     /// Cluster centres keep this far apart (pt), at these normalised radii, at least nectarArcMargin rad from the
     /// vertical. A lobe with two clusters puts the first in its upper half and the second in its lower half, each at
     /// least nectarHalfGap rad from the horizontal.
@@ -130,7 +137,9 @@ enum Tuning {
     static let nectarClusterOuter: Double = 0.55
     /// A re-seeded drop this close (pt) to a drop that is still being sipped is skipped.
     static let nectarKeptClearance: Double = 60
-    static let nectarCreaseClearance: Double = 50
+    /// R3: a drop sits at least this far (pt) from the midrib line, so even a bumblebee sipping it keeps
+    /// creaseHalfWidth + radius + creaseClearance (75.6 pt) off the crease (was 50).
+    static let nectarCreaseClearance: Double = 80
     static let nectarTries: Int = 30
     static let lingerMorningMin: Double = 6
     static let lingerMorningMax: Double = 8
@@ -142,13 +151,15 @@ enum Tuning {
     static let lingerNightMax: Double = 5
     /// Protected bugs per wave (R1: chances, not the design's flat counts; see core-R1.md).
     static let beeFromWave: Int = 3
-    static let beeChanceMorning: Double = 0.5
+    /// R3: 0.35 (was 0.5): stinger bites refund nothing now, so the morning is a little kinder.
+    static let beeChanceMorning: Double = 0.35
     static let beeChanceNoon: Double = 0.4
     static let beeChanceDusk: Double = 0.5
     static let beeChanceNight: Double = 0.55
     static let beeChanceNight2: Double = 0.15
-    /// One more protected bug per wave every this many waves after lateWaveStart (capped).
-    static let extraBeeEvery: Int = 8
+    /// One more protected bug per wave every this many waves after lateWaveStart (capped). R3: 40 (was 8): extra bees
+    /// made the late night a wilt machine for patient players; the reaction and linger ramp ends runs instead.
+    static let extraBeeEvery: Int = 40
     static let maxProtectedPerWave: Int = 4
     /// R1: bees drop in for a quicker sip than the bugs.
     static let beeLingerFactor: Double = 0.6
@@ -187,6 +198,9 @@ enum Tuning {
     static let gnatFromWave: Int = 4
     /// Random landing spots lie within this normalised radius.
     static let spotRadius: Double = 0.75
+    /// R3 (REVIEW-2 #5): no bug rests (lands, sips, pauses, ends a hop) with its centre closer to the midrib line than
+    /// ScreenLayout.creaseHalfWidth + its radius + this (pt). See TrapRules.creaseGap(radius:).
+    static let creaseClearance: Double = 16
 
     // MARK: Session
 
@@ -199,6 +213,10 @@ enum Tuning {
     static let openUpDelay: Double = 1.0
     static let crowdHintCount: Int = 3
     static let maxSubstep: Double = 1.0 / 120.0
+    /// R3 (REVIEW-2 #21): the fixed step (s) of a deterministic pilot run (PilotRun), whatever the display's frame time.
+    static let pilotStep: Double = 1.0 / 60.0
+    /// … and at most this many fixed steps per display frame (after a long hitch the run falls behind, it never jumps).
+    static let pilotMaxStepsPerFrame: Int = 6
 
     // MARK: Movement (ROUND-1 "Movement")
 

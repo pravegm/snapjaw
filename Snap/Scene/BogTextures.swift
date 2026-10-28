@@ -173,7 +173,6 @@ enum BogTextures {
 
     /// The lobe layers' margin past the zone's edge (R2: room for the green back).
     static let lobePad: CGFloat = TrapArt.exteriorWidth + 6
-    static let jawPad: CGFloat = 4
 
     static func lobe(side: Int) -> SKTexture {
         lobeLayer("lobe", side: side, reach: 1, pad: lobePad, scale: 2) { ctx, sd, g in
@@ -212,10 +211,32 @@ enum BogTextures {
         }
     }
 
-    static func jaw(side: Int) -> SKTexture {
-        lobeLayer("jaw", side: side, reach: BogArt.jawOuter, pad: jawPad, scale: 2) { ctx, sd, g in
-            BogArt.drawJaw(ctx, side: sd, geometry: g)
+    /// R3 (#1): the closed trap for the bite's hold (both lobes squeezed shut, the cilia interlocked), centred on the
+    /// trap centre. Its size is `closedSize`.
+    static var closedTrap: SKTexture {
+        let g = TrapGeometry(sceneSize: CGSize(width: ScreenLayout.canvasWidth, height: ScreenLayout.canvasHeight))
+        let frame = BogArt.closedFrame(geometry: g)
+        return make("closed", width: frame.width, height: frame.height, scale: 2) { ctx, _ in
+            ctx.translateBy(x: -frame.minX, y: -frame.minY)
+            BogArt.drawClosedTrap(ctx, geometry: g)
         }
+    }
+
+    static var closedSize: CGSize {
+        let g = TrapGeometry(sceneSize: CGSize(width: ScreenLayout.canvasWidth, height: ScreenLayout.canvasHeight))
+        return BogArt.closedFrame(geometry: g).size
+    }
+
+    /// R3: the trap's soft shadow on the bog (white: tint it), `trapShadowSize`, centred on the trap.
+    static var trapShadow: SKTexture {
+        let sz = trapShadowSize
+        return make("tshadow", width: sz.width, height: sz.height, scale: 0.5) { ctx, s in
+            BogArt.drawTrapShadow(ctx, size: s)
+        }
+    }
+
+    static var trapShadowSize: CGSize {
+        CGSize(width: 2 * TrapGeometry.semiAxisX * 1.14, height: 2 * TrapGeometry.semiAxisY * 1.14)
     }
 
     /// The midrib, cropped to its own frame (centred on the trap centre).
@@ -267,7 +288,7 @@ enum BogTextures {
 
     static var snapGlyph: SKTexture {
         make("glyph", width: glyphSize.width, height: glyphSize.height, scale: 3) { ctx, s in
-            BogArt.drawSnapGlyph(ctx, size: s)
+            TrapArt.drawSnapGlyph(ctx, size: s)
         }
     }
 
@@ -345,8 +366,9 @@ enum BogTextures {
             _ = gloss(side: side)
             _ = lobeGlow(side: side)
             _ = lobeSilhouette(side: side)
-            _ = jaw(side: side)
         }
+        _ = closedTrap
+        _ = trapShadow
         _ = midrib
         _ = foldBand
         _ = tooth(curl: 1)

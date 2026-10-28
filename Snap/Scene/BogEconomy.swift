@@ -6,7 +6,10 @@ import UIKit
 /// "+2 snaps" is shown, not told.
 /// - On a Feast (or a lucky bug) +N snap glyphs fly from the bite to `anchor` (0.45 s, ease-in along an arc, one
 ///   after another), each landing with a bump and a sparkle.
-/// - On a sting the lost glyph cracks at the anchor: two halves fall 20 pt and fade, under a crimson flash.
+/// - On a sting the lost glyph cracks at the anchor: two halves fall 20 pt and fade, under a crimson flash on the
+///   glyph and (R3 #14) a 0.45 s crimson flash across the whole row.
+/// - R3 (#14): `shownOffset` keeps the HUD's numeral truthful: it changes when each glyph lands, and only after a
+///   sting's crack has shown.
 /// - On a wilt (hunger) a glyph droops off the row, greyed, and fades.
 /// The row itself is the App's HUD; the App passes its scene-space position as `BogScene.hudSnapsAnchor`.
 @MainActor
@@ -27,6 +30,11 @@ final class BogEconomy {
     static let flightTime: Double = 0.45
     static let flightGap: Double = 0.12
     static let bumpTime: Double = 0.2
+    /// R3 (#14): how long the numeral waits for a sting's crack before it drops (s).
+    static let crackLead: Double = 0.15
+    /// R3 (#14): the row flash's size and how long it shows (s).
+    static let rowFlashSize = CGSize(width: 300, height: 96)
+    static let rowFlashTime: Double = 0.45
 
     private var glyphs: [SKSpriteNode] = []
     private var flights: [Flight] = []
@@ -34,7 +42,9 @@ final class BogEconomy {
     private let halfR: SKSpriteNode
     private let wiltGlyph: SKSpriteNode
     private let flash: SKSpriteNode
+    private let rowFlash: SKSpriteNode
     private var crackAge: Double = -1
+    private var crackCost = 0
     private var crackAt: CGPoint = .zero
     private var wiltAge: Double = -1
     private var wiltAt: CGPoint = .zero
@@ -67,17 +77,33 @@ final class BogEconomy {
         flash.blendMode = .add
         flash.color = BogPaint.ui(TrapArt.palette.danger)
         flash.colorBlendFactor = 1
-        for s in [halfL, halfR, wiltGlyph, flash] {
+        rowFlash = SKSpriteNode(texture: BogTextures.soft, size: BogEconomy.rowFlashSize)
+        rowFlash.color = BogPaint.ui(RGBA(hex: 0xE0203C))
+        rowFlash.colorBlendFactor = 1
+        for s in [halfL, halfR, wiltGlyph, flash, rowFlash] {
             s.isHidden = true
             root.addChild(s)
         }
         flash.zPosition = -1
+        rowFlash.zPosition = -2
     }
 
     /// Glyphs in the air or landing now (tests).
     var activeFlights: Int { flights.filter { $0.active }.count }
     var cracking: Bool { crackAge >= 0 }
     var wilting: Bool { wiltAge >= 0 }
+    /// R3 (#14): the row's crimson flash is showing (tests).
+    var rowFlashing: Bool { !rowFlash.isHidden && rowFlash.alpha > 0.01 }
+
+    /// R3 (#14) for the App: add this to `snapshot.snapsLeft` for the numeral the HUD shows. Each Feast glyph still in
+    /// the air holds one snap back (−1) until it lands; a sting's cost shows for `crackLead` s while its glyph
+    /// cracks (+cost), then the numeral drops.
+    var shownOffset: Int {
+        var n = 0
+        for f in flights where f.active && !f.landed { n -= 1 }
+        if crackAge >= 0 && crackAge < BogEconomy.crackLead { n += crackCost }
+        return n
+    }
 
     func clear() {
         for i in 0..<flights.count {
@@ -85,8 +111,9 @@ final class BogEconomy {
             glyphs[i].isHidden = true
         }
         crackAge = -1
+        crackCost = 0
         wiltAge = -1
-        for s in [halfL, halfR, wiltGlyph, flash] { s.isHidden = true }
+        for s in [halfL, halfR, wiltGlyph, flash, rowFlash] { s.isHidden = true }
         landedCount = 0
     }
 
@@ -115,11 +142,13 @@ final class BogEconomy {
         }
     }
 
-    /// The glyph a sting cost cracks at `p`.
-    func crack(at p: CGPoint) {
+    /// The glyph a sting cost cracks at `p` (`cost` snaps: the numeral waits `crackLead` s for it), and the row
+    /// flashes crimson.
+    func crack(at p: CGPoint, cost: Int = 1) {
         crackAge = 0
         crackAt = p
-        for s in [halfL, halfR, flash] {
+        crackCost = max(cost, 0)
+        for s in [halfL, halfR, flash, rowFlash] {
             s.isHidden = false
             s.alpha = 1
             s.zRotation = 0
@@ -128,6 +157,8 @@ final class BogEconomy {
         halfL.position = CGPoint(x: p.x - BogTextures.glyphSize.width / 4, y: p.y)
         halfR.position = CGPoint(x: p.x + BogTextures.glyphSize.width / 4, y: p.y)
         flash.position = p
+        // The row runs right from its leftmost live glyph (the anchor), in two rows of seven.
+        rowFlash.position = CGPoint(x: p.x + 90, y: p.y - 12)
     }
 
     /// A snap wilted (hunger): one glyph droops off the row at `p`, greyed.
@@ -182,10 +213,21 @@ final class BogEconomy {
         if crackAge >= 0 {
             crackAge += dt
             let u = CGFloat(crackAge / 0.6)
+            let r = CGFloat(crackAge / BogEconomy.rowFlashTime)
+            if r < 1 {
+                // Two quick crimson beats across the row, then gone.
+                rowFlash.alpha = 0.72 * (1 - r) * (0.6 + 0.4 * abs(cos(.pi * 2 * r)))
+                rowFlash.setScale(1 + 0.08 * r)
+            } else {
+                rowFlash.isHidden = true
+            }
             if u >= 1 {
                 crackAge = -1
-                for s in [halfL, halfR, flash] { s.isHidden = true }
+                for s in [halfL, halfR, flash, rowFlash] { s.isHidden = true }
             } else {
+                // (R3 #14: the halves are a size bigger, so the crack reads at arm's length.)
+                halfL.setScale(1.3)
+                halfR.setScale(1.3)
                 let fall = 20 * u * u
                 let w = BogTextures.glyphSize.width / 4
                 halfL.position = CGPoint(x: crackAt.x - w - 6 * u, y: crackAt.y - fall)

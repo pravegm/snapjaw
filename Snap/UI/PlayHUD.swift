@@ -1,8 +1,9 @@
 import SwiftUI
+import UIKit
 
-/// The play layer over the scene: the HUD in the corners of the HUD page (outside the trap ellipse where it fits, so
-/// it never covers bugs), the hint, the lesson card, the pause menu and the closing card. Only the buttons take
-/// touches: every tap elsewhere reaches the scene (tap to snap on iPhones without a hinge).
+/// The play layer over the scene: the HUD in the outer corners of the HUD page (R3: off the cilia, `HUDLayout`), the
+/// hint, the lesson card, the pause menu and the closing card. Only the buttons take touches: every tap elsewhere
+/// reaches the scene (tap to snap on iPhones without a hinge).
 struct PlayLayer: View {
     @ObservedObject var controller: GameController
     @ObservedObject var hud: HUDState
@@ -23,6 +24,9 @@ struct PlayLayer: View {
         let lesson = controller.route == .lesson ? controller.lessonDisplay : nil
         let showsCard = lesson.map { !$0.isFinal } ?? false
         let hintRect = showsCard ? l.lessonHint : l.hint
+        let inner: HorizontalAlignment = l.trailing ? .leading : .trailing
+        let hintAlign = Alignment(horizontal: inner, vertical: showsCard ? .bottom : .top)
+        let showsSnaps = !v.lesson || v.lessonSnaps
         ZStack {
             if let lesson, !paused, !lesson.isFinal, !v.lessonTargets.isEmpty {
                 LessonPointer(targets: v.lessonTargets, info: info,
@@ -37,7 +41,7 @@ struct PlayLayer: View {
                     .position(x: l.score.midX, y: l.score.midY)
                     .allowsHitTesting(false)
                 if v.chainMultiplier > 1.01 {
-                    ChainChip(multiplier: v.chainMultiplier, compact: c)
+                    ChainChip(multiplier: v.chainMultiplier, compact: c, short: l.chainCompact)
                         .scaleEffect(chainBump ? 1.22 : 1, anchor: l.trailing ? .trailing : .leading)
                         .frame(width: l.chain.width, height: l.chain.height,
                                alignment: l.trailing ? .trailing : .leading)
@@ -45,22 +49,31 @@ struct PlayLayer: View {
                         .allowsHitTesting(false)
                         .transition(.scale(scale: 0.7).combined(with: .opacity))
                 }
-                SnapsRow(left: v.snapsLeft, max: v.snapsMax, trailing: l.trailing, rows: l.snapRows,
-                         hunger: v.hunger)
-                    .frame(width: l.snaps.width, height: l.snaps.height,
-                           alignment: l.trailing ? .trailing : .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(SnapTheme.crimson.opacity(rowFlash ? 0.55 : 0))
-                            .padding(-5)
-                    )
+            }
+            if showsSnaps {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(SnapTheme.crimson.opacity(rowFlash ? 0.55 : (v.rowFlashing ? 0.4 : 0)))
+                    .animation(.easeOut(duration: 0.12), value: v.rowFlashing)
+                    .frame(width: l.snaps.width + 12, height: l.snaps.height + 12)
                     .position(x: l.snaps.midX, y: l.snaps.midY)
                     .allowsHitTesting(false)
+                SnapsRow(left: v.snapsLeft, layout: l, size: info.size, hunger: v.hunger, hungry: v.hungry,
+                         reduceMotion: controller.reduceMotion)
+                    .allowsHitTesting(false)
+                if v.ringSnaps && !paused {
+                    SnapsRing(rect: l.snaps, reduceMotion: controller.reduceMotion)
+                        .allowsHitTesting(false)
+                }
+                if let gain = v.snapGain {
+                    SnapGainTag(text: gain, compact: c)
+                        .position(x: l.chain.midX, y: l.chain.minY - (c ? 14 : 18))
+                        .allowsHitTesting(false)
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                }
             }
             if !paused {
-                HintPlate(hint: v.hint, banner: v.banner, touch: controller.touchWording, compact: c)
-                    .frame(width: hintRect.width, height: hintRect.height,
-                           alignment: l.trailing ? .trailing : .leading)
+                HintPlate(hint: v.hint, banner: v.banner, touch: controller.hintTouch, compact: c)
+                    .frame(width: hintRect.width, height: hintRect.height, alignment: hintAlign)
                     .position(x: hintRect.midX, y: hintRect.midY)
                     .allowsHitTesting(false)
             }
@@ -73,7 +86,7 @@ struct PlayLayer: View {
                     .minimumScaleFactor(0.7)
                     .snapLegible()
                     .frame(width: l.score.width, alignment: l.trailing ? .trailing : .leading)
-                    .position(x: l.score.midX, y: l.score.maxY + 8)
+                    .position(x: l.score.midX, y: l.score.maxY + 6)
                     .allowsHitTesting(false)
             }
             if v.tired {
@@ -86,12 +99,13 @@ struct PlayLayer: View {
             }
             if let lesson, !paused {
                 if lesson.isFinal {
-                    LessonFinalCard(controller: controller, compact: c)
+                    LessonFinalCard(controller: controller, compact: c, trailing: l.trailing)
                         .frame(width: l.card.width)
-                        .position(x: l.card.midX, y: info.size.height / 2)
+                        .position(x: l.card.midX, y: min(info.size.height / 2, (l.card.minY + l.chain.minY) / 2))
                         .transition(.opacity)
                 } else {
-                    LessonCard(lesson: lesson, compact: c, onSkip: { controller.skipLesson() },
+                    LessonCard(lesson: lesson, compact: c, reduceMotion: controller.reduceMotion,
+                               onSkip: { controller.skipLesson() },
                                onHeight: { h in if abs(h - lessonCardHeight) > 1 { lessonCardHeight = h } })
                         .frame(width: l.lesson.width, height: l.lesson.height, alignment: .top)
                         .position(x: l.lesson.midX, y: l.lesson.midY)
@@ -114,13 +128,13 @@ struct PlayLayer: View {
         .animation(SnapTheme.settle(controller.reduceMotion), value: controller.isClosingPaused)
         .animation(SnapTheme.pop(controller.reduceMotion), value: v.chainMultiplier > 1.01)
         .animation(SnapTheme.pop(controller.reduceMotion), value: v.tired)
-        .onAppear { reportAnchor(l, slots: SnapsRow.slots(left: v.snapsLeft, max: v.snapsMax)) }
+        .animation(SnapTheme.pop(controller.reduceMotion), value: v.snapGain)
+        .onAppear { reportAnchor(l, left: v.snapsLeft) }
         .onChange(of: info) { _, _ in
-            reportAnchor(HUDLayout.make(info), slots: SnapsRow.slots(left: hud.values.snapsLeft,
-                                                                      max: hud.values.snapsMax))
+            reportAnchor(HUDLayout.make(info), left: hud.values.snapsLeft)
         }
-        .onChange(of: SnapsRow.slots(left: v.snapsLeft, max: v.snapsMax)) { _, slots in
-            reportAnchor(HUDLayout.make(info), slots: slots)
+        .onChange(of: v.snapsLeft) { _, left in
+            reportAnchor(HUDLayout.make(info), left: left)
         }
         .onChange(of: v.stings) { old, new in
             guard new > old else { return }
@@ -136,9 +150,9 @@ struct PlayLayer: View {
         }
     }
 
-    /// The Scene's economy glyphs (Feast flights, the sting crack, the wilt droop) land on the row's first glyph.
-    private func reportAnchor(_ l: HUDLayout, slots: Int) {
-        controller.setSnapsAnchor(info.scenePoint(l.firstGlyphCenter(slots: slots)))
+    /// The Scene's economy glyphs (Feast flights, the sting crack, the wilt droop) land on the row's live edge.
+    private func reportAnchor(_ l: HUDLayout, left: Int) {
+        controller.setSnapsAnchor(info.scenePoint(l.anchor(snapsLeft: left)))
     }
 
     /// A sting: the snaps row flashes crimson for a beat.
@@ -239,7 +253,7 @@ struct ScoreBlock: View {
     var body: some View {
         VStack(alignment: trailing ? .trailing : .leading, spacing: 0) {
             Text(AppRules.formatted(score))
-                .font(SnapType.number(compact ? 36 : 44))
+                .font(SnapType.number(compact ? 32 : 40))
                 .foregroundStyle(SnapTheme.cream)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
@@ -247,9 +261,11 @@ struct ScoreBlock: View {
                 .animation(.easeOut(duration: 0.25), value: score)
                 .snapLegible()
             Text(passedBest ? "NEW BEST" : (best > 0 ? "BEST " + AppRules.formatted(best) : "PROTEIN"))
-                .font(.system(size: compact ? 11 : 13, weight: .heavy, design: .rounded))
+                .font(.system(size: compact ? 11 : 12, weight: .heavy, design: .rounded))
                 .kerning(0.8)
                 .foregroundStyle(passedBest ? SnapTheme.gold : SnapTheme.mist)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
                 .snapLegible()
         }
         .accessibilityElement(children: .ignore)
@@ -257,16 +273,18 @@ struct ScoreBlock: View {
     }
 }
 
-/// The chain multiplier chip ("Chain ×2"). Sized by its content (`.fixedSize()`, REVIEW-1 #2): never "Chain…".
+/// The chain multiplier chip ("Chain ×2"; `short`: "×2" with the link, where the cilia leave less room). Sized by its
+/// content (`.fixedSize()`, REVIEW-1 #2).
 struct ChainChip: View {
     let multiplier: Double
     let compact: Bool
+    var short = false
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "link")
                 .font(.system(size: compact ? 12 : 14, weight: .heavy))
-            Text("Chain " + AppRules.multiplierText(multiplier))
+            Text((short ? "" : "Chain ") + AppRules.multiplierText(multiplier))
                 .font(.system(size: compact ? 14 : 17, weight: .heavy, design: .rounded).monospacedDigit())
                 .lineLimit(1)
         }
@@ -277,86 +295,113 @@ struct ChainChip: View {
                                                   endPoint: .bottom)))
         .overlay(Capsule().stroke(SnapTheme.goldDeep, lineWidth: 1.5))
         .fixedSize()
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Chain " + AppRules.multiplierText(multiplier))
     }
 }
 
-/// The snaps as little trap icons (up to 12): filled for each snap left, hollow up to the start. The next snap to go
-/// (the last filled one) drains with hunger (GAME-DESIGN §5 "Hunger"): its fill sinks and greys as a wilt nears.
-/// The numeral has a fixed box (REVIEW-1 #3: "12" never clips); 11–12 slots use the small glyph; a short phone wraps
-/// the row into two rows of six.
+/// The snaps: every snap the trap can hold (`Tuning.maxSnaps` 14) as mini closed traps in two rows of seven, filled
+/// for each snap left, a grey outline for each empty slot (REVIEW-2 #11). The next snap to go (the last full one)
+/// drains with hunger and, 3 s before it wilts, pulses crimson while the numeral ticks red. The numeral sits on the
+/// inner side of the lower row. Drawn at the layout's absolute positions over the whole canvas.
 struct SnapsRow: View {
     let left: Int
-    let max: Int
-    let trailing: Bool
-    var rows: Int = 1
+    let layout: HUDLayout
+    let size: CGSize
     /// 0 just fed … 1 a snap wilts.
     var hunger: Double = 0
+    var hungry = false
+    var reduceMotion = false
 
-    static func slots(left: Int, max: Int) -> Int {
-        Swift.min(Swift.max(Swift.max(left, Tuning.startSnaps), 0), Swift.max(max, 1))
+    /// The hungry pulse: 1.6 Hz.
+    static let pulseHz: Double = 1.6
+
+    /// The numeral's tick: a bump at the start of every second, fading over a quarter of it. Pure; tested.
+    static func tick(at t: Double) -> Double {
+        guard t.isFinite else { return 1 }
+        let f = t - t.rounded(.down)
+        return 1 + 0.28 * max(0, 1 - f / 0.25)
     }
 
     var body: some View {
-        let count = Self.slots(left: left, max: max)
-        let icon = rows > 1 ? HUDLayout.snapIconSmall : HUDLayout.glyphSize(slots: count)
-        let perRow = rows > 1 ? (count + 1) / 2 : count
+        let count = HUDLayout.slotCount
         let drain = Swift.min(Swift.max(hunger.isFinite ? hunger : 0, 0), 1)
-        HStack(spacing: 4) {
-            if trailing { Spacer(minLength: 0) }
-            Text("\(Swift.max(left, 0))")
-                .font(.system(size: 15, weight: .heavy, design: .rounded).monospacedDigit())
-                .foregroundStyle(left <= 1 ? SnapTheme.danger : SnapTheme.cream)
-                .lineLimit(1)
-                .fixedSize()
-                .snapLegible()
-                .frame(width: HUDLayout.snapNumeralW, alignment: trailing ? .trailing : .leading)
-            VStack(alignment: trailing ? .trailing : .leading, spacing: 6) {
-                ForEach(0..<Swift.max(rows, 1), id: \.self) { r in
-                    HStack(spacing: HUDLayout.snapGap) {
-                        ForEach(Swift.min(r * perRow, count)..<Swift.min((r + 1) * perRow, count), id: \.self) { i in
-                            SnapSlot(filled: i < left, drain: i == left - 1 ? drain : 0, size: icon)
-                        }
-                    }
+        let still = reduceMotion || AppTrace.enabled
+        let shown = Swift.max(left, 0)
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: still || !hungry)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            let pulse = hungry ? (still ? 1 : (sin(t * 2 * Double.pi * Self.pulseHz) + 1) / 2) : 0
+            let bump = hungry && !still ? Self.tick(at: t) : 1
+            ZStack {
+                ForEach(0..<count, id: \.self) { i in
+                    SnapSlot(filled: i < shown, drain: i == shown - 1 ? drain : 0, hot: i == shown - 1 ? pulse : 0,
+                             size: layout.glyph)
+                        .position(layout.glyphCenter(i))
                 }
+                Text("\(shown)")
+                    .font(.system(size: layout.glyph > 18 ? 17 : 15, weight: .heavy, design: .rounded).monospacedDigit())
+                    .foregroundStyle(shown <= 1 || hungry ? SnapTheme.danger : SnapTheme.cream)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .scaleEffect(bump)
+                    .snapLegible()
+                    .frame(width: layout.numeral.width, height: layout.numeral.height,
+                           alignment: layout.trailing ? .trailing : .leading)
+                    .position(x: layout.numeral.midX, y: layout.numeral.midY)
             }
-            if !trailing { Spacer(minLength: 0) }
+            .frame(width: size.width, height: size.height)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(Swift.max(left, 0)) snaps left" + (drain > 0.75 ? ", hungry" : ""))
+        .accessibilityLabel("\(shown) snaps left" + (hungry ? ", hungry" : ""))
     }
 }
 
-/// One snap glyph: filled (crimson), spent (dark), or draining (`drain` 0…1 of its fill gone, greyed).
-struct SnapSlot: View {
-    let filled: Bool
-    var drain: Double = 0
-    let size: CGFloat
+/// The lesson's last card rings the snaps row ("These are your snaps", REVIEW-2 #12).
+struct SnapsRing: View {
+    let rect: CGRect
+    var reduceMotion = false
 
     var body: some View {
-        let h = size * 0.82
-        let left = CGFloat(1 - Swift.min(Swift.max(drain, 0), 1))
-        ZStack {
-            SnapGlyph().fill(Color.black.opacity(0.35))
-            if filled {
-                SnapGlyph()
-                    .fill(LinearGradient(colors: [SnapTheme.pink, SnapTheme.crimson], startPoint: .top,
-                                         endPoint: .bottom))
-                    .saturation(1 - drain * 0.85)
-                    .mask(alignment: .bottom) {
-                        Rectangle().frame(height: h * left)
-                    }
+        let still = reduceMotion || AppTrace.enabled
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: still)) { context in
+            let t = still ? 0.25 : context.date.timeIntervalSinceReferenceDate
+            let pulse = CGFloat((sin(t * 2 * Double.pi / LessonPointer.period) + 1) / 2)
+            let r = rect.insetBy(dx: -10 - 4 * pulse, dy: -10 - 4 * pulse)
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.black.opacity(0.35), lineWidth: 6)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(SnapTheme.limeLight.opacity(0.6 + 0.4 * Double(pulse)), lineWidth: 3.5)
             }
-            SnapGlyph().stroke(filled ? (drain > 0.75 ? SnapTheme.pink : SnapTheme.lime)
-                                      : SnapTheme.haze.opacity(0.6), lineWidth: 1.5)
+            .frame(width: r.width, height: r.height)
+            .position(x: r.midX, y: r.midY)
         }
-        .frame(width: size, height: h)
+        .accessibilityHidden(true)
     }
 }
 
-/// The hint (or the run-start line): up to two short lines on a cream plate (warnings on crimson).
+/// The first Feast's one-time label over the snaps ("+1 snap", REVIEW-2 #12).
+struct SnapGainTag: View {
+    let text: String
+    let compact: Bool
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: compact ? 15 : 18, weight: .black, design: .rounded))
+            .foregroundStyle(SnapTheme.ink)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(SnapTheme.limeLight))
+            .overlay(Capsule().stroke(SnapTheme.lime, lineWidth: 1.5))
+            .fixedSize()
+            .shadow(color: SnapTheme.shadow.opacity(0.5), radius: 6, y: 2)
+    }
+}
+
+/// The hint (or the run-start line): up to three short lines on a cream plate (warnings on crimson). REVIEW-2 #3:
+/// never truncated (`HintFit`, tested for every line at both plate widths).
 struct HintPlate: View {
-    let hint: TrapHint?
+    let hint: HUDHint?
     let banner: String?
     let touch: Bool
     let compact: Bool
@@ -364,15 +409,16 @@ struct HintPlate: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: compact ? 18 : 22, style: .continuous)
         ZStack {
-            if let hint, let text = AppRules.hintText(hint, touch: touch) {
-                let warn = AppRules.hintIsWarning(hint)
+            if let hint, let text = AppRules.hudHintText(hint, touch: touch) {
+                let warn = AppRules.hudHintIsWarning(hint)
                 Text(text)
                     .font(SnapType.hint(compact))
                     .foregroundStyle(warn ? SnapTheme.cream : SnapTheme.ink)
                     .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
-                    .padding(.horizontal, 12)
+                    .lineLimit(HintFit.maxLines)
+                    .minimumScaleFactor(0.8)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, HintFit.horizontalPadding)
                     .padding(.vertical, 7)
                     .background(shape.fill(warn ? SnapTheme.crimson : SnapTheme.cream))
                     .overlay(shape.stroke(warn ? SnapTheme.pink : SnapTheme.lime, lineWidth: 2))
@@ -385,9 +431,10 @@ struct HintPlate: View {
                     .font(SnapType.headline(compact))
                     .foregroundStyle(SnapTheme.cream)
                     .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
-                    .padding(.horizontal, 12)
+                    .lineLimit(HintFit.maxLines)
+                    .minimumScaleFactor(0.8)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, HintFit.horizontalPadding)
                     .padding(.vertical, 7)
                     .background(shape.fill(SnapTheme.surface.opacity(0.85)))
                     .overlay(shape.stroke(SnapTheme.lime.opacity(0.4), lineWidth: 1.5))
@@ -397,6 +444,43 @@ struct HintPlate: View {
         }
         .animation(.easeOut(duration: 0.18), value: hint)
         .animation(.easeOut(duration: 0.25), value: banner)
+    }
+}
+
+/// Measures a hint line as the plate sets it (SnapType.hint: SF Rounded Heavy 19 / 23 pt), so a test can prove no
+/// line is ever cut (REVIEW-2 #3: "Last snap — make i…").
+enum HintFit {
+    static let maxLines = 3
+    static let horizontalPadding: CGFloat = 12
+
+    static func font(compact: Bool) -> UIFont {
+        let size: CGFloat = compact ? 19 : 23
+        let base = UIFont.systemFont(ofSize: size, weight: .heavy)
+        guard let rounded = base.fontDescriptor.withDesign(.rounded) else { return base }
+        return UIFont(descriptor: rounded, size: size)
+    }
+
+    /// The lines `text` wraps to on a plate `plateWidth` wide.
+    static func lines(_ text: String, plateWidth: CGFloat, compact: Bool) -> Int {
+        let f = font(compact: compact)
+        let w = max(plateWidth - 2 * horizontalPadding, 1)
+        let rect = (text as NSString).boundingRect(with: CGSize(width: w, height: .greatestFiniteMagnitude),
+                                                   options: [.usesLineFragmentOrigin, .usesFontLeading],
+                                                   attributes: [.font: f], context: nil)
+        return max(Int((rect.height / max(f.lineHeight, 1) - 0.05).rounded(.up)), 1)
+    }
+
+    /// The widest single word (a word wider than the plate would be broken or cut).
+    static func longestWord(_ text: String, compact: Bool) -> CGFloat {
+        let f = font(compact: compact)
+        let widths = text.split(separator: " ").map { (String($0) as NSString).size(withAttributes: [.font: f]).width }
+        return widths.max() ?? 0
+    }
+
+    /// Fits in `maxLines` lines with every word whole.
+    static func fits(_ text: String, plateWidth: CGFloat, compact: Bool) -> Bool {
+        lines(text, plateWidth: plateWidth, compact: compact) <= maxLines
+            && longestWord(text, compact: compact) <= plateWidth - 2 * horizontalPadding
     }
 }
 
@@ -519,13 +603,16 @@ struct ClosingCard: View {
     }
 }
 
+
 // MARK: - The First Bite lesson
 
 /// One sentence per step, the step number, praise (green-gold) or a warning (crimson), and Skip on every step. Only
-/// Skip takes touches (QA-1 #11): a tap anywhere else on the card reaches the scene (tap to snap on phones).
+/// Skip takes touches (QA-1 #11): a tap anywhere else on the card reaches the scene (tap to snap on phones). On a
+/// hinge, step 2 shows the 160° → 138° clap beside its line (ROUND-3 founder call).
 struct LessonCard: View {
     let lesson: LessonDisplay
     let compact: Bool
+    var reduceMotion = false
     let onSkip: () -> Void
     var onHeight: (CGFloat) -> Void = { _ in }
 
@@ -538,21 +625,31 @@ struct LessonCard: View {
                 // Room for the Skip button (drawn over the card, the one hit-testable part).
                 Color.clear.frame(width: lesson.allowsSkip ? SnapTheme.minTap : 0, height: 30)
             }
-            Text(lesson.line)
-                .font(SnapType.headline(compact))
-                .foregroundStyle(SnapTheme.cream)
-                .fixedSize(horizontal: false, vertical: true)
-            if let praise = lesson.praise {
-                Text(praise)
-                    .font(SnapType.hint(compact))
-                    .foregroundStyle(SnapTheme.gold)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .transition(.scale(scale: 0.8).combined(with: .opacity))
-            } else if let warning = lesson.warning {
-                Text(warning)
-                    .font(SnapType.body(compact))
-                    .foregroundStyle(SnapTheme.pink)
-                    .transition(.opacity)
+            HStack(alignment: .top, spacing: compact ? 8 : 12) {
+                VStack(alignment: .leading, spacing: compact ? 4 : 6) {
+                    Text(lesson.line)
+                        .font(SnapType.headline(compact))
+                        .foregroundStyle(SnapTheme.cream)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let praise = lesson.praise {
+                        Text(praise)
+                            .font(SnapType.hint(compact))
+                            .foregroundStyle(SnapTheme.gold)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .transition(.scale(scale: 0.8).combined(with: .opacity))
+                    } else if let warning = lesson.warning {
+                        Text(warning)
+                            .font(SnapType.body(compact))
+                            .foregroundStyle(SnapTheme.pink)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .transition(.opacity)
+                    }
+                }
+                if lesson.showsClap {
+                    Spacer(minLength: 0)
+                    DuoClapDiagram(reduceMotion: reduceMotion)
+                        .frame(width: compact ? 84 : 104, height: compact ? 66 : 82)
+                }
             }
         }
         .snapCard(padding: pad, radius: 20)
@@ -586,34 +683,62 @@ private struct LessonCardHeightKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
-/// The lesson's last card: "Snaps run out. Big bites earn them back." Then Feed.
+/// The lesson's last card: "Snaps run out. Big bites earn them back.", the four rules, and a pointer to the snaps row
+/// (ringed on screen: REVIEW-2 #12). Then Feed.
 struct LessonFinalCard: View {
     @ObservedObject var controller: GameController
     let compact: Bool
+    /// The HUD hugs the right edge (the pointer arrow aims at the snaps' corner).
+    var trailing = true
+
+    static let rules = "Every snap costs one. Three bugs in one bite give one back. Bees cost one more. "
+        + "Wait too long and a snap wilts."
+    static let snapsLine = "These are your snaps"
 
     var body: some View {
-        VStack(spacing: compact ? 10 : 14) {
+        VStack(spacing: compact ? 8 : 14) {
             SnapOverline(text: "First Bite done", compact: compact, color: SnapTheme.gold)
             Text(LessonScript.line(.done, touch: controller.touchWording))
                 .font(SnapType.title(compact))
                 .foregroundStyle(SnapTheme.cream)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Every snap costs one. Three bugs in one bite give one back. Bees cost one more. "
-                 + "Wait too long and a snap wilts.")
+            Text(Self.rules)
                 .font(SnapType.body(compact))
                 .foregroundStyle(SnapTheme.mist)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            SnapButton(kind: .primary, height: compact ? 56 : SnapTheme.primaryHeight, compact: compact,
-                       action: { controller.finishLesson() }) {
-                Text("Start feeding")
+            HStack(spacing: 6) {
+                Text(Self.snapsLine)
+                    .font(SnapType.body(compact))
+                    .foregroundStyle(SnapTheme.limeLight)
+                Image(systemName: trailing ? "arrow.down.right" : "arrow.down.left")
+                    .font(.system(size: compact ? 14 : 17, weight: .heavy))
+                    .foregroundStyle(SnapTheme.limeLight)
             }
-            SnapButton(kind: .quiet, height: SnapTheme.minTap, compact: compact,
-                       action: { controller.finishLessonHome() }) {
-                Text("Home")
+            .accessibilityElement(children: .combine)
+            if compact {
+                // Side by side on a short phone, so the card stays clear of the snaps row it points at.
+                HStack(spacing: 8) {
+                    SnapButton(kind: .secondary, height: 52, compact: true, action: { controller.finishLessonHome() }) {
+                        Text("Home")
+                    }
+                    .frame(width: 96)
+                    SnapButton(kind: .primary, height: 52, compact: true, action: { controller.finishLesson() }) {
+                        Text("Start feeding")
+                    }
+                }
+            } else {
+                SnapButton(kind: .primary, height: SnapTheme.primaryHeight, compact: false,
+                           action: { controller.finishLesson() }) {
+                    Text("Start feeding")
+                }
+                SnapButton(kind: .quiet, height: SnapTheme.minTap, compact: false,
+                           action: { controller.finishLessonHome() }) {
+                    Text("Home")
+                }
             }
         }
-        .snapCard(padding: compact ? 16 : 22, radius: 28)
+        .snapCard(padding: compact ? 14 : 22, radius: 28)
     }
 }

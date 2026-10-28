@@ -89,9 +89,54 @@ enum AppRules {
         case .openUp: return touch ? nil : "Open up to reset"
         case .beeInside: return "Bee! Wait…"
         case .crowd: return "Now!"
-        case .lastSnap: return "Last snap — make it count"
+        case .lastSnap: return "Last snap! Make it count"
         case .hungry: return "Hungry… bite!"
         }
+    }
+
+    /// The plate's words for an App hint (Core's, the first wave's fold line, the free sting's toast). Pure; tested.
+    static func hudHintText(_ hint: HUDHint, touch: Bool) -> String? {
+        switch hint {
+        case let .trap(h): return hintText(h, touch: touch)
+        // ROUND-3 founder call: the Duo's fold is the input, so the first wave says so (phones keep the tap).
+        case .foldInput: return touch ? "Tap to snap" : "Snap the halves together"
+        case .beesCost: return "Bees cost a snap!"
+        }
+    }
+
+    static func hudHintIsWarning(_ hint: HUDHint) -> Bool {
+        switch hint {
+        case let .trap(h): return hintIsWarning(h)
+        case .foldInput: return false
+        case .beesCost: return true
+        }
+    }
+
+    /// Every line the hint plate can show, on both inputs (REVIEW-2 #3: the no-truncation test renders each one).
+    static var allHintCopy: [String] {
+        let core: [TrapHint] = [.bendALittle, .quick, .openUp, .beeInside, .crowd, .lastSnap, .hungry]
+        var out: [String] = []
+        for touch in [false, true] {
+            for h in core {
+                if let t = hintText(h, touch: touch), !out.contains(t) { out.append(t) }
+            }
+            for h in [HUDHint.foldInput, HUDHint.beesCost] {
+                if let t = hudHintText(h, touch: touch), !out.contains(t) { out.append(t) }
+            }
+        }
+        return out
+    }
+
+    /// The first wave's "Snap the halves together" (phones: "Tap to snap"): Feed and the Daily only, in the first
+    /// wave, before the run's first snap, once the run-start line has gone, and never over one of Core's hints.
+    /// Pure; tested.
+    static func showsFoldHint(mode: RunMode, wave: Int, snapsMade: Int, time: Double, after banner: Double,
+                              coreHint: TrapHint?) -> Bool {
+        switch mode {
+        case .feed, .daily: break
+        case .attract, .lesson: return false
+        }
+        return wave <= 1 && snapsMade == 0 && time >= banner && coreHint == nil
     }
 
     /// Warnings get the crimson plate; the rest the cream one.
@@ -128,6 +173,35 @@ enum AppRules {
         return PlantRanks.rank(forLifetimeBugs: max(lifetimeBugs, 0)) == 0 ? sproutStartSnaps : nil
     }
 
+    /// Sprout's very first Feed run (ROUND-3 founder call, REVIEW-2 #9): it never wilts and its first bee is free.
+    /// Pure; tested.
+    static func isSproutFirstRun(mode: RunMode, runs: Int, lifetimeBugs: Int) -> Bool {
+        guard case .feed = mode else { return false }
+        return runs <= 0 && PlantRanks.rank(forLifetimeBugs: max(lifetimeBugs, 0)) == 0
+    }
+
+    /// A sting that cost nothing in a scored run (Sprout's free first bee): the "Bees cost a snap!" toast. The lesson's
+    /// stings are free too, but it says "Bzzt! Never eat a bee." itself. Pure; tested.
+    static func isFreeSting(_ event: TrapEvent, mode: RunMode) -> Bool {
+        guard case let .stung(_, _, cost) = event, cost <= 0 else { return false }
+        switch mode {
+        case .feed, .daily: return true
+        case .attract, .lesson: return false
+        }
+    }
+
+    /// The snaps the HUD shows: Core's count plus the Scene's in-flight offset (Scene R3 #14), within 0…max.
+    /// Pure; tested.
+    static func shownSnaps(_ left: Int, offset: Int, max m: Int) -> Int {
+        min(max(left + offset, 0), max(m, 1))
+    }
+
+    /// The one-time label on the first Feast's flying glyph ("+1 snap", "+2 snaps"). Pure; tested.
+    static func snapGainText(_ n: Int) -> String {
+        let k = max(n, 1)
+        return "+\(k) \(k == 1 ? "snap" : "snaps")"
+    }
+
     // MARK: Short labels (tiles and stats)
 
     /// A species' name for small tiles ("Scarab", not "Golden Scarab"). Pure; tested.
@@ -144,11 +218,23 @@ enum AppRules {
         return "\(bugs) \(bugs == 1 ? "bug" : "bugs") · \(formatted(max(points, 0)))"
     }
 
-    /// Results' longest chain as the multiplier it built: "×1.5 (1 bite)", "×2 (2 bites)"; "–" for none.
-    /// Pure; tested.
+    /// Results' best chain as the multiplier it built (REVIEW-2 #24), under the label "Best chain": "×1.5 · 1 big
+    /// bite", "×2 · 2 big bites"; "–" for none. Pure; tested.
     static func chainText(longest n: Int) -> String {
         guard n > 0 else { return "–" }
-        return multiplierText(TrapRules.chainMultiplier(n)) + " (\(n) \(n == 1 ? "bite" : "bites"))"
+        let m = multiplierText(TrapRules.chainMultiplier(n))
+        return m + " · \(n) big \(n == 1 ? "bite" : "bites")"
+    }
+
+    /// "A" or "An" before a number said aloud ("An 8-bug FEAST", "An 11-bug…", "A 5-bug…"). Pure; tested.
+    static func article(_ n: Int) -> String {
+        let vowelSound = n == 8 || n == 11 || n == 18 || (80...89).contains(n) || (800...899).contains(n)
+        return vowelSound ? "An" : "A"
+    }
+
+    /// "was 3,200" beside Results' "New best!" (REVIEW-2 #24). Pure; tested.
+    static func previousBestText(_ previous: Int) -> String? {
+        previous > 0 ? "was " + formatted(previous) : nil
     }
 
     /// Under the rank title: what grows it next ("Catch 30 bugs to grow", "12 more bugs to Nibbler"). Pure; tested.
@@ -285,21 +371,32 @@ enum AppRules {
     /// 1.5 pt of a free drop: QA-1 #3, REVIEW-1 #8). The drop nearest the slot's spot that is free (no occupant) and not
     /// in `taken` (drops already given to this step's other bugs). Falls back to the spot when there's no free drop.
     /// Returns the drop id used (nil: the fallback). Pure; tested.
+    /// The lesson prefers drops inside this normalised radius (the rim starts at 0.84).
+    static let lessonInnerRadius: Double = 0.74
+
     static func lessonSpot(slot: Int, geometry g: TrapGeometry, nectar: [NectarDrop],
                            taken: Set<Int>) -> (entry: CGPoint, target: CGPoint, drop: Int?) {
         let spot = lessonSpot(slot: slot, geometry: g).target
-        var best: NectarDrop?
-        var bestD = Double.infinity
-        for d in nectar where d.occupant == nil && !taken.contains(d.id) && g.contains(d.position) {
-            // Keep the lesson's bugs off the crease (the midrib band distorts small sprites on a Duo).
-            guard abs(d.position.x - g.center.x) > ScreenLayout.creaseHalfWidth + 8 else { continue }
-            let dist = Double(hypot(d.position.x - spot.x, d.position.y - spot.y))
-            if dist < bestD {
-                bestD = dist
-                best = d
+        // R3 (REVIEW-2 #18): the lesson's bugs sip in the middle of a lobe, never on the rim, where the pointer and the
+        // bee's halo read plainly. A rim drop only when no inner one is free.
+        func pick(maxRadius: Double) -> NectarDrop? {
+            var best: NectarDrop?
+            var bestD = Double.infinity
+            for d in nectar where d.occupant == nil && !taken.contains(d.id) && g.contains(d.position) {
+                // Keep the lesson's bugs off the crease (the midrib band distorts small sprites on a Duo).
+                guard abs(d.position.x - g.center.x) > ScreenLayout.creaseHalfWidth + 8 else { continue }
+                guard g.normalizedRadius(d.position) <= maxRadius else { continue }
+                let dist = Double(hypot(d.position.x - spot.x, d.position.y - spot.y))
+                if dist < bestD {
+                    bestD = dist
+                    best = d
+                }
             }
+            return best
         }
-        guard let drop = best else { return (lessonEntry(for: spot, geometry: g), spot, nil) }
+        guard let drop = pick(maxRadius: lessonInnerRadius) ?? pick(maxRadius: 1) else {
+            return (lessonEntry(for: spot, geometry: g), spot, nil)
+        }
         return (lessonEntry(for: drop.position, geometry: g), drop.position, drop.id)
     }
 
@@ -320,9 +417,11 @@ enum AppRules {
 
     /// The lesson's pointer targets: every bug in play (scene space, rounded so the HUD publishes only on movement),
     /// bees marked (they get the "wait" ring). Pure; tested.
+    /// R3: while a bee is in play only the bee is pointed at (its flies are the temptation, not the target).
     static func lessonTargets(_ s: TrapSnapshot) -> [LessonTarget] {
         var out: [LessonTarget] = []
-        for b in s.bugs where inPlay(b.activity) {
+        let beeInPlay = s.bugs.contains { inPlay($0.activity) && $0.species.isProtected }
+        for b in s.bugs where inPlay(b.activity) && (!beeInPlay || b.species.isProtected) {
             let p = CGPoint(x: (b.position.x / 2).rounded() * 2, y: (b.position.y / 2).rounded() * 2)
             out.append(LessonTarget(id: b.id, point: p, bee: b.species.isProtected,
                                     sipping: b.activity == .sipping))
@@ -337,7 +436,8 @@ enum AppRules {
         let scarabs = r.caughtBySpecies[BugSpecies.goldenScarab.rawValue] ?? 0
         let dragonflies = r.caughtBySpecies[BugSpecies.dragonfly.rawValue] ?? 0
         if r.biggestBite >= 5 {
-            return "A \(r.biggestBite)-bug FEAST in one bite: \(formatted(r.bestBitePoints)) protein."
+            return "\(article(r.biggestBite)) \(r.biggestBite)-bug FEAST in one bite: "
+                + "\(formatted(r.bestBitePoints)) protein."
         }
         if scarabs > 0 { return "You caught a Golden Scarab. Lucky trap!" }
         if dragonflies > 0 { return "A dragonfly! Only the sharpest snaps catch those." }

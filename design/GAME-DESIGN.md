@@ -94,27 +94,30 @@ notice anything. Touch snaps (no hinge) count as `d = 0.09 s`.
 **Creep rule:** while creeping (above), each bug in the zone with `nerve ≤ c` takes off at once.
 
 ## 5. Snaps, score and chain
-- A run starts with **10 snaps** (shown as little trap icons; max held 12).
+- A run starts with **10 snaps** (shown as little trap icons; max held **14**, two rows of 7; R3).
 - **Every snap costs 1.** Then:
   - caught ≥ 3 bugs: **+1 back** ("Feast!");
   - caught ≥ 5: **+2 back**;
-  - a Golden Scarab: **+2 back**;
+  - a Golden Scarab: **+2 back**; a ladybird: **+1 back**;
   - a **bee** in the bite: it is let go, unharmed and cross ("Bzzt!"), costs **1 more snap**, and breaks the chain;
   - a **wasp** in the bite stings: **2 more snaps**, breaks the chain.
+  - **A bite with a stinger in it (R3)** gets **no refund at all** (no Feast, scarab or ladybird snaps) and scores at
+    **×1**; the sting cost stays. The pop reads "Stung! · +172". Eating a bee is never the best move.
 - **Score per snap** = (sum of the caught bugs' points) × (number of bugs caught) × chain multiplier.
   - "Double ×2", "Triple ×3", "Quad ×4", "FEAST ×5+" on screen.
-- **Chain:** each consecutive snap that catches ≥ 1 bug and no stinger adds 0.5 to the multiplier (×1, ×1.5, ×2 … up
-  to ×4). A dry snap (nothing caught) or a stinger resets it to ×1.
-- **Chain (R2 rule):** only a bite of ≥ 2 bugs adds +0.5; a 1-bug clean bite holds the chain; a dry snap or a stinger
-  breaks it.
-- **Hunger (R2):** patience can't be infinite. With no catching bite for the phase's wilt time (morning 15 s, noon
-  14 s, dusk 12 s, night 10 s), one snap **wilts** (−1) and the timer restarts. A dry snap doesn't reset the timer; any
-  catch does. 3 s before a wilt: `hungry` (the next snap glyph drains, "Hungry… bite!"). The lesson and attract never
-  wilt.
-- **First runs (R2):** while the plant rank is Sprout, a run starts with 12 snaps instead of 10.
+- **Chain:** only a clean bite of ≥ 2 bugs adds 0.5 to the multiplier (×1, ×1.5, ×2 … ×4 at the 6th step, **×5 at the
+  8th**, the cap; R3). A clean 1-bug bite holds the chain; a dry snap or a stinger breaks it (×1).
+- **Hunger:** patience can't be infinite. With no catching bite for the phase's wilt time (R3: morning **18 s**, noon
+  **16 s**, dusk **14 s**, night **12 s**), one snap **wilts** ("Too slow! −1 snap") and the timer restarts. The clock
+  only runs from the **first in-trap landing of a catchable bug after a catching bite** (and after the start), so an
+  empty trap (or one with only a bee in it) never gets hungry. A dry snap or a miss doesn't feed it; any catch does.
+  3 s before a wilt: `hungry` (the next snap glyph drains, "Hungry… bite!"). The lesson and attract never wilt.
+- **First runs:** while the plant rank is Sprout, a run starts with 12 snaps instead of 10. **Sprout run 1 (R3)** never
+  wilts, and its first bite with a bee in it costs no extra snap ("Bees cost a snap!").
 - **The run ends** when snaps reach 0: "Your trap is tired." The score is the **protein** total.
-- A typical casual run: 25–35 snaps, 2–3 minutes. The difficulty ramp (§6) ends runs; a perfect player still ends
-  around 6–8 minutes.
+- A typical casual run: 20–25 snaps, about 2 minutes (a Sprout's first run about 2.5). The late night (§6: reactions
+  × 0.96 per wave after wave 30 to a 0.25 floor, lingers × 0.92 to 0.2) ends runs; a perfect player ends around
+  5–7 minutes with at most a handful of wilts.
 
 ## 6. Waves and the day
 - Bugs come in **waves**: a group of 1–7 bugs every 3.0–4.5 s (overlapping). Each wave has a recipe from the wave

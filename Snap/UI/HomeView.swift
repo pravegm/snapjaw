@@ -9,6 +9,9 @@ struct HomeView: View {
     @ObservedObject var store: ProgressStore
     let info: AppCanvas
 
+    /// The caption under Home's clap diagram.
+    static let foldCaption = "Snap it shut a little"
+
     var body: some View {
         let c = info.isCompact
         let page = info.hudPage
@@ -66,7 +69,7 @@ struct HomeView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .snapLegible()
-            Text(controller.hasHinge ? "Snap it a little shut. It bites!" : "Tap the trap. It bites!")
+            Text(controller.showsFoldInput(info) ? "Snap it shut a little. It bites!" : "Tap the trap. It bites!")
                 .font(SnapType.caption(c))
                 .foregroundStyle(SnapTheme.mist)
                 .snapLegible()
@@ -104,10 +107,30 @@ struct HomeView: View {
         let today = controller.today
         let found = store.data.speciesFound
         return VStack(spacing: c ? 8 : 14) {
-            SnapButton(kind: .primary, height: c ? 58 : 70, compact: c, action: { controller.play() }) {
-                Label("Feed", systemImage: "fork.knife")
+            HStack(spacing: c ? 8 : 12) {
+                SnapButton(kind: .primary, height: c ? 58 : 70, compact: c, action: { controller.play() }) {
+                    Label("Feed", systemImage: "fork.knife")
+                }
+                .accessibilityHint("Start a run")
+                // ROUND-3 founder call: on a Duo the fold is the input, so Home shows it beside Feed.
+                if controller.showsFoldInput(info) {
+                    VStack(spacing: 2) {
+                        DuoClapDiagram(reduceMotion: controller.reduceMotion, showsAngle: false)
+                            .frame(width: c ? 72 : 92, height: c ? 40 : 50)
+                        Text(Self.foldCaption)
+                            .font(SnapType.caption(true))
+                            .foregroundStyle(SnapTheme.mist)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .snapLegible()
+                    }
+                    .frame(width: c ? 80 : 100)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Self.foldCaption)
+                }
             }
-            .accessibilityHint("Start a run")
             SnapButton(kind: .secondary, height: c ? 52 : 60, compact: c, action: { controller.show(.daily) }) {
                 HStack(spacing: 10) {
                     Image(systemName: "sun.max.fill").foregroundStyle(SnapTheme.gold)

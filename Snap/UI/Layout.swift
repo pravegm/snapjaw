@@ -159,135 +159,265 @@ struct AppCanvas: Equatable {
     }
 }
 
+// MARK: - The trap's outline (R3, REVIEW-2 #4: the HUD clears the cilia, not just the face)
+
+extension AppCanvas {
+    /// The green back's reach beyond the trap zone's edge (scene points). Scene R2's `TrapArt.exteriorWidth`, kept as
+    /// the App's own conservative constant: a thinner R3 back only adds room.
+    static let leafBack: CGFloat = 26
+    /// The HUD's glyphs and text stay at least this far from the cilia and the green back (REVIEW-2-duo P0 4).
+    static let ciliaClear: CGFloat = 8
+    /// The layout keeps this much (over `ciliaClear`): the outline is sampled every ≤ 3.5 pt and the cilia have width.
+    static let ciliaPad: CGFloat = 11
+
+    /// Screen points along the open trap's outer outline: the green back's edge and every cilium from root to tip,
+    /// curl included. The cilia come from the Scene's own `TrapArt.teeth`, so longer cilia move the HUD with them.
+    /// Pure; tested.
+    func trapOutline() -> [CGPoint] {
+        let g = layout.geometry
+        var pts: [CGPoint] = []
+        pts.reserveCapacity(1_900)
+        let rx = g.a + Self.leafBack
+        let ry = g.b + Self.leafBack
+        let n = 720
+        for i in 0..<n {
+            let t = CGFloat(i) / CGFloat(n) * 2 * CGFloat.pi
+            pts.append(screenPoint(CGPoint(x: g.center.x + rx * cos(t), y: g.center.y + ry * sin(t))))
+        }
+        let steps = 20
+        for side in [-1, 1] {
+            for tooth in TrapArt.teeth(side: side, geometry: g) {
+                let dx = cos(tooth.angle)
+                let dy = sin(tooth.angle)
+                // The tooth's own x axis once placed (`TrapArt.toothTransform` rotates by angle − π/2).
+                let sx = sin(tooth.angle)
+                let sy = -cos(tooth.angle)
+                let length = tooth.length
+                for k in 0...steps {
+                    let f = CGFloat(k) / CGFloat(steps)
+                    let bend = tooth.curl * length * 0.12 * f * f
+                    let p = CGPoint(x: tooth.root.x + dx * length * f + sx * bend,
+                                    y: tooth.root.y + dy * length * f + sy * bend)
+                    pts.append(screenPoint(p))
+                }
+            }
+        }
+        return pts
+    }
+
+    /// The outermost outline x among `points` whose y is in y0…y1 (right: the largest x; left: the smallest). Nil: no
+    /// point in the band. Pure; tested.
+    static func outlineReach(_ points: [CGPoint], y0: CGFloat, y1: CGFloat, right: Bool) -> CGFloat? {
+        let lo = min(y0, y1)
+        let hi = max(y0, y1)
+        var best: CGFloat?
+        for p in points where p.y >= lo && p.y <= hi {
+            if let b = best {
+                best = right ? max(b, p.x) : min(b, p.x)
+            } else {
+                best = p.x
+            }
+        }
+        return best
+    }
+
+    /// The distance from `rect` to the nearest of `points` (0 when one is inside it). Pure; tested.
+    static func clearance(_ rect: CGRect, from points: [CGPoint]) -> CGFloat {
+        var best = CGFloat.infinity
+        for p in points {
+            let dx = max(rect.minX - p.x, 0, p.x - rect.maxX)
+            let dy = max(rect.minY - p.y, 0, p.y - rect.maxY)
+            best = min(best, (dx * dx + dy * dy).squareRoot())
+        }
+        return best
+    }
+}
+
 // MARK: - The play HUD
 
-/// Where the HUD goes (screen points), in the outer corners of the HUD page, OFF the trap's face (REVIEW-1 #14):
-/// - the pause button in the top outer corner, the score beside it (pulled up, sized for six digits), the chain chip
-///   under the pause button;
-/// - the snaps row along the bottom outer edge (two rows of six on a short phone when one row would cover the rim);
-/// - the hint plate where it has the most room off the trap, the crease and the thumbs (REVIEW-1 #16): under the
-///   chain chip, or above the snaps row on the Duo (below the thumbs' band);
-/// - "Your trap is tired." centred on the HUD page, never on the crease (REVIEW-1 #11).
-/// Mirrored with "HUD on the left". Pure; tested (fold-clear, off the trap at 951 × 669, ≥ 56 pt pause).
+/// Where the HUD goes (screen points). R3 (REVIEW-2 #4): every glyph and line of text sits ≥ 8 pt off the cilia tips
+/// (the trap's real outline, `AppCanvas.trapOutline`), so on a Duo the HUD lives in the two outer corners of the HUD
+/// page, the only room the open trap leaves:
+/// - the top corner: the score (the widest spot), the pause button under it;
+/// - the bottom corner: the snaps in two rows of seven (`Tuning.maxSnaps` 14), the numeral on the inner side of the
+///   lower row, and the chain chip above them ("×2" alone when "Chain ×2" doesn't fit);
+/// - the hint on the HUD page's inner top, ≥ 24 pt off the crease and off the thumbs (REVIEW-2-duo P1 6); while the
+///   lesson card holds the top, at the inner bottom;
+/// - "Your trap is tired." centred on the HUD page, never on the crease.
+/// Mirrored with "HUD on the left". Pure; tested (fold-clear, cilia-clear at 951 × 669 on both sides, ≥ 56 pt pause).
 struct HUDLayout: Equatable {
     var pause: CGRect
+    /// The menus' back button: the top outer corner (Bug Book, Settings, the Daily).
+    var back: CGRect
     var score: CGRect
     var chain: CGRect
+    /// The chain chip shows the multiplier alone: too little room off the cilia for "Chain ×2".
+    var chainCompact: Bool
+    /// Everything the snaps take (the glyph rows and the numeral).
     var snaps: CGRect
+    /// The glyph rows, top first. The lower one also holds the numeral, on its inner side.
+    var snapRowRects: [CGRect]
+    var numeral: CGRect
+    /// The glyph's width (its height is `glyphAspect` of that).
+    var glyph: CGFloat
     var hint: CGRect
-    /// The hint while the lesson card is up (below the card).
+    /// The hint while the lesson card holds the top (the inner bottom).
     var lessonHint: CGRect
     var lesson: CGRect
     var card: CGRect
     var tired: CGRect
-    /// The snaps row wraps into two rows of six.
     var snapRows: Int
     /// The HUD hugs the right edge (false: the left edge, "HUD on the left").
     var trailing: Bool
 
     static let pauseSide: CGFloat = 56
-    /// Snap glyph sizes: 22 pt up to ten slots, 18 pt for 11–12 (REVIEW-1 #3), 18 pt in two rows.
-    static let snapIcon: CGFloat = 22
-    static let snapIconSmall: CGFloat = 18
-    static let snapGap: CGFloat = 4
-    /// The numeral's box (fixed: "12" never clips).
+    /// The snaps: rows of seven mini closed traps (REVIEW-2 #11, #23).
+    static let snapColumns = 7
+    static let snapGap: CGFloat = 3
+    static let snapRowGap: CGFloat = 5
+    /// Height over width: the Scene's snap glyph is drawn 30 × 22 (`TrapArt.snapGlyph`).
+    static let glyphAspect: CGFloat = 22.0 / 30.0
+    static let glyphDuo: CGFloat = 22
+    static let glyphPhone: CGFloat = 16
+    /// Glyphs shrink towards this when a row would touch the cilia.
+    static let glyphMin: CGFloat = 12
+    /// The numeral's box (fixed: "14" never clips).
     static let snapNumeralW: CGFloat = 30
-    /// The trap's face ends at radius 1 (cilia and the leaf outside it may pass under the HUD).
+    /// The trap's face ends at radius 1.
     static let clearRadius: CGFloat = 1.0
-    /// The hint plate is never narrower (two short lines).
-    static let hintMin: CGFloat = 96
+    /// The hint plate: three short lines at most. Never narrower than `hintMin`.
+    static let hintMin: CGFloat = 150
+    static let hintDuo: CGFloat = 250
+    static let hintPhone: CGFloat = 200
+    static let hintHeightDuo: CGFloat = 100
+    static let hintHeightPhone: CGFloat = 84
+    /// "Chain ×4.5" and "×4.5" chips.
+    static let chainFullDuo: CGFloat = 136
+    static let chainFullPhone: CGFloat = 118
+    static let chainShortDuo: CGFloat = 84
+    static let chainShortPhone: CGFloat = 72
 
-    static func glyphSize(slots: Int) -> CGFloat { slots > 10 ? snapIconSmall : snapIcon }
+    /// The glyphs the row shows: every snap the trap can hold (`Tuning.maxSnaps`), at most two rows.
+    static var slotCount: Int { min(max(Tuning.maxSnaps, 1), snapColumns * 2) }
 
-    /// The snaps row's width for `slots` glyphs in `rows` rows. Pure; tested.
-    static func snapsWidth(slots: Int, rows: Int) -> CGFloat {
-        let perRow = rows > 1 ? (slots + 1) / 2 : slots
-        let icon = rows > 1 ? snapIconSmall : glyphSize(slots: slots)
-        let n = CGFloat(max(perRow, 1))
-        return snapNumeralW + 4 + n * icon + (n - 1) * snapGap
-    }
-
-    static func snapsHeight(rows: Int) -> CGFloat {
-        rows > 1 ? snapIconSmall * 0.82 * 2 + 6 : 30
+    /// The width of a row of `snapColumns` glyphs.
+    static func rowsWidth(glyph g: CGFloat) -> CGFloat {
+        CGFloat(snapColumns) * g + CGFloat(snapColumns - 1) * snapGap
     }
 
     static func make(_ c: AppCanvas) -> HUDLayout {
         let page = c.hudPage
         let right = !c.hudOnLeft
         let compact = c.isCompact
+        let fold = c.hasFold
+        let outline = c.trapOutline()
+        let pad = AppCanvas.ciliaPad
         let outer = right ? page.maxX : page.minX
-        func span(_ w: CGFloat) -> CGFloat { right ? outer - w : outer }   // x of a box hugging the outer edge
-        /// The width from the outer edge to where the trap's face (grown a touch) stops, over a band.
-        func room(_ y0: CGFloat, _ y1: CGFloat) -> CGFloat {
-            guard let reach = c.trapReach(y0: y0, y1: y1, right: right, grow: 1.02) else { return page.width }
-            let w = right ? outer - max(reach, page.minX) : min(reach, page.maxX) - outer
-            return min(max(w, 0), page.width)
+        // Glyphs and text may sit nearer the screen's edge than a button (there's nothing to tap).
+        let textOuter = right ? c.size.width - max(c.insets.trailing, 0) - (fold ? 14 : 8)
+                              : max(c.insets.leading, 0) + (fold ? 14 : 8)
+        func box(_ edge: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect {
+            CGRect(x: right ? edge - w : edge, y: y, width: w, height: h)
+        }
+        /// The width from `edge` inward before the outline (plus the pad) over the band y…y+h; never into the crease.
+        func room(_ edge: CGFloat, _ y: CGFloat, _ h: CGFloat) -> CGFloat {
+            let cap = right ? edge - page.minX : page.maxX - edge
+            guard let reach = AppCanvas.outlineReach(outline, y0: y - pad, y1: y + h + pad, right: right) else {
+                return max(cap, 0)
+            }
+            let w = right ? edge - (reach + pad) : (reach - pad) - edge
+            return min(max(w, 0), max(cap, 0))
         }
 
-        let pause = CGRect(x: span(pauseSide), y: c.top - 6, width: pauseSide, height: pauseSide)
-        // The score: beside the pause button, pulled up off the rim.
-        let scoreH: CGFloat = compact ? 50 : 58
-        let scoreY = c.top - 8
-        let scoreRoom = room(scoreY, scoreY + scoreH) - pauseSide - 6
-        let scoreW = max(min(compact ? 150 : 172, scoreRoom), 110)
-        let scoreX = right ? pause.minX - 6 - scoreW : pause.maxX + 6
-        let score = CGRect(x: scoreX, y: scoreY, width: scoreW, height: scoreH)
-        // The chain chip: under the pause button, hugging the outer edge (sized for "Chain ×4.5").
-        let chainW: CGFloat = compact ? 122 : 140
-        let chain = CGRect(x: span(chainW), y: pause.maxY + 6, width: chainW, height: compact ? 30 : 34)
-        // The snaps row: one row if it clears the trap's face, else two rows of six.
-        func snapsRect(rows: Int) -> CGRect {
-            let w = min(snapsWidth(slots: 12, rows: rows), page.width)
-            let h = snapsHeight(rows: rows)
-            return CGRect(x: span(w), y: c.bottom - h, width: w, height: h)
-        }
-        var rows = 1
-        var snaps = snapsRect(rows: 1)
-        if c.minTrapRadius(snaps) < clearRadius {
-            let two = snapsRect(rows: 2)
-            if c.minTrapRadius(two) > c.minTrapRadius(snaps) {
-                rows = 2
-                snaps = two
+        let back = CGRect(x: right ? outer - pauseSide : outer, y: c.top - 6, width: pauseSide, height: pauseSide)
+        // The score: the top outer corner, the widest spot off the cilia. The pause button goes under it.
+        let topY = max(c.insets.top, 0) + (fold ? 6 : 4)
+        let scoreH: CGFloat = compact ? 51 : 62
+        let scoreMax: CGFloat = compact ? 160 : 190
+        let scoreW = max(min(room(textOuter, topY, scoreH), scoreMax), 90)
+        let score = box(textOuter, topY, scoreW, scoreH)
+        let pause = CGRect(x: right ? outer - pauseSide : outer, y: score.maxY + 4, width: pauseSide,
+                           height: pauseSide)
+
+        // The snaps: rows of seven in the bottom outer corner, the numeral on the lower row's inner side. The glyphs
+        // shrink (rarely) until every row clears the cilia.
+        let rows = max((slotCount + snapColumns - 1) / snapColumns, 1)
+        let bottomY = c.size.height - max(c.insets.bottom, 0) - (fold ? 10 : 4)
+        func rowRects(_ g: CGFloat) -> [CGRect] {
+            let gh = g * glyphAspect
+            var out: [CGRect] = []
+            for r in 0..<rows {
+                let fromBottom = CGFloat(rows - 1 - r)
+                let y = bottomY - gh - fromBottom * (gh + snapRowGap)
+                let w = rowsWidth(glyph: g) + (r == rows - 1 ? snapNumeralW + 4 : 0)
+                out.append(box(textOuter, y, w, gh))
             }
+            return out
         }
-        // The hint (up to two short lines): the candidate with the most room off the trap, the crease and the
-        // thumbs. Never narrower than `hintMin`.
-        let hintH: CGFloat = compact ? 58 : 66
-        let hintMax: CGFloat = compact ? 280 : 340
-        let underChain = chain.maxY + 8
-        let aboveSnaps = snaps.minY - 8 - hintH
-        func plate(_ y: CGFloat) -> CGRect {
-            let w = max(min(room(y, y + hintH), hintMax), hintMin)
-            return CGRect(x: span(w), y: y, width: w, height: hintH)
+        var glyph: CGFloat = compact ? glyphPhone : glyphDuo
+        var rects = rowRects(glyph)
+        while glyph > glyphMin && rects.contains(where: { room(textOuter, $0.minY, $0.height) < $0.width }) {
+            glyph -= 1
+            rects = rowRects(glyph)
         }
-        let high = plate(underChain)
-        let low = plate(aboveSnaps)
-        let lowOK = aboveSnaps > underChain + hintH && !c.inThumbZone(low)
-        let hint = lowOK && low.width > high.width ? low : high
+        let lower = rects.last ?? box(textOuter, bottomY - 14, 200, 14)
+        let numeral = CGRect(x: right ? lower.minX : lower.maxX - snapNumeralW, y: min(lower.midY - 10, bottomY - 20),
+                             width: snapNumeralW, height: 20)
+        let snaps = rects.reduce(numeral) { $0.union($1) }
+
+        // The chain chip: above the snaps.
+        let chainH: CGFloat = compact ? 28 : 32
+        let chainY = (rects.first?.minY ?? bottomY) - 8 - chainH
+        let chainRoom = room(textOuter, chainY, chainH)
+        let fullW = compact ? chainFullPhone : chainFullDuo
+        let shortW = compact ? chainShortPhone : chainShortDuo
+        let chainCompact = chainRoom < fullW
+        let chain = box(textOuter, chainY, chainCompact ? shortW : fullW, chainH)
+
+        // The hint: the inner top of the HUD page (off the thumbs, the crease and the score).
+        let hintH = compact ? hintHeightPhone : hintHeightDuo
+        let beside = right ? score.minX - 8 - page.minX : page.maxX - (score.maxX + 8)
+        let hintW = max(min(compact ? hintPhone : hintDuo, beside, page.width), hintMin)
+        let hint = CGRect(x: right ? page.minX : page.maxX - hintW, y: c.top, width: hintW, height: hintH)
+        // The lesson card holds the top: its hint goes to the inner bottom, clear of the snaps.
+        let besideSnaps = right ? lower.minX - 8 - page.minX : page.maxX - (lower.maxX + 8)
+        let lessonHintW = max(min(hintW, besideSnaps), hintMin)
+        let lessonHint = CGRect(x: right ? page.minX : page.maxX - lessonHintW, y: bottomY - hintH,
+                                width: lessonHintW, height: hintH)
+
         let lessonW = max(page.width - pauseSide - 10, 160)
-        let lesson = CGRect(x: right ? page.minX : pause.maxX + 10, y: c.top - 4, width: lessonW,
+        let lesson = CGRect(x: right ? page.minX : page.maxX - lessonW, y: c.top - 4, width: lessonW,
                             height: compact ? 128 : 150)
-        // In the lesson the card holds the top: the hint goes low if it can, else under the card.
-        let lessonHint = lowOK ? low : plate(max(lesson.maxY, chain.maxY) + 8)
         let cardW = min(page.width, 380)
         let card = CGRect(x: page.midX - cardW / 2, y: c.top, width: cardW, height: max(c.bottom - c.top, 0))
         let tiredW = min(page.width, compact ? 300 : 360)
         let tiredH: CGFloat = compact ? 76 : 90
         let tired = CGRect(x: page.midX - tiredW / 2, y: c.size.height / 2 - tiredH / 2, width: tiredW, height: tiredH)
-        return HUDLayout(pause: pause, score: score, chain: chain, snaps: snaps, hint: hint, lessonHint: lessonHint,
+        return HUDLayout(pause: pause, back: back, score: score, chain: chain, chainCompact: chainCompact, snaps: snaps,
+                         snapRowRects: rects, numeral: numeral, glyph: glyph, hint: hint, lessonHint: lessonHint,
                          lesson: lesson, card: card, tired: tired, snapRows: rows, trailing: right)
     }
 
-    /// The centre (screen) of the snaps row's first glyph for `slots` glyphs: the Scene's economy anchor (the row's
-    /// leftmost live glyph). Pure; tested.
-    func firstGlyphCenter(slots: Int) -> CGPoint {
-        let icon = snapRows > 1 ? Self.snapIconSmall : Self.glyphSize(slots: slots)
-        let content = min(Self.snapsWidth(slots: slots, rows: snapRows), snaps.width)
-        let x0 = trailing ? snaps.maxX - content : snaps.minX
-        let y = snapRows > 1 ? snaps.minY + icon * 0.41 : snaps.midY
-        return CGPoint(x: x0 + Self.snapNumeralW + 4 + icon / 2, y: y)
+    /// The centre (screen) of glyph `i` (reading order: the top row first, left to right). Pure; tested.
+    func glyphCenter(_ i: Int) -> CGPoint {
+        guard !snapRowRects.isEmpty else { return CGPoint(x: snaps.midX, y: snaps.midY) }
+        let k = max(i, 0)
+        let r = min(k / Self.snapColumns, snapRowRects.count - 1)
+        let col = min(k - r * Self.snapColumns, Self.snapColumns - 1)
+        let rect = snapRowRects[r]
+        let x0 = trailing ? rect.maxX - Self.rowsWidth(glyph: glyph) : rect.minX
+        return CGPoint(x: x0 + CGFloat(col) * (glyph + Self.snapGap) + glyph / 2, y: rect.midY)
     }
 
-    /// Every rect the play HUD draws text or glyphs in (the fold-clear and trap-clear tests).
-    var textRects: [CGRect] { [score, chain, snaps, hint, tired] }
+    /// The Scene's economy anchor (`BogScene.hudSnapsAnchor`: Feast glyph flights, the sting crack, the wilt droop, the
+    /// row flash 90 pt right of it): the top row's first glyph, as the Scene's contract asks. Pure; tested.
+    func anchor(snapsLeft: Int) -> CGPoint {
+        _ = snapsLeft
+        return glyphCenter(0)
+    }
+
+    /// Every rect the play HUD draws text or glyphs in (the fold-clear test).
+    var textRects: [CGRect] { [score, chain, hint, tired, numeral] + snapRowRects }
+    /// What must clear the cilia by `AppCanvas.ciliaClear` (REVIEW-2-duo P0 4).
+    var ciliaRects: [CGRect] { [score, chain, numeral] + snapRowRects }
 }

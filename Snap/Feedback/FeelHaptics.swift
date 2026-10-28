@@ -150,6 +150,10 @@ enum FeelHapticBook {
         0.09 + 0.02 * Double(min(max(caught, 0), 6))
     }
 
+    /// R3: the rumble floor of a 1–2 bug CHOMP (was 0.84 for one bug). Under 0.9, so its held clamp (+0.1) stays below
+    /// a big bite's full 1.0: a bigger bite still rumbles harder.
+    static let smallBiteStrength: Float = 0.88
+
     /// The CHOMP: the strongest transient the phone has (1.0), then (R2) a deep, held **clamp** for the Scene's 50 ms
     /// hit-stop (the lobes pressed shut), the second tooth's tap on the sound's clack, and a heavy rumble that fades in
     /// three steps after the hit-stop (90 ms + 20 ms per bug, stronger with more bugs); one keen crunch tap per caught
@@ -158,7 +162,10 @@ enum FeelHapticBook {
     static func chomp(caught: Int) -> FeelHapticCue {
         let n = min(max(caught, 0), 8)
         let rumble = rumbleLength(caught: n)
-        let strength = min(0.8 + 0.04 * Float(n), 1)
+        let small = n >= 1 && n <= FeelSoundBook.smallBite
+        var strength = min(0.8 + 0.04 * Float(n), 1)
+        // R3: a small bite still has weight (a firmer rumble floor, and a settle tap on the sound's "nom").
+        if small { strength = max(strength, smallBiteStrength) }
         let third = rumble / 3
         let hold = Double(FeelSoundBook.hitStop)
         let clack = Double(FeelSoundBook.clackAt + FeelSoundBook.clackGap)
@@ -170,6 +177,9 @@ enum FeelHapticBook {
             .buzz(strength * 0.4, 0.12, at: hold + 2 * third, duration: third),
             .tap(0.75, 0.9, at: clack),
         ]
+        if small {
+            notes.append(.tap(0.6, 0.35, at: hold))
+        }
         for index in 0..<min(n, 5) {
             notes.append(.tap(0.35, 1.0, at: Double(FeelSoundBook.crunchDelay(index: index))))
         }
@@ -190,13 +200,42 @@ enum FeelHapticBook {
         .tap(0.7, 0.8, at: Double(FeelSoundBook.feastAt)), .tap(0.85, 0.9, at: Double(FeelSoundBook.feastAt) + 0.1),
     ])
 
-    /// A sting: a buzzy wobble (six 35 ms segments alternating strong and weak, keen) after a firm tap.
-    static func sting(at start: Double = 0) -> FeelHapticCue {
+    /// A sting: a buzzy wobble (six 35 ms segments alternating strong and weak, keen) after a firm tap. R3: `heavy` (a
+    /// sting that cost snaps) hits harder: a firmer tap, a deeper wobble, and a low thud as the snap goes.
+    static func sting(at start: Double = 0, heavy: Bool = false) -> FeelHapticCue {
         let begin = start.isFinite ? max(start, 0) : 0
-        var notes: [FeelHapticNote] = [.tap(0.6, 0.5, at: begin)]
+        var notes: [FeelHapticNote] = [.tap(heavy ? 0.85 : 0.6, heavy ? 0.45 : 0.5, at: begin)]
         for index in 0..<6 {
             let strong = index % 2 == 0
-            notes.append(.buzz(strong ? 0.85 : 0.35, 0.9, at: begin + 0.035 * Double(index), duration: 0.035))
+            let level: Float = strong ? (heavy ? 0.95 : 0.85) : (heavy ? 0.45 : 0.35)
+            notes.append(.buzz(level, heavy ? 0.75 : 0.9, at: begin + 0.035 * Double(index), duration: 0.035))
+        }
+        if heavy {
+            notes.append(.buzz(0.6, 0.1, at: begin + 0.21, duration: 0.08))
+        }
+        return FeelHapticCue(notes: notes)
+    }
+
+    /// R3: the loss blip's touch: two falling taps (firm then duller) on its two notes.
+    static func snapLost(at start: Double = 0) -> FeelHapticCue {
+        let begin = start.isFinite ? max(start, 0) : 0
+        return FeelHapticCue(notes: [.tap(0.6, 0.6, at: begin),
+                                     .tap(0.5, 0.25, at: begin + Double(FeelSoundBook.lostSpacing))])
+    }
+
+    /// R3: the free first bee's "oops": two light taps that end keener (nothing lost).
+    static func oops(at start: Double = 0) -> FeelHapticCue {
+        let begin = start.isFinite ? max(start, 0) : 0
+        return FeelHapticCue(notes: [.tap(0.25, 0.6, at: begin), .tap(0.3, 0.9, at: begin + 0.11)])
+    }
+
+    /// R3: the chain's ×5 flare: four quick taps rising in strength and keenness with the chord's roll.
+    static func chainFlare(at start: Double = 0) -> FeelHapticCue {
+        let begin = start.isFinite ? max(start, 0) : 0
+        var notes: [FeelHapticNote] = []
+        for index in 0..<4 {
+            let u = Float(index) / 3
+            notes.append(.tap(0.45 + 0.4 * u, 0.7 + 0.3 * u, at: begin + 0.035 * Double(index)))
         }
         return FeelHapticCue(notes: notes)
     }
@@ -241,12 +280,15 @@ enum FeelHapticBook {
         .buzz(0.4, 0.08, at: 0.3, duration: 0.2), .buzz(0.2, 0.05, at: 0.52, duration: 0.12),
     ])
 
-    /// Wilted: a weak, sinking droop (three fading soft steps). Weaker than the last-snap nudges.
+    /// Wilted: a weak, sinking droop. R3: clearer, on the sound's two sighs: a soft round tap and a short step on the
+    /// first, then three fading soft steps on the second. Weaker than the last-snap nudges.
     static func wilted(at start: Double = 0) -> FeelHapticCue {
         let begin = start.isFinite ? max(start, 0) : 0
+        let second = begin + Double(FeelSoundBook.wiltSecondSigh)
         return FeelHapticCue(notes: [
-            .buzz(0.3, 0.1, at: begin, duration: 0.12), .buzz(0.18, 0.1, at: begin + 0.12, duration: 0.14),
-            .buzz(0.08, 0.1, at: begin + 0.26, duration: 0.16),
+            .tap(0.38, 0.25, at: begin), .buzz(0.25, 0.1, at: begin, duration: 0.1),
+            .buzz(0.32, 0.1, at: second, duration: 0.12), .buzz(0.18, 0.1, at: second + 0.12, duration: 0.14),
+            .buzz(0.08, 0.1, at: second + 0.26, duration: 0.16),
         ])
     }
 

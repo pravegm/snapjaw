@@ -174,6 +174,40 @@ enum TrapRules {
         return min(Tuning.chainMaxMultiplier, 1 + Tuning.chainStep * Double(max(0, chain)))
     }
 
+    /// The chain length whose NEXT clean bite is scored at `multiplier` (×4 → 6, ×5 → 8), capped at the max.
+    static func chainSteps(toReach multiplier: Double) -> Int {
+        let m: Double = min(max(multiplier, 1), Tuning.chainMaxMultiplier)
+        return Int(((m - 1) / Tuning.chainStep - 1e-9).rounded(.up))
+    }
+
+    /// R3 (REVIEW-2 #5): how far (pt) a resting bug's centre must sit from the midrib line: the crease band's half
+    /// width, the bug's radius and Tuning.creaseClearance (housefly 61.2, bumblebee 75.6).
+    static func creaseGap(radius: CGFloat) -> Double {
+        return Double(ScreenLayout.creaseHalfWidth) + Double(radius) + Tuning.creaseClearance
+    }
+
+    /// R3: (x, y) moved straight out sideways to `creaseGap(radius:)` if it is closer to the midrib line (a point on
+    /// the line goes right); if that leaves the normalised radius `maxR`, y is pulled toward the centre line.
+    static func offCrease(_ g: TrapGeometry, _ x: Double, _ y: Double, maxR: Double,
+                          radius: CGFloat) -> (Double, Double) {
+        let gap: Double = creaseGap(radius: radius)
+        let cx: Double = Double(g.center.x)
+        let cy: Double = Double(g.center.y)
+        let dx: Double = x - cx
+        if abs(dx) >= gap { return (x, y) }
+        let nx: Double = cx + (dx >= 0 ? gap : -gap)
+        let ux: Double = gap / Double(g.a)
+        let lim: Double = maxR * maxR - ux * ux
+        var ny: Double = y
+        if lim <= 0 {
+            ny = cy
+        } else {
+            let ymax: Double = Double(g.b) * lim.squareRoot()
+            ny = min(max(y, cy - ymax), cy + ymax)
+        }
+        return (nx, ny)
+    }
+
     /// Is this activity in the bite (GAME-DESIGN §4: arriving low, walking, sipping, hopping)?
     static func isCandidate(_ activity: BugActivity, height: Double) -> Bool {
         switch activity {

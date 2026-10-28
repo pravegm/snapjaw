@@ -113,6 +113,21 @@ enum TrapImageCache {
         cached = TrapArt.trapImage(width: width, scale: scale)
         return cached
     }
+
+    private static var halvesCache: (CGImage, CGImage)?
+
+    /// The trap image cut down its midrib: the left and right lobes (the Duo diagrams put one on each half).
+    static func halves() -> (left: CGImage, right: CGImage)? {
+        if let hit = halvesCache { return (hit.0, hit.1) }
+        guard let whole = image(), whole.width > 1, whole.height > 1 else { return nil }
+        let w = whole.width / 2
+        guard let l = whole.cropping(to: CGRect(x: 0, y: 0, width: w, height: whole.height)),
+              let r = whole.cropping(to: CGRect(x: whole.width - w, y: 0, width: w, height: whole.height)) else {
+            return nil
+        }
+        halvesCache = (l, r)
+        return (l, r)
+    }
 }
 
 /// A bug exactly as the game paints it (`TrapArt.bugImage`, the Scene's own drawing: stripes, fuzz, faces), facing
@@ -158,33 +173,330 @@ enum BugArtCache {
     }
 }
 
-/// A little trap glyph (the HUD's snaps): two jaws with a gap, round teeth. `filled` false: a spent snap.
-struct SnapGlyph: Shape {
-    func path(in rect: CGRect) -> Path {
+// MARK: - The snap glyph (REVIEW-2 #11)
+
+/// One HUD snap: a mini CLOSED trap seen from above (founder art direction #2): two green leaf backs pressed together,
+/// the crimson seam between them and the cilia interlocked across it. Never a melon slice: no pink face, no rind.
+/// An empty slot is a grey outline of the same shape. Everything draws through `draw(_:in:filled:drain:hot:)`, so the
+/// Scene's `TrapArt.snapGlyph` (Scene R3) can replace it in one place.
+enum SnapGlyphArt {
+    static let leaf = Color(snapHex: 0x4C9A3C)
+    static let leafDark = Color(snapHex: 0x1F5526)
+    static let seam = Color(snapHex: 0x9A1A33)
+    static let seamLight = Color(snapHex: 0xC42A45)
+    static let cilia = Color(snapHex: 0xEAF7B8)
+    static let lip = Color(snapHex: 0x123A1C)
+    static let spent = Color(snapHex: 0x8AAA8D)
+
+    /// The closed trap's outline: a clam with pointed ends, the seam along its long axis.
+    static func shell(in r: CGRect) -> Path {
         var p = Path()
-        let w = rect.width
-        let h = rect.height
-        let cx = rect.midX
-        // Upper jaw.
-        p.move(to: CGPoint(x: rect.minX, y: rect.minY + h * 0.46))
-        p.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY + h * 0.46), control: CGPoint(x: cx, y: rect.minY - h * 0.38))
-        p.addLine(to: CGPoint(x: rect.minX, y: rect.minY + h * 0.46))
+        let y = r.midY
+        p.move(to: CGPoint(x: r.minX + r.width * 0.03, y: y))
+        p.addCurve(to: CGPoint(x: r.maxX - r.width * 0.03, y: y),
+                   control1: CGPoint(x: r.minX + r.width * 0.18, y: r.minY - r.height * 0.12),
+                   control2: CGPoint(x: r.maxX - r.width * 0.18, y: r.minY - r.height * 0.12))
+        p.addCurve(to: CGPoint(x: r.minX + r.width * 0.03, y: y),
+                   control1: CGPoint(x: r.maxX - r.width * 0.18, y: r.maxY + r.height * 0.12),
+                   control2: CGPoint(x: r.minX + r.width * 0.18, y: r.maxY + r.height * 0.12))
         p.closeSubpath()
-        // Lower jaw.
-        p.move(to: CGPoint(x: rect.minX, y: rect.minY + h * 0.56))
-        p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + h * 0.56))
-        p.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.minY + h * 0.56), control: CGPoint(x: cx, y: rect.maxY + h * 0.38))
+        return p
+    }
+
+    /// The crimson seam where the two margins meet (a thin lens along the middle).
+    static func seamPath(in r: CGRect) -> Path {
+        var p = Path()
+        let y = r.midY
+        let h = r.height * 0.17
+        p.move(to: CGPoint(x: r.minX + r.width * 0.10, y: y))
+        p.addQuadCurve(to: CGPoint(x: r.maxX - r.width * 0.10, y: y), control: CGPoint(x: r.midX, y: y - h))
+        p.addQuadCurve(to: CGPoint(x: r.minX + r.width * 0.10, y: y), control: CGPoint(x: r.midX, y: y + h))
         p.closeSubpath()
-        // Teeth along both rims.
-        let n = 4
+        return p
+    }
+
+    /// The cilia, interlocked like fingers across the seam (alternately from the upper and the lower lobe).
+    static func ciliaPath(in r: CGRect) -> Path {
+        var p = Path()
+        let n = 7
+        let reach = r.height * 0.30
         for i in 0..<n {
-            let x = rect.minX + w * (CGFloat(i) + 0.5) / CGFloat(n)
-            let tw = w / CGFloat(n) * 0.5
-            p.move(to: CGPoint(x: x - tw / 2, y: rect.minY + h * 0.46))
-            p.addLine(to: CGPoint(x: x, y: rect.minY + h * 0.62))
-            p.addLine(to: CGPoint(x: x + tw / 2, y: rect.minY + h * 0.46))
-            p.closeSubpath()
+            let u = (CGFloat(i) + 0.5) / CGFloat(n)
+            let x = r.minX + r.width * (0.14 + 0.72 * u)
+            let fromTop = i % 2 == 0
+            let lean = r.width * 0.025
+            p.move(to: CGPoint(x: x - lean, y: r.midY + (fromTop ? -reach : reach)))
+            p.addLine(to: CGPoint(x: x + lean, y: r.midY + (fromTop ? reach * 0.7 : -reach * 0.7)))
         }
         return p
+    }
+
+    /// Draws one slot from the Scene's glyph images (`TrapArt.snapGlyph`, the same drawing as its Feast flights and
+    /// sting cracks), or from the App's own paths when there are none. `filled` false: the grey outline. `drain` 0…1:
+    /// hunger has drained that much of the fill (from the top) and the rest greys. `hot` 0…1: the hungry pulse (a
+    /// crimson glow round the glyph).
+    static func draw(_ ctx: inout GraphicsContext, in rect: CGRect, filled: Bool, drain: Double, hot: Double,
+                     full fullImage: CGImage?, empty emptyImage: CGImage?) {
+        guard let fullImage, let emptyImage else {
+            draw(&ctx, in: rect, filled: filled, drain: drain, hot: hot)
+            return
+        }
+        let k = min(max(hot.isFinite ? hot : 0, 0), 1)
+        if filled && k > 0.01 {
+            let glow = Path(ellipseIn: rect.insetBy(dx: rect.width * 0.04, dy: rect.height * 0.10))
+            ctx.stroke(glow, with: .color(SnapTheme.crimson.opacity(0.45 + 0.55 * k)),
+                       lineWidth: max(rect.height * 0.10, 1.2) * CGFloat(1 + k))
+        }
+        guard filled else {
+            ctx.draw(Image(decorative: emptyImage, scale: SnapGlyphCache.scale), in: rect)
+            return
+        }
+        let d = CGFloat(min(max(drain.isFinite ? drain : 0, 0), 1))
+        if d > 0.001 { ctx.draw(Image(decorative: emptyImage, scale: SnapGlyphCache.scale), in: rect) }
+        var part = ctx
+        part.clip(to: Path(CGRect(x: rect.minX, y: rect.minY + rect.height * d, width: rect.width,
+                                  height: rect.height * (1 - d))))
+        if d > 0.001 { part.addFilter(.saturation(1 - Double(d) * 0.85)) }
+        part.draw(Image(decorative: fullImage, scale: SnapGlyphCache.scale), in: rect)
+    }
+
+    /// The App's own drawing of the glyph (the fallback).
+    static func draw(_ ctx: inout GraphicsContext, in rect: CGRect, filled: Bool, drain: Double, hot: Double) {
+        let r = rect.insetBy(dx: 1, dy: 1)
+        let body = shell(in: r)
+        let line = max(r.height * 0.09, 1)
+        guard filled else {
+            ctx.fill(body, with: .color(Color.black.opacity(0.22)))
+            ctx.stroke(body, with: .color(spent.opacity(0.75)), lineWidth: max(line * 0.9, 1.1))
+            return
+        }
+        let d = CGFloat(min(max(drain.isFinite ? drain : 0, 0), 1))
+        // The drained top shows as an empty slot.
+        if d > 0.001 {
+            ctx.fill(body, with: .color(Color.black.opacity(0.22)))
+        }
+        var full = ctx
+        full.clip(to: Path(CGRect(x: rect.minX, y: rect.minY + rect.height * d, width: rect.width,
+                                  height: rect.height * (1 - d))))
+        full.fill(body, with: .linearGradient(Gradient(colors: [leaf, leafDark]), startPoint: CGPoint(x: r.midX, y: r.minY),
+                                              endPoint: CGPoint(x: r.midX, y: r.maxY)))
+        full.fill(seamPath(in: r), with: .linearGradient(Gradient(colors: [seamLight, seam]),
+                                                         startPoint: CGPoint(x: r.midX, y: r.midY - r.height * 0.2),
+                                                         endPoint: CGPoint(x: r.midX, y: r.midY + r.height * 0.2)))
+        full.stroke(ciliaPath(in: r), with: .color(cilia),
+                    style: StrokeStyle(lineWidth: max(r.width * 0.045, 0.9), lineCap: .round))
+        // A wet glint on the upper lobe.
+        full.fill(Path(ellipseIn: CGRect(x: r.minX + r.width * 0.30, y: r.minY + r.height * 0.12, width: r.width * 0.22,
+                                         height: r.height * 0.14)), with: .color(Color.white.opacity(0.28)))
+        if d > 0.001 {
+            // Greying as a wilt nears.
+            full.fill(body, with: .color(Color(snapHex: 0x6E7468).opacity(Double(d) * 0.8)))
+        }
+        let k = min(max(hot.isFinite ? hot : 0, 0), 1)
+        ctx.stroke(body, with: .color(k > 0.01 ? SnapTheme.crimson.opacity(0.55 + 0.45 * k) : lip),
+                   lineWidth: k > 0.01 ? line * (1.2 + 1.3 * CGFloat(k)) : line)
+    }
+}
+
+/// The Scene's snap glyph images, per size (`TrapArt.snapGlyph`), kept for the app's life.
+@MainActor
+enum SnapGlyphCache {
+    static let scale: CGFloat = 3
+    private static var cache: [String: CGImage] = [:]
+    private static var failed: Set<String> = []
+
+    static func image(width: CGFloat, empty: Bool) -> CGImage? {
+        let w = max((width * 2).rounded() / 2, 4)
+        let key = "\(w).\(empty ? 1 : 0)"
+        if let hit = cache[key] { return hit }
+        guard !failed.contains(key) else { return nil }
+        guard let made = TrapArt.snapGlyph(width: w, height: w * HUDLayout.glyphAspect, scale: scale, empty: empty) else {
+            failed.insert(key)
+            return nil
+        }
+        cache[key] = made
+        return made
+    }
+}
+
+/// One snap glyph in the HUD (`SnapGlyphArt`), `size` wide.
+struct SnapSlot: View {
+    let filled: Bool
+    var drain: Double = 0
+    var hot: Double = 0
+    let size: CGFloat
+
+    var body: some View {
+        let full = SnapGlyphCache.image(width: size, empty: false)
+        let empty = SnapGlyphCache.image(width: size, empty: true)
+        Canvas { ctx, sz in
+            SnapGlyphArt.draw(&ctx, in: CGRect(origin: .zero, size: sz), filled: filled, drain: drain, hot: hot,
+                              full: full, empty: empty)
+        }
+        .frame(width: size, height: size * HUDLayout.glyphAspect)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - The Duo's fold as the input (ROUND-3 founder call)
+
+/// One half of a Duo seen from the front: a dark body, its screen showing that half's lobe of the play trap
+/// (`TrapArt.trapImage`, cut down the midrib) on the bog.
+struct DuoHalfView: View {
+    let left: Bool
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
+        ZStack {
+            shape.fill(Color(snapHex: 0x14181C))
+            ZStack {
+                SnapTheme.bog
+                if let halves = TrapImageCache.halves() {
+                    Image(decorative: left ? halves.left : halves.right, scale: TrapImageCache.scale)
+                        .resizable()
+                        .interpolation(.medium)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: left ? .trailing : .leading)
+                } else {
+                    LinearGradient(colors: left ? [SnapTheme.crimson, SnapTheme.crimsonDeep]
+                                                : [SnapTheme.crimsonDeep, SnapTheme.crimson],
+                                   startPoint: .leading, endPoint: .trailing)
+                        .padding(.vertical, 8)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .padding(3)
+        }
+    }
+}
+
+/// The Duo held like a book at hinge angle `theta` (degrees between the halves, 180 = flat), seen from the front: each
+/// half turns (180 − θ) / 2 about the hinge. `arrows` 0…1 shows the "snap it shut" chevrons at the outer edges.
+struct DuoFoldView: View {
+    var theta: Double
+    var arrows: Double = 0
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let halfW = max(w / 2 - 1, 1)
+            let tilt = min(max((180 - (theta.isFinite ? theta : 160)) / 2, 0), 80)
+            ZStack {
+                HStack(spacing: 2) {
+                    DuoHalfView(left: true)
+                        .frame(width: halfW, height: h)
+                        .rotation3DEffect(.degrees(tilt), axis: (x: 0, y: 1, z: 0), anchor: .trailing,
+                                          perspective: 0.55)
+                    DuoHalfView(left: false)
+                        .frame(width: halfW, height: h)
+                        .rotation3DEffect(.degrees(-tilt), axis: (x: 0, y: 1, z: 0), anchor: .leading,
+                                          perspective: 0.55)
+                }
+                if arrows > 0.01 {
+                    let a = min(max(arrows, 0), 1)
+                    HStack {
+                        Image(systemName: "chevron.right")
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.left")
+                    }
+                    .font(.system(size: max(h * 0.26, 10), weight: .black))
+                    .foregroundStyle(SnapTheme.limeLight)
+                    .shadow(color: SnapTheme.shadow.opacity(0.7), radius: 2, y: 1)
+                    .padding(.horizontal, -max(h * 0.2, 8))
+                    .opacity(a)
+                }
+            }
+            .frame(width: w, height: h)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// The hinge seen from the top: two arms meeting at the fold with the angle between them ("138°").
+struct FoldAngleGlyph: View {
+    var theta: Double
+
+    var body: some View {
+        let th = theta.isFinite ? min(max(theta, 60), 180) : 160
+        Canvas { ctx, size in
+            let hinge = CGPoint(x: size.width / 2, y: size.height - 3)
+            let arm = min(size.width * 0.3, 60)
+            let lift = CGFloat((180 - th) / 2 * Double.pi / 180)
+            var v = Path()
+            v.move(to: CGPoint(x: hinge.x - arm * cos(lift), y: hinge.y - arm * sin(lift)))
+            v.addLine(to: hinge)
+            v.addLine(to: CGPoint(x: hinge.x + arm * cos(lift), y: hinge.y - arm * sin(lift)))
+            ctx.stroke(v, with: .color(Color.black.opacity(0.35)),
+                       style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+            ctx.stroke(v, with: .color(SnapTheme.limeLight),
+                       style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
+            ctx.draw(Text("\(Int(th.rounded()))°").font(.system(size: max(min(size.height * 0.5, 15), 9),
+                                                                weight: .heavy, design: .rounded).monospacedDigit())
+                        .foregroundColor(SnapTheme.cream),
+                     at: CGPoint(x: hinge.x, y: hinge.y - arm * sin(lift) - 2), anchor: .bottom)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// The looping clap: the Duo held open at 160°, snapped to 138° and opened again (ROUND-3 founder call: Home beside
+/// Feed, the lesson's step 2, the pose card). Still at the clap under Reduce Motion and in demo captures.
+struct DuoClapDiagram: View {
+    var reduceMotion = false
+    var showsAngle = true
+
+    static let openAngle: Double = 160
+    static let shutAngle: Double = 138
+    static let loop: Double = 2.2
+    /// The still frame's moment (mid-clap, at 138°).
+    static let stillTime: Double = 1.2
+
+    private var still: Bool { reduceMotion || AppTrace.enabled }
+
+    /// θ at `t` s into the loop: open, a quick snap to 138°, a beat, open again. Pure; tested.
+    static func theta(at t: Double) -> Double {
+        let x = t.isFinite ? t.truncatingRemainder(dividingBy: loop) : 0
+        let span = openAngle - shutAngle
+        if x < 0.9 { return openAngle }
+        if x < 1.02 {
+            let f = (x - 0.9) / 0.12
+            return openAngle - span * f * f
+        }
+        if x < 1.4 { return shutAngle }
+        if x < 1.9 {
+            let f = (x - 1.4) / 0.5
+            return shutAngle + span * (1 - pow(1 - f, 3))
+        }
+        return openAngle
+    }
+
+    /// The chevrons: from just before the snap until it opens again.
+    static func arrows(at t: Double) -> Double {
+        let x = t.isFinite ? t.truncatingRemainder(dividingBy: loop) : 0
+        if x < 0.6 || x > 1.5 { return 0 }
+        if x < 0.75 { return (x - 0.6) / 0.15 }
+        if x > 1.4 { return (1.5 - x) / 0.1 }
+        return 1
+    }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: still)) { context in
+            let t = still ? Self.stillTime : context.date.timeIntervalSinceReferenceDate
+            let th = Self.theta(at: t)
+            GeometryReader { geo in
+                let angleH: CGFloat = showsAngle ? min(max(geo.size.height * 0.26, 14), 30) : 0
+                VStack(spacing: 2) {
+                    DuoFoldView(theta: th, arrows: Self.arrows(at: t))
+                        .padding(.horizontal, geo.size.height * 0.12)
+                    if showsAngle {
+                        FoldAngleGlyph(theta: th)
+                            .frame(height: angleH)
+                    }
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+            }
+        }
+        .accessibilityHidden(true)
     }
 }

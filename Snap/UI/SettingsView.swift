@@ -10,7 +10,7 @@ struct SettingsView: View {
 
     var body: some View {
         let c = info.isCompact
-        let pause = HUDLayout.make(info).pause
+        let pause = HUDLayout.make(info).back
         ZStack {
             BogBackdrop(controller: controller)
             ScrollView(showsIndicators: false) {
@@ -18,7 +18,7 @@ struct SettingsView: View {
                     .padding(.top, info.top)
                     .padding(.bottom, 28)
             }
-            .mask { Self.footFade }
+            .scrollColumn()
             .frame(width: info.otherPage.width, height: info.size.height)
             .position(x: info.otherPage.midX, y: info.size.height / 2)
             ScrollView(showsIndicators: false) {
@@ -27,7 +27,7 @@ struct SettingsView: View {
                     .padding(.top, pause.maxY + 10)
                     .padding(.bottom, 28)
             }
-            .mask { Self.footFade }
+            .scrollColumn(initially: true)
             .frame(width: info.hudPage.width, height: info.size.height)
             .position(x: info.hudPage.midX, y: info.size.height / 2)
             SnapRoundButton(systemImage: "chevron.backward", label: "Back") { controller.show(.home) }
@@ -36,7 +36,7 @@ struct SettingsView: View {
         .frame(width: info.size.width, height: info.size.height)
     }
 
-    /// A fade at the foot of a scrolling column: there's more below.
+    /// A fade at the foot of a scrolling column: there's more below (with `scrollColumn()`).
     static var footFade: some View {
         VStack(spacing: 0) {
             Color.black
@@ -64,6 +64,11 @@ struct SettingsView: View {
             }
             .snapCard(padding: c ? 10 : 14, radius: 22)
         }
+    }
+
+    /// The diagnostics line: TestFlight on a device with a hinge only. Pure; tested.
+    static func showsDiagnostics(channel: BuildChannel.Kind, hasHinge: Bool) -> Bool {
+        channel == .testFlight && hasHinge
     }
 
     private var divider: some View {
@@ -105,10 +110,10 @@ struct SettingsView: View {
                     .font(SnapType.caption(c))
                     .foregroundStyle(SnapTheme.mist)
                     .fixedSize(horizontal: false, vertical: true)
-                if BuildChannel.current != .appStore {
-                    Text(BuildChannel.current.label + " · input " + controller.input.rawValue
-                         + (controller.hasHinge ? " · hinge " + AppTrace.fixed(controller.hinge.angle ?? 0, 0) + "°"
-                                                : ""))
+                // REVIEW-2 #20: no "Debug · input touch" line. TestFlight builds on a Duo keep the hinge angle (the
+                // founder's device checks); nothing else ever shows it.
+                if Self.showsDiagnostics(channel: BuildChannel.current, hasHinge: controller.hasHinge) {
+                    Text("TestFlight · hinge " + AppTrace.fixed(controller.hinge.angle ?? 0, 0) + "°")
                         .font(SnapType.caption(c).monospacedDigit())
                         .foregroundStyle(SnapTheme.haze)
                 }
@@ -131,5 +136,48 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .snapCard(padding: c ? 10 : 14, radius: 22)
         }
+    }
+}
+
+/// A scrolling page column: the foot fade, and a "more below" chevron that shows until the end is reached
+/// (REVIEW-2 #19, #20: the Bug Book's fourth row and the clipped Credits had no cue).
+struct ScrollColumnCue: ViewModifier {
+    @State private var more: Bool
+
+    init(initially: Bool) {
+        _more = State(initialValue: initially)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onScrollGeometryChange(for: Bool.self) { g in
+                g.contentOffset.y + g.containerSize.height < g.contentSize.height - 12
+            } action: { _, new in
+                more = new
+            }
+            .mask { SettingsView.footFade }
+            .overlay(alignment: .bottom) {
+                if more {
+                    Image(systemName: "chevron.compact.down")
+                        .font(.system(size: 22, weight: .heavy))
+                        .foregroundStyle(SnapTheme.limeLight)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(SnapTheme.surface.opacity(0.88)))
+                        .overlay(Capsule().stroke(SnapTheme.lime.opacity(0.3), lineWidth: 1))
+                        .padding(.bottom, 8)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                        .accessibilityHidden(true)
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: more)
+    }
+}
+
+extension View {
+    /// A scrolling page column's foot fade and its "more below" cue (`initially`: shown before the first measure).
+    func scrollColumn(initially: Bool = false) -> some View {
+        modifier(ScrollColumnCue(initially: initially))
     }
 }

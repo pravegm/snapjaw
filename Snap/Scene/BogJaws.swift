@@ -2,32 +2,27 @@ import CoreGraphics
 import SpriteKit
 import UIKit
 
-/// One lobe's nodes: the cached face, the closure shades, the day's overlay, the hunger wilt, the gloss, the night
-/// glow and the teeth under `node` (its origin is the trap centre, the midrib; its xScale foreshortens and squeezes
-/// the lobe towards the midrib), and the far lobe's slam jaw under `jawNode` (never squeezed).
+/// One lobe's nodes: the cached face, the closure shades, the day's overlay, the hunger wilt, the gloss, the rim light
+/// and the teeth under `node` (its origin is the trap centre, the midrib; its xScale foreshortens and squeezes the lobe
+/// towards the midrib).
 @MainActor
 final class BogLobeSide {
     let side: Int
     let node: SKNode
-    let jawNode: SKNode
     let lobe: SKSpriteNode
     let shadeNarrow: SKSpriteNode
     let shadeWide: SKSpriteNode
     let overlay: SKSpriteNode
     let wilt: SKSpriteNode
     let gloss: SKSpriteNode
+    /// R3 (#10): the rim light (additive: gold morning, peach dusk, moonlight at night).
     let glow: SKSpriteNode
-    let jaw: SKSpriteNode
     private(set) var teeth: [SKSpriteNode] = []
     private(set) var specs: [TrapTooth] = []
-    /// Each tooth's root in normalised trap units (x / a, y / b from the centre): the slam hides the ones the far
-    /// lobe's jaw covers.
-    private(set) var rootNorm: [CGPoint] = []
 
     init(side: Int) {
         self.side = side < 0 ? -1 : 1
         let n = SKNode()
-        let jn = SKNode()
         let lobeSize = BogTextures.lobeSize(reach: 1, pad: BogTextures.lobePad)
         let anchor = BogTextures.lobeAnchor(side: side)
         let l = SKSpriteNode(texture: BogTextures.lobe(side: side), size: lobeSize)
@@ -37,10 +32,7 @@ final class BogLobeSide {
         let wl = SKSpriteNode(texture: BogTextures.lobeSilhouette(side: side), size: lobeSize)
         let gl = SKSpriteNode(texture: BogTextures.gloss(side: side), size: lobeSize)
         let gw = SKSpriteNode(texture: BogTextures.lobeGlow(side: side), size: lobeSize)
-        let jw = SKSpriteNode(texture: BogTextures.jaw(side: side),
-                              size: BogTextures.lobeSize(reach: BogArt.jawOuter, pad: BogTextures.jawPad))
         node = n
-        jawNode = jn
         lobe = l
         shadeNarrow = sn
         shadeWide = sw
@@ -48,7 +40,6 @@ final class BogLobeSide {
         wilt = wl
         gloss = gl
         glow = gw
-        jaw = jw
         let layers: [(SKSpriteNode, CGFloat)] = [(l, 0), (sn, 1), (sw, 1.1), (ov, 1.5), (wl, 1.6), (gl, 2),
                                                  (gw, 2.2)]
         for (s, z) in layers {
@@ -57,9 +48,6 @@ final class BogLobeSide {
             s.zPosition = z
             n.addChild(s)
         }
-        jw.anchorPoint = anchor
-        jw.position = .zero
-        jn.addChild(jw)
         sn.alpha = 0
         sw.alpha = 0
         for s in [ov, wl] {
@@ -68,11 +56,12 @@ final class BogLobeSide {
             s.alpha = 0
             s.isHidden = true
         }
-        wl.color = UIColor(red: 0.42, green: 0.36, blue: 0.24, alpha: 1)
+        // R3 (#17): the hunger wilt is a plain grey veil.
+        wl.color = UIColor(white: 0.5, alpha: 1)
         gw.blendMode = .add
+        gw.colorBlendFactor = 1
         gw.alpha = 0
-        jw.alpha = 0
-        jw.isHidden = true
+        gw.isHidden = true
         gl.alpha = 0.75
         buildTeeth()
     }
@@ -93,14 +82,17 @@ final class BogLobeSide {
             s.colorBlendFactor = 0
             node.addChild(s)
             teeth.append(s)
-            rootNorm.append(CGPoint(x: (t.root.x - g.center.x) / g.a, y: (t.root.y - g.center.y) / g.b))
         }
     }
 }
 
-/// The trap: two lobes on the fold, the midrib, the fold band. It follows the hinge (`closure01`), slams on a bite,
-/// springs open on re-arm, droops when hungry and when the trap is tired. Static art is cached; per frame only
-/// transforms, colours and alphas change.
+/// The trap: two lobes on the fold, the midrib, the fold band, the trap's shadow. It follows the hinge (`closure01`),
+/// snaps shut on a bite, springs open on re-arm, droops when hungry and when the trap is tired. Static art is cached;
+/// per frame only transforms, colours and alphas change.
+///
+/// **R3 (#1) the bite**: both lobes squeeze to `TrapArt.slamSqueeze` about the midrib in 60 ms while the closed trap
+/// (`BogTextures.closedTrap`: margins meeting over a dark interior, the cilia interlocked) fades in over them; the open
+/// cilia fold in and hide. It holds 120 ms and lets go. Nothing is drawn outside the open trap's outline (SceneTests).
 @MainActor
 final class BogJaws {
     /// At the trap centre (scene z 10).
@@ -108,6 +100,10 @@ final class BogJaws {
     let midrib: SKSpriteNode
     /// The crease across the whole scene height (only with a real fold).
     let foldBand: SKSpriteNode
+    /// R3: the closed trap (the bite's hold).
+    let closed: SKSpriteNode
+    /// R3: the trap's soft shadow on the bog (it squeezes with the lobes, so the bite never leaves a dark ghost).
+    let shadow: SKSpriteNode
     private let sides: [BogLobeSide]
 
     /// The slam's level (0 none … 1 shut) and the lean the teeth are drawn at (radians).
@@ -115,40 +111,60 @@ final class BogJaws {
     private(set) var drawnClosure: CGFloat = 0
     private(set) var lean: CGFloat = 0
     private(set) var tiredLevel: CGFloat = 0
-    /// How hungry the trap looks (0 fed … 1 about to wilt a snap): the lobes droop and dull a little.
+    /// How hungry the trap looks (0 fed … 1 about to wilt a snap): the lobes droop and grey a little.
     private(set) var droop: CGFloat = 0
-    /// The lobes' x scale now (1 open … `slamSqueeze` mid-bite); caught bugs ride with it.
+    /// The lobes' x scale now (1 open, 0.85 at the snap depth, `slamSqueeze` mid-bite); caught bugs ride with it.
     private(set) var lobeScale: CGFloat = 1
+    /// The bite's own squeeze (1 … `slamSqueeze`), without the hinge's foreshortening: the nectar and the hairs ride
+    /// with it (they stay under the bugs that sip them while the hinge closes).
+    private(set) var slamScale: CGFloat = 1
+    /// The lobes' y scale now (the hunger droop: 0.95 at its deepest).
+    private(set) var lobeYScale: CGFloat = 1
     /// The day's overlay alpha on the lobes (tests: the trap stays crimson).
     private(set) var overlayAlpha: CGFloat = 0
+    /// The day's overlay colour on the lobes.
+    private(set) var overlayColor: UIColor = .white
+    /// The rim light's alpha (R3 #10: dusk shows).
+    private(set) var rimLightAlpha: CGFloat = 0
     var reduceMotion = false
 
     private var slamClock: Double = -1
     private var springClock: Double = -1
     private var rumbleClock: Double = -1
-    private var sweep: CGFloat = 1
 
     init() {
         let r = SKNode()
         let m = SKSpriteNode(texture: BogTextures.midrib, size: BogTextures.midribSize)
         let f = SKSpriteNode(texture: BogTextures.foldBand,
                              size: CGSize(width: 2 * ScreenLayout.creaseHalfWidth, height: ScreenLayout.canvasHeight))
+        let c = SKSpriteNode(texture: BogTextures.closedTrap, size: BogTextures.closedSize)
+        let sh = SKSpriteNode(texture: BogTextures.trapShadow, size: BogTextures.trapShadowSize)
         root = r
         midrib = m
         foldBand = f
+        closed = c
+        shadow = sh
         sides = [BogLobeSide(side: -1), BogLobeSide(side: 1)]
         r.zPosition = 10
+        // Under the lobes, over the bog (scene z 2: under the day's multiply tint at 5).
+        sh.zPosition = -8
+        sh.position = CGPoint(x: 4, y: -10)
+        sh.color = UIColor(red: 0, green: 0.03, blue: 0.01, alpha: 1)
+        sh.colorBlendFactor = 1
+        sh.alpha = 0.62
+        r.addChild(sh)
         for s in sides {
             s.node.zPosition = 0
             r.addChild(s.node)
         }
         m.zPosition = 3
         r.addChild(m)
-        for s in sides {
-            // The far lobe's jaw covers our lobe, the midrib's ends and our teeth' roots, under the bugs.
-            s.jawNode.zPosition = 3.5
-            r.addChild(s.jawNode)
-        }
+        // The closed trap covers the squeezed lobes, the midrib, their folded cilia, the nectar and the glistens (scene
+        // z 16.5), under the bugs.
+        c.zPosition = 6.5
+        c.alpha = 0
+        c.isHidden = true
+        r.addChild(c)
         f.zPosition = -9
         f.color = .black
         f.colorBlendFactor = 1
@@ -162,6 +178,32 @@ final class BogJaws {
     /// Every tooth's projected length factor as drawn (tests).
     var toothReach: CGFloat { TrapArt.toothReach(lean: lean) }
 
+    /// The closed trap's opacity now (tests: it shows in the bite's hold).
+    var closedAlpha: CGFloat { closed.isHidden ? 0 : closed.alpha }
+
+    /// R3 (#1, tests): the frame (scene space, unshaken) of everything the trap draws now that is visible: the lobes and
+    /// their layers, the teeth, the midrib and the closed trap (not the fold band, the shadow or the petiole).
+    var drawnFrame: CGRect {
+        var box = CGRect.null
+        func add(_ n: SKNode) {
+            guard !n.isHidden, n.alpha > 0.01, let parent = n.parent else { return }
+            let f = n.frame
+            for p in [CGPoint(x: f.minX, y: f.minY), CGPoint(x: f.maxX, y: f.minY), CGPoint(x: f.minX, y: f.maxY),
+                      CGPoint(x: f.maxX, y: f.maxY)] {
+                let q = parent.convert(p, to: root)
+                let s = CGPoint(x: root.position.x + q.x, y: root.position.y + q.y)
+                box = box.union(CGRect(origin: s, size: .zero))
+            }
+        }
+        for s in sides {
+            for n in [s.lobe, s.shadeNarrow, s.shadeWide, s.overlay, s.wilt, s.gloss, s.glow] { add(n) }
+            for t in s.teeth { add(t) }
+        }
+        add(midrib)
+        add(closed)
+        return box
+    }
+
     func layout(_ g: TrapGeometry, sceneHeight: CGFloat, hasFold: Bool) {
         root.position = g.center
         foldBand.size = CGSize(width: 2 * ScreenLayout.creaseHalfWidth, height: sceneHeight + 160)
@@ -169,11 +211,9 @@ final class BogJaws {
         foldBand.isHidden = !hasFold
     }
 
-    /// The bite: the teeth slam over, both lobes squeeze to `slamSqueeze` towards the midrib and the far lobe's jaw
-    /// sweeps in from beyond the outer edges (60 ms), holds (120 ms) and lets go.
+    /// The bite: the lobes squeeze shut about the midrib (60 ms), hold (120 ms) and let go.
     func slam() {
         slamClock = 0
-        sweep = 0
     }
 
     /// Re-armed: the lobes and teeth spring back out with a little overshoot (1.08).
@@ -191,36 +231,34 @@ final class BogJaws {
         springClock = -1
         rumbleClock = -1
         slamLevel = 0
-        sweep = 1
         tiredLevel = 0
         droop = 0
         lobeScale = 1
-        for s in sides {
-            s.jaw.alpha = 0
-            s.jaw.isHidden = true
-        }
+        slamScale = 1
+        lobeYScale = 1
+        closed.alpha = 0
+        closed.isHidden = true
     }
 
     /// One frame. `fxDt` runs the moments (it is 0 while the session is frozen); `time` is the wall clock for
-    /// shimmer. `hunger` is the snapshot's 0…1; `tint`/`tintAlpha` the day's overlay on the lobes.
+    /// shimmer. `hunger` is the snapshot's 0…1; `tint`/`tintAlpha` the day's overlay on the lobes, `rim`/`rimAlpha`
+    /// the day's rim light.
     func update(fxDt: Double, closure01 c: CGFloat, tired target: CGFloat, hunger: CGFloat, time: Double,
-                night: CGFloat, dusk: CGFloat, tint: UIColor, tintAlpha: CGFloat) {
+                night: CGFloat, dusk: CGFloat, tint: UIColor, tintAlpha: CGFloat, rim: UIColor = .white,
+                rimAlpha: CGFloat = 0) {
         let cc = BogMath.clamp01(c.isFinite ? c : 0)
         let dt = max(fxDt, 0)
         drawnClosure = cc
-        // The slam envelope.
+        // The slam envelope: shut in 60 ms (ease out), hold 120 ms, open by 0.5 s.
         if slamClock >= 0 {
             slamClock += dt
             let t = CGFloat(slamClock)
             if t < 0.06 {
                 let u = t / 0.06
-                sweep = 1 - (1 - u) * (1 - u)
-                slamLevel = sweep
+                slamLevel = 1 - (1 - u) * (1 - u)
             } else if t < 0.18 {
-                sweep = 1
                 slamLevel = 1
             } else if t < 0.5 {
-                sweep = 1
                 slamLevel = 1 - BogMath.smoothstep(0.18, 0.5, t)
             } else {
                 slamLevel = 0
@@ -257,27 +295,37 @@ final class BogJaws {
         let h = CGFloat(hunger.isFinite ? hunger : 0)
         droop = BogMath.smoothstep(0.7, 1, BogMath.clamp01(h))
 
+        // R3 (#17): hungry teeth lean 20° (and tired ones 40°).
         let leanDeg = max(Double(cc) * TrapArt.toothMaxLean, TrapArt.slamLean * Double(slamLevel))
-            + 40 * Double(tiredLevel) + 14 * Double(droop) * (1 - Double(slamLevel))
+            + 40 * Double(tiredLevel) + 20 * Double(droop) * (1 - Double(slamLevel))
         lean = CGFloat(leanDeg * .pi / 180)
         let reach = TrapArt.toothReach(lean: lean) * spring
         let shut = max(cc, slamLevel)
-        // Foreshortened by the hinge (up to 15 %), squeezed to 0.6 by the bite, springing back past 1 on re-arm.
+        // Foreshortened by the hinge (up to 15 %), squeezed shut by the bite, springing back past 1 on re-arm.
         let foreshorten = 1 - TrapArt.lobeSquash * cc
         let squeeze = 1 - (1 - TrapArt.slamSqueeze) * slamLevel
+        slamScale = squeeze
         lobeScale = min(foreshorten, squeeze) * lobeSpring * (1 + wobble) * (1 - 0.02 * droop)
-        let shadeK = max(cc, 0.65 * slamLevel, 0.55 * tiredLevel)
+        // R3 (#17): the hungry lobes droop to y 0.95, pinned at the midrib (the node's origin).
+        lobeYScale = 1 - 0.05 * droop
+        let shadeK = max(cc, slamLevel, 0.55 * tiredLevel)
         let narrow = 0.95 * BogMath.smoothstep(0.02, 0.6, shadeK)
         let wide = 0.6 * BogMath.smoothstep(0.45, 1, shadeK)
-        let darkTeeth = min(0.32 * cc * (1 - slamLevel) + 0.25 * tiredLevel + 0.2 * droop + 0.35 * night, 0.7)
+        let darkTeeth = min(0.32 * cc * (1 - slamLevel) + 0.25 * tiredLevel + 0.25 * droop + 0.3 * night, 0.7)
         let shimmer = CGFloat(0.05 * sin(time * 1.3))
         overlayAlpha = min(max(tintAlpha, 0), 0.25)
-        let toothTint = UIColor(red: 0.07 * (1 - night) + 0.08 * night, green: 0.2 * (1 - night) + 0.1 * night,
-                                blue: 0.1 * (1 - night) + 0.3 * night, alpha: 1)
+        overlayColor = tint
+        rimLightAlpha = min(max(rimAlpha, 0), 0.8) * (1 - 0.7 * shut)
+        // At night the teeth go a deep blue-grey (never violet: the cream tips stay readable).
+        let toothTint = UIColor(red: 0.07 * (1 - night) + 0.1 * night, green: 0.2 * (1 - night) + 0.12 * night,
+                                blue: 0.1 * (1 - night) + 0.2 * night, alpha: 1)
+        // The open cilia fold in and hide under the closed trap as it shuts.
+        let teethAlpha = 1 - BogMath.smoothstep(0.25, 0.75, slamLevel)
+        let wiltA = 0.15 * droop + 0.12 * tiredLevel
         for s in sides {
             let sx = CGFloat(s.side)
             s.node.xScale = lobeScale
-            s.node.yScale = 1 - 0.015 * droop
+            s.node.yScale = lobeYScale
             s.shadeNarrow.alpha = narrow
             s.shadeNarrow.isHidden = narrow < 0.005
             s.shadeWide.alpha = wide
@@ -285,40 +333,37 @@ final class BogJaws {
             s.overlay.color = tint
             s.overlay.alpha = overlayAlpha
             s.overlay.isHidden = overlayAlpha < 0.005
-            let wiltA = 0.2 * droop + 0.12 * tiredLevel
             s.wilt.alpha = wiltA
             s.wilt.isHidden = wiltA < 0.005
             s.gloss.position = CGPoint(x: -sx * 18 * shut, y: -6 * shut)
-            s.gloss.alpha = max(0.75 - 0.4 * shut - 0.3 * tiredLevel - 0.3 * droop + shimmer, 0.1)
-            let glowA = 0.16 * night + 0.07 * dusk
-            s.glow.alpha = glowA
-            s.glow.isHidden = glowA < 0.005
-            if slamLevel > 0.001 {
-                s.jaw.isHidden = false
-                s.jaw.alpha = slamLevel
-                s.jaw.setScale(1 + 0.5 * (1 - sweep))
-            } else if !s.jaw.isHidden {
-                s.jaw.isHidden = true
-                s.jaw.alpha = 0
-            }
-            let ji = BogArt.jawInner
-            for (i, t) in s.teeth.enumerated() {
+            s.gloss.alpha = max(0.75 - 0.45 * shut - 0.3 * tiredLevel - 0.35 * droop + shimmer, 0.08)
+            s.glow.color = rim
+            s.glow.alpha = rimLightAlpha
+            s.glow.isHidden = rimLightAlpha < 0.005
+            for t in s.teeth {
                 t.yScale = reach
                 t.color = toothTint
                 t.colorBlendFactor = darkTeeth
-                // Mid-bite, the teeth whose roots the far lobe covers (top and bottom: the lobe squeezes in x only)
-                // tuck under it; the rest interlock at the squeezed edge.
-                if slamLevel > 0.001, i < s.rootNorm.count {
-                    let q = s.rootNorm[i]
-                    let nx = q.x * lobeScale
-                    let r = (nx * nx + q.y * q.y).squareRoot()
-                    t.alpha = 1 - slamLevel * BogMath.smoothstep(ji + 0.04, ji + 0.16, r)
-                } else {
-                    t.alpha = 1
-                }
+                t.alpha = teethAlpha
+                t.isHidden = teethAlpha < 0.01
             }
         }
+        // The closed trap: it fades in over the squeezed lobes, never wider than they are (so never outside the open
+        // outline), and droops with them.
+        let show = BogMath.smoothstep(0.3, 0.85, slamLevel)
+        if show > 0.005 {
+            closed.isHidden = false
+            closed.alpha = show
+            closed.xScale = min(max(lobeScale / TrapArt.slamSqueeze, 1), 1.8)
+            closed.yScale = lobeYScale
+        } else if !closed.isHidden {
+            closed.isHidden = true
+            closed.alpha = 0
+        }
+        midrib.yScale = lobeYScale
         midrib.color = tint
         midrib.colorBlendFactor = overlayAlpha * 0.8
+        shadow.xScale = max(lobeScale, 0.3)
+        shadow.yScale = lobeYScale
     }
 }

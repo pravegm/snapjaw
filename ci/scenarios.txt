@@ -31,7 +31,7 @@
 15-play-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=sting|90|A bee or wasp in the bite: "Bzzt!", the stinger let go, snaps down by the cost|SNAP-T event stung
 16-play-dusk|screen=play;seed=7;wave=17;pilot=expert;freezeOn=landed|40|Dusk (wave 17, already dusk at the start so the tint has settled): the peach tint, moths drawn to the fold|SNAP-T canvas
 17-play-night|screen=play;seed=7;wave=22;pilot=expert;freezeOn=night|60|Night: the blue tint, fireflies glowing with blooms, other bugs dimmed|SNAP-T event dayPhaseChanged
-18-play-last-snap|screen=play;seed=7;pilot=novice;freezeOn=lastSnap|150|One snap left: "Last snap — make it count"|SNAP-T event lastSnap
+18-play-last-snap|screen=play;seed=7;pilot=novice;freezeOn=lastSnap|150|One snap left: "Last snap! Make it count"|SNAP-T event lastSnap
 19-play-tired|screen=play;seed=7;pilot=novice;freezeOn=tired|180|Snaps at 0: "Your trap is tired.", the bugs leaving|SNAP-T event tired
 20-play-results|screen=play;seed=7;pilot=novice;freezeOn=results|200|The run's end handing over to Results|SNAP-T freeze results
 # Layout variants (the wide phone, the Duo layout on a phone, the HUD mirrored)
@@ -47,7 +47,10 @@
 29-book-late|screen=book;progress=late|6|Bug Book, all 16 found (bees show "spared")|SNAP-T canvas
 30-settings|screen=settings|5|Settings: Sound, Haptics, Respect silent switch, HUD on the left, Reduce motion, Replay First Bite, About, Credits|SNAP-T canvas
 31-pose|screen=pose|5|The pose card: "Hold it open like a book" with its diagram|SNAP-T canvas
-32-cover|screen=cover|5|The cover-display card: "Open to carry on"|SNAP-T canvas
+32-cover|screen=cover|5|The cover-display card: "Open it up to carry on" and the score|SNAP-T canvas
 # R2: hunger (GAME-DESIGN §5)
 33-play-hungry|screen=play;seed=7;freezeOn=hungry|40|No pilot and no taps, so nothing is eaten. Hungry: the next snap glyph draining, "Hungry… bite!"|SNAP-T event hungry
 34-play-wilted|screen=play;seed=7;freezeOn=wilted|45|No pilot and no taps. A snap wilted: the "wilted −1" pop, the snaps row one shorter|SNAP-T event wilted
+# R3
+35-play-night-open|screen=play;seed=7;wave=24;pilot=expert;freezeOn=landed|40|Night with the trap open (no bite on screen): the blue bog, the trap still crimson, firefly blooms|SNAP-T canvas
+36-badges|screen=badges|15|The 12 Game Center achievement badges, 1024 x 1024 (written to Documents/badges, collected into badges/)|SNAP-T badges done

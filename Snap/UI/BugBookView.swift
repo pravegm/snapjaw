@@ -13,7 +13,7 @@ struct BugBookView: View {
         let half = (all.count + 1) / 2
         let first = Array(all.prefix(half))
         let second = Array(all.dropFirst(half))
-        let pause = HUDLayout.make(info).pause
+        let pause = HUDLayout.make(info).back
         // The header row is tall enough that the back button sits in it, never over the first card (REVIEW-1 #13).
         let headerH = BugBookView.headerHeight(compact: c, pauseMaxY: pause.maxY, top: info.top)
         ZStack {
@@ -60,8 +60,8 @@ struct BugBookView: View {
                 }
                 .padding(.bottom, 28)
             }
-            // A fade at the foot says "there's more below" (the fourth row peeks under it).
-            .mask { SettingsView.footFade }
+            // A fade and a chevron at the foot say "there's more below" (REVIEW-2 #19: the fourth row).
+            .scrollColumn(initially: true)
         }
         .padding(.top, info.top - 8)
         .frame(width: rect.width, height: info.size.height, alignment: .top)
@@ -109,8 +109,9 @@ struct BugBookCard: View {
                     Text(found ? info.name : "???")
                         .font(SnapType.headline(compact))
                         .foregroundStyle(SnapTheme.cream)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.75)
+                        .fixedSize(horizontal: false, vertical: true)
                     if found {
                         Text(Self.countLine(species, data: data))
                             .font(SnapType.caption(compact).monospacedDigit())

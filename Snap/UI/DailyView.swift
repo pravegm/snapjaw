@@ -20,7 +20,7 @@ struct DailyView: View {
         let today = controller.today
         let canPlay = store.canPlayScoredDaily(today: today)
         let record = store.data.dailyRecord(day: today)
-        let pause = HUDLayout.make(info).pause
+        let pause = HUDLayout.make(info).back
         ZStack {
             BogBackdrop(controller: controller, glow: SnapTheme.gold)
             VStack(spacing: c ? 8 : 14) {

@@ -393,8 +393,8 @@ final class BogEffects {
 
 // MARK: - Score pops
 
-/// The in-world callouts ("FEAST ×5 · +255", "+40", "Bzzt!", "wilted −1"): a pooled outlined label with a soft drop
-/// shadow, popping in with an overshoot, rising and fading on the FX clock. R2: 20 slots; when all are busy the
+/// The in-world callouts ("FEAST ×5 · +255", "+40", "Bzzt!", "Too slow! −1 snap"): a pooled outlined label with a
+/// soft drop shadow, popping in with an overshoot, rising, shrinking and only then fading on the FX clock. R2: 20 slots; when all are busy the
 /// oldest is recycled (QA-1 #22), never a pop that has only just appeared.
 @MainActor
 final class BogPops {
@@ -468,6 +468,11 @@ final class BogPops {
 
     /// How far a pop overshoots its size as it pops in (the crease clamp leaves room for it).
     nonisolated static func overshoot(hero: Bool) -> CGFloat { hero ? 0.22 : 0.18 }
+
+    /// R3 (#25): a pop leaves by shrinking as it lifts, still opaque, and only fades at the very end (never a
+    /// half-transparent smear mid-fade). `f` is its life fraction (0…1).
+    nonisolated static func exitScale(_ f: CGFloat) -> CGFloat { 1 - 0.38 * BogMath.smoothstep(0.66, 1, f) }
+    nonisolated static func exitAlpha(_ f: CGFloat) -> CGFloat { 1 - BogMath.smoothstep(0.86, 1, f) }
 
     var activeCount: Int { ages.filter { $0 >= 0 }.count }
 
@@ -557,9 +562,10 @@ final class BogPops {
             l.isHidden = false
             sh.isHidden = false
             let over = BogPops.overshoot(hero: heroes[i])
-            let k: CGFloat
+            var k: CGFloat
+            // R3 (#15): it pops in from 0.72 (readable even on the hit-stop's frozen first frame), overshoots, settles.
             if u < 0.09 {
-                k = 0.3 + (0.7 + over) * CGFloat(u / 0.09)
+                k = 0.72 + (0.28 + over) * CGFloat(u / 0.09)
             } else if u < 0.22 {
                 k = 1 + over - over * BogMath.smoothstep(0.09, 0.22, CGFloat(u))
             } else {
@@ -568,7 +574,8 @@ final class BogPops {
             let f = CGFloat(min(u / lives[i], 1))
             let ease = 1 - (1 - f) * (1 - f)
             let p = CGPoint(x: starts[i].x, y: starts[i].y + rises[i] * ease)
-            let a = 1 - BogMath.smoothstep(0.62, 1, f)
+            k *= BogPops.exitScale(f)
+            let a = BogPops.exitAlpha(f)
             l.position = p
             l.setScale(k)
             l.alpha = a

@@ -3,9 +3,9 @@ import Foundation
 
 /// The game's colours (ARCHITECTURE "Scene API"): a sunlit bog, a glossy crimson trap, gold nectar.
 /// - `bog`, `bogDeep`, `moss`: the bog's greens (mid, darkest, lightest).
-/// - `lobeOuter`: the lobe's inner face towards its outer edge (bright crimson-pink).
-/// - `lobeInner`: the face by the midrib (deep crimson).
-/// - `lobeGloss`: the wet highlight. `rim`: the lime margin and outer skin. `teeth`: the pale cilia.
+/// - `lobeOuter`: the lobe's face towards the margin (crimson, R3 ≤ #C42A45).
+/// - `lobeInner`: the face by the midrib (oxblood, R3 ≤ #9A1A33).
+/// - `lobeGloss`: the wet highlight. `rim`: a lime accent (UI). `teeth`: the cilia's cream tips.
 /// - `nectar`: the drops (translucent amber). `gold`: score pops only (R2: sip rings are lime-white).
 /// - `danger`: wasps, stings. `text` / `ink`: light / dark type.
 struct SnapPalette: Equatable, Sendable {
@@ -24,9 +24,9 @@ struct SnapPalette: Equatable, Sendable {
     let ink: RGBA
 }
 
-/// One cilium (tooth) on a lobe's outer rim, in scene space, as drawn with the trap open.
+/// One cilium (tooth) on a lobe's outer margin, in scene space, as drawn with the trap open.
 struct TrapTooth: Equatable, Sendable {
-    /// Where it grows from (on the lime margin, just inside the zone's edge).
+    /// Where it grows from (on the margin, at the lobe's thin green back).
     var root: CGPoint
     /// The outward direction it points when the trap is open (radians, 0 = +x).
     var angle: CGFloat
@@ -39,41 +39,64 @@ struct TrapTooth: Equatable, Sendable {
 /// The trap, bugs and nectar drawn with CoreGraphics paths, so SwiftUI (Home, Bug Book, icon) and SpriteKit share one
 /// art source. Pure functions: no UIKit, no SpriteKit, no actor isolation (safe in `Shape.path(in:)` and tests).
 ///
+/// **R3: a Venus flytrap seen from above** (the founder's art direction), never a fruit slice:
+/// - two distinct clam-shaped lobes hinged on a midrib seam; the margins dip at the midrib's ends (`notchDepth`) and a
+///   narrow dark gap parts the lobes' inner edges there (`seamGap`), so it reads as two leaves, not one ellipse;
+/// - no rind: an oxblood → crimson face with a yellow-green blush only in the last ~10 % before the margin, and the
+///   leaf's back only as a thin dark-green lip (`exteriorWidth`) that the cilia grow from;
+/// - long, thin, slightly curved cilia (`teethPerSide` × 2 = 76), pale green to cream;
+/// - a green petiole from the bottom of the midrib into the bog (`BogArt.drawPetiole`).
+///
 /// Conventions: scene space (points, y up). Lobe and teeth paths are in the scene space of `geometry`. Bug paths are
 /// centred at the origin, facing +x, inside a square of half-side `bugExtent(radius:)`.
 ///
 /// **Closure** (`closure01` 0 open … 1 at the snap depth). The scene's still frame agrees with the hands:
-/// - each tooth swings over the rim about its root (a 3-D lean seen from above): its projected length is
+/// - each tooth swings over the margin about its root (a 3-D lean seen from above): its projected length is
 ///   `cos(lean)` with `lean = closure01 × toothMaxLean` — at about 0.75 it points at you, past that it points in;
 /// - the lobe foreshortens towards the midrib by up to `lobeSquash` (15 %), as if tilting towards you;
 /// - (scene only) a shadow grows in from the outer edges and the gloss slides.
+///
+/// **The bite** (R3 #1): the lobes squeeze to `slamSqueeze` about the midrib, the margins meet over a dark interior and
+/// the cilia interlock across the seam (`closedTrapPath`, `BogArt.drawClosedTrap`). Nothing is ever drawn outside the
+/// open trap's outline.
 enum TrapArt {
     static let palette = SnapPalette(
         bog: RGBA(hex: 0x1F5E3A),
         bogDeep: RGBA(hex: 0x0C2E1E),
         moss: RGBA(hex: 0x5FA83A),
-        lobeOuter: RGBA(hex: 0xD23048),
-        lobeInner: RGBA(hex: 0x7A0C26),
+        lobeOuter: RGBA(hex: 0xC02A42),
+        lobeInner: RGBA(hex: 0x5C0B1E),
         lobeGloss: RGBA(hex: 0xFFD0DC),
         rim: RGBA(hex: 0xB7E34A),
-        teeth: RGBA(hex: 0xEAF7B8),
+        teeth: RGBA(hex: 0xF4EFC6),
         nectar: RGBA(hex: 0xF5A623),
         gold: RGBA(hex: 0xFFD54A),
         danger: RGBA(hex: 0xFF3B30),
         text: RGBA(hex: 0xFFF8E7),
         ink: RGBA(hex: 0x1E0A10))
 
-    /// The chunky cartoon outline (a warm near-black; the bugs' and the trap's outline).
+    /// The chunky cartoon outline (a warm near-black; the bugs' outline).
     static let outline = RGBA(hex: 0x1E0A10)
     /// The lobe's dark green outline against the bog.
-    static let lobeOutline = RGBA(hex: 0x123A1C)
-    /// R2: the lobe's green back (the exterior band seen beyond the lip) and its shaded edge.
-    static let leaf = RGBA(hex: 0x4C9A3C)
-    static let leafDark = RGBA(hex: 0x1F5526)
-    /// R2: the thin dark-green lip between the crimson face and the green back (no lime rind).
+    static let lobeOutline = RGBA(hex: 0x10301A)
+    /// R3: the crimson core of the face (between the oxblood midrib and the crimson margin).
+    static let lobeCore = RGBA(hex: 0x9A1A33)
+    /// R3: the warm yellow-green blush in the last ~10 % before the margin.
+    static let blush = RGBA(hex: 0xB9C04A)
+    /// R3: the leaf's back, seen only as a thin lip beyond the margin, and its shaded edge.
+    static let leaf = RGBA(hex: 0x2F5F2B)
+    static let leafDark = RGBA(hex: 0x173D19)
+    /// The thin dark-green lip between the face and the back (no lime rind).
     static let lip = RGBA(hex: 0x1A4720)
-    /// R2: how far the green back shows beyond the trap zone's edge (points; the brief's 24–32).
-    static let exteriorWidth: CGFloat = 26
+    /// R3: the cilia, from a green base to a cream tip (`palette.teeth`).
+    static let ciliaBase = RGBA(hex: 0x6A9A40)
+    static let ciliaMid = RGBA(hex: 0xCFE39A)
+    /// R3: the dark interior (the seam's gap, the closed trap's inside).
+    static let interior = RGBA(hex: 0x1C0309)
+    /// R3: the petiole (the leaf stalk into the bog).
+    static let petiole = RGBA(hex: 0x4E9338)
+    /// How far the leaf's back shows beyond the margin (R3: a thin lip, not a band).
+    static let exteriorWidth: CGFloat = 9
     /// R2: the sip ring on a catchable bug (lime-white: gold is kept for nectar and score).
     static let sipRing = RGBA(hex: 0xEEFFC4)
     /// R2: every bug is drawn this much bigger than R1 (Core's `BugInfo.radius` grows by the same factor).
@@ -83,21 +106,29 @@ enum TrapArt {
     /// R2: a protected bug's ring radius, as a multiple of its art radius.
     static let protectedRingScale: CGFloat = 1.6
 
+    // MARK: The lobes' shape
+
+    /// R3: how far the margin dips at each end of the midrib (points), and the dip's half-width.
+    static let notchDepth: CGFloat = 40
+    static let notchWidth: CGFloat = 56
+    /// R3: how far each lobe's inner edge parts from the midrib line at its ends (points; 0 in the middle).
+    static let seamGap: CGFloat = 7
+
     // MARK: Closure
 
-    /// Cilia per lobe.
-    static let teethPerSide = 24
+    /// Cilia per lobe (R3: 60–80 in total).
+    static let teethPerSide = 38
     /// The lean (degrees) the teeth reach at `closure01` = 1 (the snap depth).
     static let toothMaxLean: Double = 120
-    /// The lean during the jaw slam (the teeth flip right over and interlock).
+    /// The lean during the jaw slam (the teeth flip right over).
     static let slamLean: Double = 165
     /// How much the lobe foreshortens towards the midrib at `closure01` = 1 (R2: 3 % → 15 %, so the screen agrees with
     /// the hands).
     static let lobeSquash: CGFloat = 0.15
-    /// The slam squeezes each lobe to this x scale towards the midrib for the bite's hold.
-    static let slamSqueeze: CGFloat = 0.6
-    /// The thin lip's width (points; R1's lime margin was 17).
-    static let rimBand: CGFloat = 5
+    /// R3: the bite squeezes each lobe to this x scale about the midrib (the margins meet; the closed trap).
+    static let slamSqueeze: CGFloat = 0.3
+    /// The thin lip's width inside the margin (points).
+    static let rimBand: CGFloat = 4
     /// The midrib's half width at its widest (it covers the fold band).
     static let midribHalfWidth: CGFloat = 22
 
@@ -128,44 +159,79 @@ enum TrapArt {
         CGPoint(x: g.center.x + g.a * cos(t) * r * k, y: g.center.y + g.b * sin(t) * r)
     }
 
-    /// One lobe (side −1 left, +1 right): the half of the trap ellipse on that side of the midrib, closed along the
-    /// midrib line. `closure01` foreshortens it towards the midrib by up to `lobeSquash`.
-    static func lobePath(side: Int, geometry g: TrapGeometry, closure01: CGFloat) -> CGPath {
-        halfEllipse(side: side, geometry: g, radius: 1, squash: 1 - lobeSquash * min(max(closure01, 0), 1))
+    /// The notch's weight at `x` points from the midrib: 1 on it, falling off over `notchWidth`.
+    static func notchWeight(_ x: CGFloat) -> CGFloat {
+        let u = x / notchWidth
+        return exp(-u * u)
     }
 
-    /// The lobe's inner (crimson) face: the lobe inset by the lime margin.
-    static func lobeFacePath(side: Int, geometry g: TrapGeometry) -> CGPath {
-        let p = CGMutablePath()
+    /// A point on lobe `side`'s margin at angle `t` (π/2 the top of the midrib, 0 the outer middle, −π/2 its bottom)
+    /// for semi-axes `a`, `b`, foreshortened towards the midrib by `k`. The margin dips by `notchDepth` and parts by
+    /// `gap` at the midrib's ends: a clam shape, not a half ellipse.
+    static func marginPoint(_ g: TrapGeometry, side: Int, t: CGFloat, a: CGFloat, b: CGFloat, squash k: CGFloat = 1,
+                            gap: CGFloat = TrapArt.seamGap) -> CGPoint {
         let s: CGFloat = side < 0 ? -1 : 1
-        let ia = g.a - rimBand, ib = g.b - rimBand
-        let n = 120
-        p.move(to: CGPoint(x: g.center.x, y: g.center.y + ib))
+        let c = max(cos(t), 0), sn = sin(t)
+        let x0 = a * c
+        let w = notchWeight(x0)
+        let x = (x0 + gap * w * abs(sn)) * k
+        let y = (b - notchDepth * w) * sn
+        return CGPoint(x: g.center.x + s * x, y: g.center.y + y)
+    }
+
+    /// R3: one lobe's outline (side −1 left, +1 right), `inset` points inside the margin (negative: outside it),
+    /// foreshortened towards the midrib by `k`. The inner edge runs along the midrib: the lobes touch in the middle
+    /// and part at the ends. `semiAxisX` replaces the lobe's width (the closed trap: a narrower lobe with the same
+    /// notch and seam, so it lies inside the open one point for point).
+    static func lobeShape(side: Int, geometry g: TrapGeometry, inset: CGFloat = 0, squash k: CGFloat = 1,
+                            semiAxisX: CGFloat? = nil) -> CGPath {
+        let s: CGFloat = side < 0 ? -1 : 1
+        let a = max(semiAxisX ?? (g.a - inset), 10), b = max(g.b - inset, 10)
+        let gap = seamGap + max(inset, 0) * 0.6
+        let n = 160
+        let p = CGMutablePath()
+        let top = marginPoint(g, side: side, t: .pi / 2, a: a, b: b, squash: k, gap: gap)
+        p.move(to: top)
         for i in 1...n {
             let t = CGFloat.pi / 2 - CGFloat(i) / CGFloat(n) * .pi
-            p.addLine(to: CGPoint(x: g.center.x + s * ia * cos(t), y: g.center.y + ib * sin(t)))
+            p.addLine(to: marginPoint(g, side: side, t: t, a: a, b: b, squash: k, gap: gap))
         }
+        p.addQuadCurve(to: top, control: CGPoint(x: g.center.x - s * gap * k, y: g.center.y))
         p.closeSubpath()
         return p
+    }
+
+    /// R3: the margin alone, an open curve from the top of the midrib round the outer side to its bottom, `inset`
+    /// points inside (the blush and the rim light are strokes along it, never along the midrib).
+    static func marginCurve(side: Int, geometry g: TrapGeometry, inset: CGFloat = 0, squash k: CGFloat = 1) -> CGPath {
+        let a = max(g.a - inset, 10), b = max(g.b - inset, 10)
+        let gap = seamGap + max(inset, 0) * 0.6
+        let n = 160
+        let p = CGMutablePath()
+        p.move(to: marginPoint(g, side: side, t: .pi / 2, a: a, b: b, squash: k, gap: gap))
+        for i in 1...n {
+            let t = CGFloat.pi / 2 - CGFloat(i) / CGFloat(n) * .pi
+            p.addLine(to: marginPoint(g, side: side, t: t, a: a, b: b, squash: k, gap: gap))
+        }
+        return p
+    }
+
+    /// One lobe's margin outline: `closure01` foreshortens it towards the midrib by up to `lobeSquash`.
+    static func lobePath(side: Int, geometry g: TrapGeometry, closure01: CGFloat) -> CGPath {
+        lobeShape(side: side, geometry: g, inset: 0, squash: 1 - lobeSquash * min(max(closure01, 0), 1))
+    }
+
+    /// The lobe's crimson face: the lobe inset by the thin lip.
+    static func lobeFacePath(side: Int, geometry g: TrapGeometry) -> CGPath {
+        lobeShape(side: side, geometry: g, inset: rimBand)
     }
 
     /// The half ellipse on `side` at radius fraction `radius` (closed along the midrib line).
     static func halfEllipse(side: Int, geometry g: TrapGeometry, radius r: CGFloat, squash k: CGFloat) -> CGPath {
-        let p = CGMutablePath()
-        let s: CGFloat = side < 0 ? -1 : 1
-        let n = 120
-        p.move(to: CGPoint(x: g.center.x, y: g.center.y + g.b * r))
-        for i in 1...n {
-            // From the top (π/2) round the outer side to the bottom (−π/2), mirrored by `s`.
-            let t = CGFloat.pi / 2 - CGFloat(i) / CGFloat(n) * .pi
-            p.addLine(to: CGPoint(x: g.center.x + s * g.a * r * k * cos(t), y: g.center.y + g.b * r * sin(t)))
-        }
-        p.closeSubpath()
-        return p
+        halfEllipse(side: side, geometry: g, rx: g.a * r * k, ry: g.b * r)
     }
 
-    /// The half ellipse on `side` with semi-axes `rx`, `ry` about the trap centre (closed along the midrib line): the
-    /// green back is a constant-width band, so it can't be a radius fraction.
+    /// The half ellipse on `side` with semi-axes `rx`, `ry` about the trap centre (closed along the midrib line).
     static func halfEllipse(side: Int, geometry g: TrapGeometry, rx: CGFloat, ry: CGFloat) -> CGPath {
         let p = CGMutablePath()
         let s: CGFloat = side < 0 ? -1 : 1
@@ -179,51 +245,76 @@ enum TrapArt {
         return p
     }
 
-    /// The lobe's green back: the half ellipse `exteriorWidth` beyond the zone's edge.
+    /// The lobe's back: the thin dark-green lip `exteriorWidth` beyond the margin.
     static func exteriorPath(side: Int, geometry g: TrapGeometry) -> CGPath {
-        halfEllipse(side: side, geometry: g, rx: g.a + exteriorWidth, ry: g.b + exteriorWidth)
+        lobeShape(side: side, geometry: g, inset: -exteriorWidth)
     }
 
-    /// The midrib (the trap's hinge, on the fold band): a lens from the top of the zone to the bottom.
+    /// R3: the closed trap (the bite's hold): both lobes, backs included, `slamSqueeze` of their open width about the
+    /// midrib, with the same notches and seam. It lies inside the open trap's outline point for point.
+    static func closedTrapPath(geometry g: TrapGeometry) -> CGPath {
+        let p = CGMutablePath()
+        for side in [-1, 1] { p.addPath(closedLobePath(side: side, geometry: g, inset: -exteriorWidth)) }
+        return p
+    }
+
+    /// One closed lobe, `inset` points inside its margin (negative: its back).
+    static func closedLobePath(side: Int, geometry g: TrapGeometry, inset: CGFloat) -> CGPath {
+        lobeShape(side: side, geometry: g, inset: inset, semiAxisX: (g.a - inset) * slamSqueeze)
+    }
+
+    /// The midrib (the trap's hinge, on the fold band): a lens down the seam, ending inside the notches.
     static func midribPath(geometry g: TrapGeometry) -> CGPath {
         let p = CGMutablePath()
-        let cx = g.center.x, top = g.center.y + g.b - 4, bottom = g.center.y - g.b + 4
+        let half = g.b - notchDepth + 2
+        let cx = g.center.x, top = g.center.y + half, bottom = g.center.y - half
         let w = midribHalfWidth
         p.move(to: CGPoint(x: cx, y: top))
-        p.addCurve(to: CGPoint(x: cx, y: bottom), control1: CGPoint(x: cx + w * 1.32, y: top - g.b * 0.45),
-                   control2: CGPoint(x: cx + w * 1.32, y: bottom + g.b * 0.45))
-        p.addCurve(to: CGPoint(x: cx, y: top), control1: CGPoint(x: cx - w * 1.32, y: bottom + g.b * 0.45),
-                   control2: CGPoint(x: cx - w * 1.32, y: top - g.b * 0.45))
+        p.addCurve(to: CGPoint(x: cx, y: bottom), control1: CGPoint(x: cx + w * 1.32, y: top - half * 0.45),
+                   control2: CGPoint(x: cx + w * 1.32, y: bottom + half * 0.45))
+        p.addCurve(to: CGPoint(x: cx, y: top), control1: CGPoint(x: cx - w * 1.32, y: bottom + half * 0.45),
+                   control2: CGPoint(x: cx - w * 1.32, y: top - half * 0.45))
         p.closeSubpath()
         return p
     }
 
-    /// The veins radiating from the midrib across one lobe's face (a path to stroke).
+    /// R3: the narrow dark gap between the two lobes' inner edges (widest at the midrib's ends, closed in the middle).
+    static func seamGapPath(geometry g: TrapGeometry) -> CGPath {
+        let p = CGMutablePath()
+        let cx = g.center.x, cy = g.center.y
+        let h = g.b - notchDepth
+        let gap = seamGap + 1
+        p.move(to: CGPoint(x: cx - gap, y: cy + h))
+        p.addQuadCurve(to: CGPoint(x: cx - gap, y: cy - h), control: CGPoint(x: cx + gap, y: cy))
+        p.addLine(to: CGPoint(x: cx + gap, y: cy - h))
+        p.addQuadCurve(to: CGPoint(x: cx + gap, y: cy + h), control: CGPoint(x: cx - gap, y: cy))
+        p.closeSubpath()
+        return p
+    }
+
+    /// The fine veins radiating from the midrib across one lobe's face (a path to stroke).
     static func veinsPath(side: Int, geometry g: TrapGeometry) -> CGPath {
         let p = CGMutablePath()
         let s: CGFloat = side < 0 ? -1 : 1
-        let n = 11
+        let n = 17
+        let h = g.b - notchDepth
         for i in 0..<n {
             let u = (CGFloat(i) + 0.5) / CGFloat(n)            // 0 top … 1 bottom
-            let t = CGFloat.pi / 2 - u * .pi                    // the vein's end angle on the face edge
-            let startY = g.center.y + g.b * 0.78 * (1 - 2 * u)
-            let start = CGPoint(x: g.center.x + s * midribHalfWidth * 0.6, y: startY)
-            let end = ellipsePoint(g, t, 0.9)
-            let endX = g.center.x + s * abs(end.x - g.center.x)
-            let ctrl = CGPoint(x: g.center.x + s * abs(end.x - g.center.x) * 0.45,
-                               y: startY + (end.y - startY) * 0.25)
+            let t = CGFloat.pi / 2 * 0.94 - u * .pi * 0.94      // the vein's end angle on the margin
+            let startY = g.center.y + h * 0.92 * (1 - 2 * u)
+            let start = CGPoint(x: g.center.x + s * midribHalfWidth * 0.5, y: startY)
+            let end = marginPoint(g, side: side, t: t, a: g.a * 0.93, b: g.b * 0.93)
+            let ctrl = CGPoint(x: g.center.x + (end.x - g.center.x) * 0.5, y: startY + (end.y - startY) * 0.2)
             p.move(to: start)
-            p.addQuadCurve(to: CGPoint(x: endX, y: end.y), control: ctrl)
+            p.addQuadCurve(to: end, control: ctrl)
             // A small side branch on every other vein.
             if i % 2 == 1 {
-                let mid = CGPoint(x: g.center.x + s * abs(end.x - g.center.x) * 0.55,
-                                  y: startY + (end.y - startY) * 0.5)
-                let bt = t + (u < 0.5 ? 0.12 : -0.12)
-                let bEnd = ellipsePoint(g, bt, 0.82)
+                let mid = CGPoint(x: g.center.x + (end.x - g.center.x) * 0.52, y: startY + (end.y - startY) * 0.42)
+                let bt = t + (u < 0.5 ? 0.1 : -0.1)
+                let bEnd = marginPoint(g, side: side, t: bt, a: g.a * 0.86, b: g.b * 0.86)
                 p.move(to: mid)
-                p.addQuadCurve(to: CGPoint(x: g.center.x + s * abs(bEnd.x - g.center.x), y: bEnd.y),
-                               control: CGPoint(x: g.center.x + s * abs(bEnd.x - g.center.x) * 0.8,
-                                                y: mid.y + (bEnd.y - mid.y) * 0.3))
+                p.addQuadCurve(to: bEnd, control: CGPoint(x: g.center.x + (bEnd.x - g.center.x) * 0.8,
+                                                          y: mid.y + (bEnd.y - mid.y) * 0.3))
             }
         }
         return p
@@ -236,8 +327,8 @@ enum TrapArt {
         return spots.map { CGPoint(x: g.center.x + s * g.a * $0.0, y: g.center.y + g.b * $0.1) }
     }
 
-    /// The rim's start (normalised radius `TrapGeometry.rimStart`) on one lobe: points for the row of tiny glands
-    /// that marks where bugs are "half in".
+    /// The rim's start (normalised radius `TrapGeometry.rimStart`) on one lobe: where bugs are "half in" (R3: the
+    /// blush begins about here; the points are no longer drawn as pale dots).
     static func rimGlands(side: Int, geometry g: TrapGeometry) -> [CGPoint] {
         let s: CGFloat = side < 0 ? -1 : 1
         let n = 34
@@ -250,19 +341,20 @@ enum TrapArt {
 
     // MARK: The teeth
 
-    /// The cilia on one lobe, evenly spaced by arc length along the outer rim from near the top of the midrib, round
-    /// the outer side, to near its bottom. Longest at the outer middle, shorter towards the midrib's ends.
+    /// The cilia on one lobe, evenly spaced by arc length along the margin from near the top of the midrib, round the
+    /// outer side, to near its bottom. Longest at the outer middle, shorter towards the midrib's ends.
     static func teeth(side: Int, geometry g: TrapGeometry) -> [TrapTooth] {
         let s: CGFloat = side < 0 ? -1 : 1
-        let gap: CGFloat = 0.17
-        let t0 = CGFloat.pi / 2 - gap, t1 = -CGFloat.pi / 2 + gap   // the right side, top to bottom
-        let samples = 400
+        let gapT: CGFloat = 0.22
+        let t0 = CGFloat.pi / 2 - gapT, t1 = -CGFloat.pi / 2 + gapT   // the right side, top to bottom
+        let samples = 480
         var pts: [CGPoint] = []
         var cum: [CGFloat] = [0]
         pts.reserveCapacity(samples + 1)
         for i in 0...samples {
             let t = t0 + (t1 - t0) * CGFloat(i) / CGFloat(samples)
-            let q = CGPoint(x: g.a * cos(t), y: g.b * sin(t))
+            let m = marginPoint(g, side: 1, t: t, a: g.a, b: g.b)
+            let q = CGPoint(x: m.x - g.center.x, y: m.y - g.center.y)
             if let last = pts.last {
                 let dx = q.x - last.x, dy = q.y - last.y
                 cum.append(cum[cum.count - 1] + (dx * dx + dy * dy).squareRoot())
@@ -279,19 +371,18 @@ enum TrapArt {
             let target = u * total
             while j < samples - 1 && cum[j + 1] < target { j += 1 }
             let seg = max(cum[j + 1] - cum[j], 0.0001)
-            let f = (target - cum[j]) / seg
-            let tt = t0 + (t1 - t0) * (CGFloat(j) + f) / CGFloat(samples)
-            // The outward normal of the ellipse (the gradient), mirrored for the left side.
-            var nx = cos(tt) / g.a, ny = sin(tt) / g.b
-            let len = max((nx * nx + ny * ny).squareRoot(), 0.000001)
-            nx /= len
-            ny /= len
-            let rootR: CGFloat = 0.985
-            let root = CGPoint(x: g.center.x + s * g.a * rootR * cos(tt), y: g.center.y + g.b * rootR * sin(tt))
+            let f = min(max((target - cum[j]) / seg, 0), 1)
+            let q = CGPoint(x: pts[j].x + (pts[j + 1].x - pts[j].x) * f, y: pts[j].y + (pts[j + 1].y - pts[j].y) * f)
+            // The outward normal (the tangent turned a quarter clockwise: the right side runs top to bottom).
+            let tx = pts[j + 1].x - pts[j].x, ty = pts[j + 1].y - pts[j].y
+            let tl = max((tx * tx + ty * ty).squareRoot(), 0.000001)
+            let nx = -ty / tl, ny = tx / tl
+            let rootR: CGFloat = 0.99
+            let root = CGPoint(x: g.center.x + s * q.x * rootR, y: g.center.y + q.y * rootR)
             let angle = atan2(ny, s * nx)
             let bulge = sin(CGFloat.pi * u)
-            // R2: cilia, not spikes: 1.5 × longer and 40 % thinner than R1, the tip kept 4 pt inside the canvas.
-            var length: CGFloat = 30 + 33 * bulge
+            // R3: long, thin cilia (60–80 in all), the tip kept 4 pt inside the canvas.
+            var length: CGFloat = 34 + 30 * bulge
             let dx = cos(angle), dy = sin(angle)
             let margin: CGFloat = 4
             if dx < -0.0001 { length = min(length, (root.x - margin) / -dx) }
@@ -299,28 +390,29 @@ enum TrapArt {
             if dy < -0.0001 { length = min(length, (root.y - margin) / -dy) }
             if dy > 0.0001 { length = min(length, (g.sceneSize.height - margin - root.y) / dy) }
             length = max(length, 18)
-            out.append(TrapTooth(root: root, angle: angle, length: length, width: (8.5 + 3 * bulge) * 0.6,
+            out.append(TrapTooth(root: root, angle: angle, length: length, width: 3.6 + 1.1 * bulge,
                                  curl: i % 2 == 0 ? 1 : -1))
         }
         return out
     }
 
-    /// One tooth in its own frame: root at the origin (tucked 3 pt under the rim), pointing +y, `length` long.
+    /// One tooth in its own frame: root at the origin (tucked 3 pt under the margin), pointing +y, `length` long,
+    /// tapering to a fine tip that curls a little.
     static func toothShape(length L: CGFloat, width w: CGFloat, curl: CGFloat) -> CGPath {
         let p = CGMutablePath()
         let h = w / 2
-        let tipX = curl * L * 0.12
+        let tipX = curl * L * 0.09
         p.move(to: CGPoint(x: -h, y: -3))
-        p.addCurve(to: CGPoint(x: tipX - 0.7, y: L - 0.6), control1: CGPoint(x: -h * 0.9, y: L * 0.35),
-                   control2: CGPoint(x: tipX * 0.6 - h * 0.25, y: L * 0.75))
-        p.addQuadCurve(to: CGPoint(x: tipX + 0.7, y: L - 0.6), control: CGPoint(x: tipX, y: L + 0.8))
-        p.addCurve(to: CGPoint(x: h, y: -3), control1: CGPoint(x: tipX * 0.6 + h * 0.25, y: L * 0.75),
-                   control2: CGPoint(x: h * 0.9, y: L * 0.35))
+        p.addCurve(to: CGPoint(x: tipX - 0.45, y: L - 0.5), control1: CGPoint(x: -h * 0.8, y: L * 0.4),
+                   control2: CGPoint(x: tipX * 0.7 - h * 0.2, y: L * 0.8))
+        p.addQuadCurve(to: CGPoint(x: tipX + 0.45, y: L - 0.5), control: CGPoint(x: tipX, y: L + 0.6))
+        p.addCurve(to: CGPoint(x: h, y: -3), control1: CGPoint(x: tipX * 0.7 + h * 0.2, y: L * 0.8),
+                   control2: CGPoint(x: h * 0.8, y: L * 0.4))
         p.closeSubpath()
         return p
     }
 
-    /// The transform that places a tooth (`toothShape`) on the rim at a lean, with the lobe foreshortened by `squash`.
+    /// The transform that places a tooth (`toothShape`) on the margin at a lean, with the lobe foreshortened by `squash`.
     static func toothTransform(_ tooth: TrapTooth, geometry g: TrapGeometry, lean: CGFloat,
                                squash k: CGFloat) -> CGAffineTransform {
         let root = CGPoint(x: g.center.x + (tooth.root.x - g.center.x) * k, y: tooth.root.y)
@@ -329,7 +421,7 @@ enum TrapArt {
             .scaledBy(x: 1, y: toothReach(lean: lean))
     }
 
-    /// Every tooth on one lobe at `closure01` (they lean over the rim as it grows; see the type's notes).
+    /// Every tooth on one lobe at `closure01` (they lean over the margin as it grows; see the type's notes).
     static func teethPath(side: Int, geometry g: TrapGeometry, closure01: CGFloat) -> CGPath {
         let p = CGMutablePath()
         let c = min(max(closure01, 0), 1)
@@ -340,5 +432,29 @@ enum TrapArt {
             p.addPath(shape, transform: toothTransform(tooth, geometry: g, lean: lean, squash: k))
         }
         return p
+    }
+
+    /// R3: the closed trap's interlocking cilia (scene space): each lobe's cilia cross the seam from its own margin,
+    /// alternating with the other lobe's, like laced fingers. (root, angle, length) per cilium.
+    static func interlockedCilia(geometry g: TrapGeometry) -> [(root: CGPoint, angle: CGFloat, length: CGFloat,
+                                                                 curl: CGFloat)] {
+        var out: [(root: CGPoint, angle: CGFloat, length: CGFloat, curl: CGFloat)] = []
+        let h = g.b - notchDepth - 18
+        let n = 24
+        let step = 2 * h / CGFloat(n)
+        for side in [-1, 1] {
+            let s = CGFloat(side)
+            for i in 0..<n {
+                let y = g.center.y + h - step * (CGFloat(i) + (side < 0 ? 0.25 : 0.75))
+                let u = (y - (g.center.y - h)) / (2 * h)
+                let bulge = sin(CGFloat.pi * min(max(u, 0), 1))
+                let root = CGPoint(x: g.center.x + s * 9, y: y)
+                // Pointing across the seam (left lobe → +x), tilted a little alternately.
+                let tilt: CGFloat = (i % 2 == 0 ? 0.16 : -0.12) * s
+                let angle: CGFloat = (side < 0 ? 0 : .pi) + tilt
+                out.append((root: root, angle: angle, length: 24 + 12 * bulge, curl: i % 2 == 0 ? 1 : -1))
+            }
+        }
+        return out
     }
 }

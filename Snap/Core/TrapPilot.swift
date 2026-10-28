@@ -15,6 +15,9 @@ import Foundation
 //   perfect never misses and also waits while a protected bug is flying low over the trap.
 // - The novice sometimes creeps (a slow 12° close over 1.2 s before finishing the snap). The expert shoos a bee that
 //   has sat in the trap for 5 s with a slow 11° creep (bugs with nerve ≤ the creep depth leave) and reopens.
+// - R3 (REVIEW-2 #21): deterministic. Its only randomness is its SeededRandom and its only clock is the sum of its dt,
+//   so the same seed and the same dts give the same run; PilotRun steps a pilot and a session in fixed
+//   Tuning.pilotStep steps, so a CI capture is the same run whatever the display's frame times.
 // Keep in sync with Pilot in tools/balance-sim.js (same draw order).
 
 enum PilotSkill: String, CaseIterable, Sendable {
@@ -79,6 +82,9 @@ struct TrapPilot {
     private var missed: [Int: Bool] = [:]
     private var lastSnap: Double = 0
     private var plannedDuration: Double
+    /// R3 (REVIEW-2 #21): the pilot's own clock, the sum of the dt it was stepped with. Every decision runs on it,
+    /// never on the caller's (wall-clock) time, so the same seed and the same dts give the same run.
+    private var clock: Double = 0
 
     init(skill: PilotSkill, seed: UInt64) {
         self.skill = skill
@@ -193,8 +199,11 @@ struct TrapPilot {
         return !beeBlocks(snap)
     }
 
-    mutating func step(dt: Double, time: Double, snapshot: TrapSnapshot) -> PilotOutput {
+    /// One frame of `dt` s. `time` only stamps SnapTrigger.time; every decision uses the pilot's own clock (R3).
+    mutating func step(dt: Double, time stamp: Double, snapshot: TrapSnapshot) -> PilotOutput {
         let h: Double = dt.isFinite ? max(0, dt) : 0
+        let time: Double = clock
+        clock += h
         var fired: SnapTrigger? = nil
         let prev: Double = closure
         var playing: Bool = false
@@ -257,7 +266,7 @@ struct TrapPilot {
             if armed && closure >= Tuning.snapDepth {
                 let t22: Double = time - h + h * (Tuning.snapDepth - prev) / max(1e-9, closure - prev)
                 let start: Double = t4 ?? t22
-                fired = SnapTrigger(duration: max(0, t22 - start), time: time)
+                fired = SnapTrigger(duration: max(0, t22 - start), time: stamp.isFinite ? stamp : time)
                 armed = false
                 lastSnap = time
             }
@@ -291,5 +300,61 @@ struct TrapPilot {
         let input = TrapInput(closure: closure, armed: armed, creeping: creeping, snap: fired, tooFlat: false,
                               angle: Tuning.pilotIdleAngle - closure)
         return PilotOutput(input: input)
+    }
+}
+
+// MARK: - R3 (REVIEW-2 #21): a deterministic pilot run
+
+/// Steps a pilot and a session in fixed `Tuning.pilotStep` steps of session time, whatever the display's frame time:
+/// feed it each frame's dt and it runs as many whole steps as the time buys (the remainder carries to the next frame;
+/// at most `Tuning.pilotMaxStepsPerFrame` per frame, so after a long hitch the run falls behind instead of jumping).
+/// The run itself is the same sequence of fixed steps every time, so the same session seed and pilot seed give the
+/// same bites, scores and Results on any device and any frame rate. CI freezes should key on session time
+/// (`snapshot.time`) or on events, never on wall time.
+struct PilotRun {
+    private(set) var pilot: TrapPilot
+    /// Frame time not yet spent on a whole step (s).
+    private(set) var carry: Double = 0
+    /// The pilot's latest input (draw the jaws from it between steps).
+    private(set) var lastInput: TrapInput = TrapInput()
+    /// Fixed steps run so far.
+    private(set) var stepsRun: Int = 0
+
+    init(pilot: TrapPilot) {
+        self.pilot = pilot
+    }
+
+    init(skill: PilotSkill, seed: UInt64) {
+        self.pilot = TrapPilot(skill: skill, seed: seed)
+    }
+
+    /// How many whole fixed steps `dt` s of frame time buys now (the rest is carried).
+    mutating func steps(for dt: Double) -> Int {
+        let d: Double = dt.isFinite ? max(0, dt) : 0
+        carry += d
+        var n: Int = Int((carry / Tuning.pilotStep + 1e-9).rounded(.down))
+        if n > Tuning.pilotMaxStepsPerFrame {
+            n = Tuning.pilotMaxStepsPerFrame
+            carry = 0
+        } else {
+            carry = max(0, carry - Double(n) * Tuning.pilotStep)
+        }
+        return n
+    }
+
+    /// Advances `session` by `dt` s of frame time in fixed steps. Returns every step's events, in order. `stamp` only
+    /// stamps SnapTrigger.time.
+    mutating func advance(_ session: TrapSession, dt: Double, stamp: Double = 0) -> [TrapEvent] {
+        let n: Int = steps(for: dt)
+        var out: [TrapEvent] = []
+        var i: Int = 0
+        while i < n && !session.isFinished {
+            let o: PilotOutput = pilot.step(dt: Tuning.pilotStep, time: stamp, snapshot: session.snapshot)
+            lastInput = o.input
+            out.append(contentsOf: session.step(dt: Tuning.pilotStep, input: o.input))
+            stepsRun += 1
+            i += 1
+        }
+        return out
     }
 }

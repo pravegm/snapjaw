@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Snapjaw balance simulator (Round 2): a line-by-line Node port of Snap/Core (Tuning, BugCatalog, WaveFactory,
+// Snapjaw balance simulator (Round 3): a line-by-line Node port of Snap/Core (Tuning, BugCatalog, WaveFactory,
 // TrapSession, TrapPilot). KEEP IN SYNC with Snap/Core/*.swift: same constants, same draw order.
 // Used to tune Tuning numerically without a Swift compiler.
 //
@@ -10,7 +10,9 @@
 //   node tools/balance-sim.js attract=1            # attract mode never stalls
 //   node tools/balance-sim.js crowd=1              # R2: crowd waves land within 1.2 s
 //   node tools/balance-sim.js detector=1           # the SnapDetector checks (incl. QA-1 #5 and #6)
+//   node tools/balance-sim.js crease=1             # R3: no bug rests within creaseGap(radius) of the midrib line
 //   Any Tuning value can be overridden: T.beeChanceDusk=0.5
+//   With casual in the skills, it also runs the casual pilot's Sprout run 1 (SPROUT1) and checks it lasts >= 90 s.
 //   Seeds are 1000 + 7919*i (the same as SnapTests/BalanceTests.swift); the pilot seed is seed*7+1.
 //
 // Numbers are not bit-identical to Swift (libm sin/cos/pow may differ in the last bit and the runs are chaotic), so
@@ -18,27 +20,30 @@
 // drives TrapInput directly, as in the Swift harness).
 // R2: bugs x1.8 with a body rim test, nectar clusters, crowd landings, hunger (wilt), the >= 2 chain rule,
 // SessionOptions.startSnaps, spared-on-escape, and the casual pilot's fumbles (design/notes/core-R2.md).
+// R3: nothing rests on the crease, the hunger clock (18/16/14/12 s) from the first in-trap landing after a catch,
+// stinger bites x1 with no refund, SessionOptions.freeFirstSting, maxSnaps 14, the x5 chain cap, tight nectar
+// clusters, the late-night ramp, and the pilot's own clock (design/notes/core-R3.md).
 'use strict';
 
 // MARK: Tuning (mirror of Snap/Core/Tuning.swift)
 const T = {
   // economy (GAME-DESIGN §5)
-  startSnaps: 10, maxSnaps: 12, snapCost: 1, feastCount: 3, feastRefund: 1, bigFeastCount: 5, bigFeastRefund: 2,
-  scarabRefund: 2, ladybirdRefund: 1, beeCost: 1, waspCost: 2, chainStep: 0.5, chainMaxMultiplier: 4,
+  startSnaps: 10, maxSnaps: 14, snapCost: 1, feastCount: 3, feastRefund: 1, bigFeastCount: 5, bigFeastRefund: 2,
+  scarabRefund: 2, ladybirdRefund: 1, beeCost: 1, waspCost: 2, chainStep: 0.5, chainMaxMultiplier: 5,
   // bite (GAME-DESIGN §4)
   sipReactionFactor: 1.35, flyingReactionFactor: 0.55, rimReactionFactor: 0.6, catchableHeight: 0.6,
-  lateWaveStart: 30, lateReactionDecay: 0.97, lateReactionFloor: 0.6, lateLingerDecay: 0.98, lateLingerFloor: 0.5,
+  lateWaveStart: 30, lateReactionDecay: 0.96, lateReactionFloor: 0.25, lateLingerDecay: 0.92, lateLingerFloor: 0.2,
   // waves (GAME-DESIGN §6)
   firstWaveTime: 1.2, waveDelayMin: 3.0, waveDelayMax: 4.5,
   noonWave: 7, duskWave: 15, nightWave: 23, deepNightWave: 31,
   nectarReseedWaves: 6, nectarMin: 6, nectarMax: 8, nectarRadiusMin: 12, nectarRadiusMax: 16,
-  nectarClusterMin: 2, nectarClusterMax: 3, nectarRingMin: 40, nectarRingMax: 48, nectarClusterGap: 190, nectarArcMargin: 0.25, nectarHalfGap: 0.45,
-  nectarClusterInner: 0.32, nectarClusterOuter: 0.55, nectarKeptClearance: 60, nectarCreaseClearance: 50,
+  nectarClusterMin: 2, nectarClusterMax: 3, nectarRingMin: 24, nectarRingMax: 30, nectarClusterGap: 190, nectarArcMargin: 0.25, nectarHalfGap: 0.45,
+  nectarClusterInner: 0.32, nectarClusterOuter: 0.55, nectarKeptClearance: 60, nectarCreaseClearance: 80,
   nectarTries: 30, crowdNearMin: 60, crowdNearMax: 140,
   lingerMorningMin: 6, lingerMorningMax: 8, lingerNoonMin: 5, lingerNoonMax: 7,
   lingerDuskMin: 4, lingerDuskMax: 6, lingerNightMin: 3.5, lingerNightMax: 5,
-  beeFromWave: 3, beeChanceMorning: 0.5, beeChanceNoon: 0.4, beeChanceDusk: 0.5, beeChanceNight: 0.55,
-  beeChanceNight2: 0.15, extraBeeEvery: 8, maxProtectedPerWave: 4, beeLingerFactor: 0.6,
+  beeFromWave: 3, beeChanceMorning: 0.35, beeChanceNoon: 0.4, beeChanceDusk: 0.5, beeChanceNight: 0.55,
+  beeChanceNight2: 0.15, extraBeeEvery: 40, maxProtectedPerWave: 4, beeLingerFactor: 0.6,
   sizeFirstMin: 2, sizeFirstMax: 3, sizeMorningMin: 2, sizeMorningMax: 4, sizeNoonMin: 2, sizeNoonMax: 4,
   sizeDuskMin: 2, sizeDuskMax: 4, sizeNightMin: 2, sizeNightMax: 5,
   crowdFromWave: 3, crowdChance: 0.45, crowdSpread: 0.1, trickleMin: 0.6, trickleMax: 1.2, beeSpread: 2.5,
@@ -47,7 +52,9 @@ const T = {
   // session
   tiredSeconds: 2.2, caughtSeconds: 0.5, openUpDelay: 1.0, crowdHintCount: 3, maxSubstep: 1 / 120,
   // R2 hunger (GAME-DESIGN §5)
-  wiltMorning: 15, wiltNoon: 14, wiltDusk: 12, wiltNight: 10, hungryWarning: 3,
+  wiltMorning: 18, wiltNoon: 16, wiltDusk: 14, wiltNight: 12, hungryWarning: 3,
+  // R3 (REVIEW-2 #5): no bug rests within its radius + creaseClearance of the crease band (creaseHalfWidth each side)
+  creaseClearance: 16,
   // R2 bugs x1.8 (REVIEW-1 #4)
   bugRadiusScale: 1.8, chainMinBite: 2,
   // motion (ROUND-1 "Movement")
@@ -69,6 +76,7 @@ const T = {
 };
 const SNAP_DEPTH = 22, SNAP_START = 4, CREEP_DEPTH = 6, CREEP_DWELL = 0.45, REARM_RISE = 16;
 const SCENE = { w: 952, h: 670 };
+const CREASE_HALF = 20; // ScreenLayout.creaseHalfWidth
 
 const args = {};
 for (const a of process.argv.slice(2)) { const [k, v] = a.split('='); if (!k.startsWith('T.')) args[k] = v === undefined ? '1' : v; }
@@ -156,6 +164,22 @@ function wiltSeconds(ph) {
   switch (ph) { case MORNING: return T.wiltMorning; case NOON: return T.wiltNoon; case DUSK: return T.wiltDusk; default: return T.wiltNight; }
 }
 function chainMultiplier(chain) { return Math.min(T.chainMaxMultiplier, 1 + T.chainStep * chain); }
+// R3 (REVIEW-2 #5): how far (pt) a resting bug's centre must sit from the midrib line: the crease band, its radius and
+// creaseClearance.
+function creaseGap(radius) { return CREASE_HALF + radius + T.creaseClearance; }
+// R3: (x, y) moved straight out sideways to creaseGap if it is closer, then (if that leaves maxR) y pulled in.
+function offCrease(g, p, maxR, radius) {
+  const gap = creaseGap(radius);
+  const dx = p.x - g.cx;
+  if (Math.abs(dx) >= gap) return p;
+  const x = g.cx + (dx >= 0 ? gap : -gap);
+  const ux = gap / g.a;
+  const lim = maxR * maxR - ux * ux;
+  let y = p.y;
+  if (lim <= 0) y = g.cy;
+  else { const ymax = g.b * Math.sqrt(lim); y = clamp(p.y, g.cy - ymax, g.cy + ymax); }
+  return { x, y };
+}
 
 // MARK: WaveFactory
 function phaseForWave(index) {
@@ -424,7 +448,8 @@ class Session {
     this.nectar = []; this.nextDropID = 0; this.reservedBy = new Map(); this.retiring = new Set();
     this.installNectar(0);
     this.snapsLeft = clamp(opts.startSnaps == null ? T.startSnaps : opts.startSnaps, 1, T.maxSnaps); this.score = 0; this.chain = 0;
-    this.hunger = 0; this.hungrySent = false;
+    // R3 (REVIEW-2 #7): the hunger clock waits for the first in-trap landing after a catching bite (and at the start).
+    this.hunger = 0; this.hungrySent = false; this.hungerRunning = false; this.freeStingUsed = false;
     this.prevArmed = true; this.prevClosure = 0;
     this.stats = { snaps: 0, caught: 0, stings: 0, feasts: 0, dry: 0, bestBite: 0, biggest: 0, longestChain: 0, spared: 0, wilts: 0 };
   }
@@ -479,7 +504,7 @@ class Session {
     for (const b of this.bugs) this.updateBug(b, h);
     this.bugs = this.bugs.filter((b) => !b.gone);
     // R2 hunger (GAME-DESIGN §5): no catching bite for the phase's wilt time wilts a snap; 3 s before, hungry.
-    if (this.phase === 'playing' && this.opts.snapsRunOut && this.opts.hunger !== false) {
+    if (this.phase === 'playing' && this.opts.snapsRunOut && this.opts.hunger !== false && this.hungerRunning) {
       const w = wiltSeconds(this.dayPhase);
       this.hunger += h / w;
       if (!this.hungrySent && (1 - this.hunger) * w <= T.hungryWarning) this.hungrySent = true;
@@ -570,21 +595,22 @@ class Session {
     }
     return worst;
   }
-  clampIn(p, maxR) {
+  clampIn(p, maxR, radius) {
     const r = this.g.nr(p);
-    if (r <= maxR || r === 0) return p;
-    const k = maxR / r;
-    return { x: this.g.cx + (p.x - this.g.cx) * k, y: this.g.cy + (p.y - this.g.cy) * k };
+    let q = p;
+    if (r > maxR && r !== 0) { const k = maxR / r; q = { x: this.g.cx + (p.x - this.g.cx) * k, y: this.g.cy + (p.y - this.g.cy) * k }; }
+    // R3 (REVIEW-2 #5): never rest on the crease
+    return offCrease(this.g, q, maxR, radius);
   }
   findSpot(b, x, y, dMin, dMax, maxR) {
-    let best = this.clampIn({ x, y }, maxR);
+    let best = this.clampIn({ x, y }, maxR, b.info.radius);
     let bestScore = dMin <= 0 ? this.spotScore(b, best) : -Infinity;
     if (bestScore >= 0) return best;
     for (let i = 0; i < T.spotTries; i++) {
       const t = b.rng.range(0, 2 * Math.PI);
       // R2: the search reaches at least this bug's own spacing need (radii are x1.8)
       const dd = b.rng.range(Math.max(dMin, 8), Math.max(dMax, 20, b.info.radius * 2 + T.landSpacing + 10));
-      const p = this.clampIn({ x: x + Math.cos(t) * dd, y: y + Math.sin(t) * dd }, maxR);
+      const p = this.clampIn({ x: x + Math.cos(t) * dd, y: y + Math.sin(t) * dd }, maxR, b.info.radius);
       const s = this.spotScore(b, p);
       if (s > bestScore) { bestScore = s; best = p; }
       if (s >= 0) break;
@@ -739,6 +765,8 @@ class Session {
   land(b) {
     b.landed = true; b.height = 0; b.el = 0;
     b.landedInTrap = b.landsInTrap && this.g.contains(b);
+    // R3 (REVIEW-2 #7): the first catchable bug to land in the trap starts the hunger clock
+    if (b.landedInTrap && !isProtected(b.species)) this.hungerRunning = true;
     if (!b.landsInTrap) { this.startPause(b); return; }
     if (b.m.style === DARTER) { this.startPause(b); return; }
     if (b.dropID !== null && this.isAtDrop(b)) { this.startSip(b); return; }
@@ -831,19 +859,26 @@ class Session {
       }
     }
     this.stats.snaps += 1;
-    if (caught.length >= 1) { this.hunger = 0; this.hungrySent = false; }
+    // R3 (REVIEW-2 #7): a catch feeds the trap and stops the clock until the next in-trap landing
+    if (caught.length >= 1) { this.hunger = 0; this.hungrySent = false; this.hungerRunning = false; }
     const n = caught.length;
+    const stung = stingers.length > 0;
     let sum = 0; for (const s of caught) sum += info(s).points;
-    const mult = chainMultiplier(this.chain);
+    // R3 (REVIEW-2 #8): a bite with a stinger in it scores x1 and refunds nothing (the sting cost stays)
+    const mult = stung ? 1 : chainMultiplier(this.chain);
     const points = Math.round(sum * n * mult);
     let back = 0;
-    if (n >= T.bigFeastCount) back += T.bigFeastRefund; else if (n >= T.feastCount) back += T.feastRefund;
-    for (const s of caught) { if (s === 'goldenScarab') back += T.scarabRefund; if (s === 'ladybird') back += T.ladybirdRefund; }
+    if (!stung) {
+      if (n >= T.bigFeastCount) back += T.bigFeastRefund; else if (n >= T.feastCount) back += T.feastRefund;
+      for (const s of caught) { if (s === 'goldenScarab') back += T.scarabRefund; if (s === 'ladybird') back += T.ladybirdRefund; }
+    }
     let lost = 0;
     if (this.opts.stingCosts) for (const s of stingers) lost += s === 'wasp' ? T.waspCost : T.beeCost;
+    // R3 (REVIEW-2 #9): Sprout run 1's first stinger bite costs no extra snap ("Bees cost a snap!")
+    if (stung && this.opts.freeFirstSting && !this.freeStingUsed) { this.freeStingUsed = true; lost = 0; }
     this.score += points;
     this.stats.caught += n; this.stats.stings += stingers.length;
-    if (n >= T.feastCount) this.stats.feasts += 1;
+    if (n >= T.feastCount && !stung) this.stats.feasts += 1;
     if (n === 0 && stingers.length === 0) this.stats.dry += 1;
     this.stats.bestBite = Math.max(this.stats.bestBite, points); this.stats.biggest = Math.max(this.stats.biggest, n);
     // R2 chain rule: a clean bite of >= 2 adds a step, a clean 1-bug bite holds it, a dry snap or a stinger breaks it.
@@ -877,6 +912,7 @@ class Pilot {
     this.stage = 0; // 0 idle, 1 down, 2 hold, 3 up
     this.closure = 0; this.armed = true; this.el = 0; this.d = 0.2; this.creepy = false; this.peak = 0;
     this.t4 = null; this.t6 = null; this.decideAt = null; this.beeSince = null; this.missed = new Map(); this.lastSnap = 0; this.plannedD = this.p.dmin;
+    this.clock = 0; // R3 (REVIEW-2 #21): the pilot's own clock (the sum of its dt), never the caller's time
   }
   planDuration() {
     // R2: a casual hand sometimes fumbles a snap (slow), which is what breaks its chains besides the bees.
@@ -936,7 +972,10 @@ class Pilot {
     if (!want) return false;
     return !this.beeBlocks(snap);
   }
-  step(dt, time, snap) {
+  step(dt, callerTime, snap) {
+    // R3 (REVIEW-2 #21): decisions run on the pilot's own clock, so the same seed and dt give the same run
+    const time = this.clock;
+    this.clock += dt;
     let fired = null;
     const prev = this.closure;
     if (this.stage === 0) {
@@ -1125,8 +1164,10 @@ function detectorChecks() {
 }
 
 // MARK: Runs
-function runOne(skill, seed) {
-  const s = new Session(seed, { snapsRunOut: true, waves: true, stingCosts: true }, 'feed');
+// R3: SPROUT1 is the App's options for a Sprout's first run (12 snaps, no wilting, the first stinger bite free).
+const SPROUT1 = { startSnaps: 12, hunger: false, freeFirstSting: true };
+function runOne(skill, seed, extra) {
+  const s = new Session(seed, Object.assign({ snapsRunOut: true, waves: true, stingCosts: true }, extra || {}), 'feed');
   const pilot = new Pilot(skill, u64(BigInt(seed) * 7n + 1n));
   const dt = 1 / 60; let t = 0; let frames = 0;
   while (s.phase !== 'finished' && frames < 60 * 600) {
@@ -1155,8 +1196,11 @@ function checks(med) {
     out.push([`casual seconds 100-240 (${c.seconds.toFixed(1)})`, c.seconds >= 100 && c.seconds <= 240]);
     out.push([`casual snaps 18-45 (${c.snaps})`, c.snaps >= 18 && c.snaps <= 45]);
     out.push([`casual longest chain 3-6 (${c.chain})`, c.chain >= 3 && c.chain <= 6]);
+    out.push([`casual wilts <= 2 (${c.wilts})`, c.wilts <= 2]);
   }
-  if (p) out.push([`perfect seconds 240-420 (${p.seconds.toFixed(1)})`, p.seconds >= 240 && p.seconds <= 420]);
+  if (med.sprout) out.push([`casual Sprout run 1 seconds >= 90 (${med.sprout.seconds.toFixed(1)})`, med.sprout.seconds >= 90]);
+  if (p) out.push([`perfect seconds 240-480 (${p.seconds.toFixed(1)})`, p.seconds >= 240 && p.seconds <= 480]);
+  if (p) out.push([`perfect wilts <= 6 (${p.wilts})`, p.wilts <= 6]);
   if (n) out.push([`novice stings >= 1 (${n.stings})`, n.stings >= 1]);
   if (p) out.push([`perfect never stung (max ${p.maxStings})`, p.maxStings === 0]);
   if (n && c) out.push([`novice < casual (${n.score} < ${c.score})`, n.score < c.score]);
@@ -1205,6 +1249,29 @@ function main() {
     console.log(`CROWD waves=${waves} median spread=${pct(spreads, 0.5).toFixed(2)} s p90=${pct(spreads, 0.9).toFixed(2)} worst=${worst.toFixed(2)} over1.2=${over}`);
     return;
   }
+  if (args.crease) {
+    // R3 (REVIEW-2 #5): no bug ever rests (sips or pauses) in the trap within creaseGap(radius) of the midrib line
+    let rests = 0, bad = 0, worst = Infinity;
+    for (let i = 0; i < seeds; i++) {
+      for (const sk of ['casual', 'perfect']) {
+        const s = new Session(base + i * stride, { snapsRunOut: true, waves: true, stingCosts: true }, 'feed');
+        const pilot = new Pilot(sk, 3n);
+        for (let fr = 0; fr < 60 * 240 && s.phase !== 'finished'; fr++) {
+          s.step(1 / 60, pilot.step(1 / 60, 0, s.snapshot()));
+          for (const b of s.bugs) {
+            if (!b.landsInTrap || !(b.mode === M.sip || b.mode === M.pause)) continue;
+            rests += 1;
+            const slack = Math.abs(b.x - s.g.cx) - creaseGap(b.info.radius);
+            worst = Math.min(worst, slack);
+            // a walker ends a dash up to its wobble amplitude (ant: 3 pt) off its spot
+            if (slack < -(b.m.style === WALKER ? b.m.wobbleAmp : 0) - 0.5) bad += 1;
+          }
+        }
+      }
+    }
+    console.log(`CREASE resting frames=${rests} too close=${bad} worst slack=${worst.toFixed(2)} pt`);
+    return;
+  }
   if (args.attract) {
     for (const sk of skills) {
       const s = new Session(7, { snapsRunOut: false, waves: true, stingCosts: true }, 'attract');
@@ -1238,6 +1305,14 @@ function main() {
     med[sk] = medians(runs);
     const m = med[sk];
     console.log(`SNAP-BAL skill=${sk} score=${m.score} p10=${pct(runs.map((r) => r.score), 0.1).toFixed(0)} p90=${pct(runs.map((r) => r.score), 0.9).toFixed(0)} seconds=${m.seconds.toFixed(1)} snaps=${m.snaps} caught=${m.caught} stings=${m.stings} maxStings=${m.maxStings} feasts=${m.feasts} dry=${m.dry} waves=${m.waves} chain=${m.chain} biggest=${m.biggest} spared=${m.spared} wilts=${m.wilts} capped=${m.capped} n=${runs.length}`);
+  }
+  if (skills.includes('casual')) {
+    // R3 (REVIEW-2 #9): the casual pilot's Sprout run 1 (SPROUT1 options)
+    const runs = [];
+    for (let i = 0; i < seeds; i++) runs.push(runOne('casual', base + i * stride, SPROUT1));
+    med.sprout = medians(runs);
+    const m = med.sprout;
+    console.log(`SNAP-BAL sprout1 casual score=${m.score} seconds=${m.seconds.toFixed(1)} p10s=${pct(runs.map((r) => r.seconds), 0.1).toFixed(1)} snaps=${m.snaps} caught=${m.caught} stings=${m.stings} feasts=${m.feasts} chain=${m.chain} wilts=${m.wilts} capped=${m.capped}`);
   }
   for (const [name, ok] of checks(med)) console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`);
 }

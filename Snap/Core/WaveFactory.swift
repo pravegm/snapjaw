@@ -58,8 +58,9 @@ enum WaveFactory {
         return seed ^ (UInt64(truncatingIfNeeded: block) &* 0xBF58_476D_1CE4_E5B9) ^ 0x4E_4543
     }
 
-    /// R2 (REVIEW-1 #19): 6–8 drops in clusters of 2–3 (each cluster's drops evenly spaced on a 40–48 pt ring), the
-    /// clusters alternating between the lobes, off the crease. Ids 0…n−1, cluster by cluster.
+    /// R2 (REVIEW-1 #19): 6–8 drops in clusters of 2–3 (each cluster's drops evenly spaced on a ring of
+    /// Tuning.nectarRingMin…Max, 24–30 pt since R3), the clusters alternating between the lobes, at least
+    /// Tuning.nectarCreaseClearance (80 pt, R3) off the midrib line. Ids 0…n−1, cluster by cluster.
     static func nectar(seed: UInt64, geometry: TrapGeometry) -> [NectarDrop] {
         var r = SeededRandom(seed: seed ^ 0x4E45_4354)
         let n: Int = r.int(Tuning.nectarMin...Tuning.nectarMax)

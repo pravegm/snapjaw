@@ -25,6 +25,8 @@ struct ResultsView: View {
                     .padding(.bottom, max(info.size.height - info.bottom, 12))
                     .frame(minHeight: info.size.height)
             }
+            // The cards' shadows run past the column: unclipped, so there's no seam beside it (REVIEW-2 #24).
+            .scrollClipDisabled()
             .frame(width: page.width, height: info.size.height)
             .position(x: page.midX, y: info.size.height / 2)
         }
@@ -46,7 +48,7 @@ struct ResultsView: View {
         return VStack(spacing: c ? 6 : 12) {
             // The trap that ate it all, as the scene paints it (REVIEW-1 #12).
             TrapArtImage()
-                .frame(width: c ? 120 : 190, height: c ? 80 : 126)
+                .frame(width: c ? 116 : 180, height: c ? 84 : 130)
                 .shadow(color: Color.black.opacity(0.5), radius: 12, y: 4)
             SnapOverline(text: summary.title, compact: c, color: SnapTheme.limeLight)
             CountingNumber(value: r.score, font: SnapType.hero(c), instant: controller.reduceMotion || AppTrace.enabled)
@@ -58,7 +60,14 @@ struct ResultsView: View {
                 .font(SnapType.headline(c))
                 .foregroundStyle(SnapTheme.mist)
             if o.showsNewBest {
-                SnapPill(text: "New best!")
+                HStack(spacing: 8) {
+                    SnapPill(text: "New best!")
+                    if let was = AppRules.previousBestText(o.previousBest) {
+                        Text(was)
+                            .font(SnapType.body(c).monospacedDigit())
+                            .foregroundStyle(SnapTheme.mist)
+                    }
+                }
             } else if o.firstRun {
                 SnapPill(text: "First run!", color: SnapTheme.lime)
             } else if o.isFirstScore {
@@ -92,7 +101,7 @@ struct ResultsView: View {
                 statRow(icon: "ladybug.fill", title: "Bugs caught", value: "\(r.bugsCaught)", c)
                 statRow(icon: "flame.fill", title: "Best bite",
                         value: AppRules.bestBiteText(bugs: r.biggestBite, points: r.bestBitePoints), c)
-                statRow(icon: "link", title: "Longest chain", value: AppRules.chainText(longest: r.longestChain), c)
+                statRow(icon: "link", title: "Best chain", value: AppRules.chainText(longest: r.longestChain), c)
                 statRow(icon: "heart.fill", title: "Bees spared", value: "\(r.beesSpared)", c)
             }
             .snapCard(padding: c ? 10 : 14, radius: 20)
@@ -188,6 +197,8 @@ struct ResultsView: View {
             Text(value)
                 .font(SnapType.body(c).monospacedDigit())
                 .foregroundStyle(SnapTheme.gold)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
         .accessibilityElement(children: .combine)
     }

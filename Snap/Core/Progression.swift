@@ -67,9 +67,15 @@ enum Achievements {
     static let all: [AchievementDef] = [feast, bite5, chain4, scarab, dragonfly, spare50, bugbook, monarch, night,
                                         daily, score10k, nobees]
 
-    /// The chain length whose last bite is the first scored at ×4 (×1, ×1.5, … : the 7th clean bite in a row).
+    /// The chain length whose last bite is the first scored at ×4 (×1, ×1.5, … : the 7th clean bite in a row). The
+    /// "Four Times Hungry" achievement stays at ×4 now that the cap is ×5 (R3).
+    static var chainForX4: Int {
+        return TrapRules.chainSteps(toReach: 4) + 1
+    }
+
+    /// R3: the chain length whose last bite is the first scored at the cap (×5: the 9th clean bite in a row).
     static var chainForMaxMultiplier: Int {
-        return Int(((Tuning.chainMaxMultiplier - 1) / Tuning.chainStep).rounded()) + 1
+        return TrapRules.chainSteps(toReach: Tuning.chainMaxMultiplier) + 1
     }
 
     /// Newly earned after `run`, given lifetime totals that already include the run and what's already earned.
@@ -88,7 +94,7 @@ enum Achievements {
         }
         check(feast, run.feasts >= 1)
         check(bite5, run.biggestBite >= 5)
-        check(chain4, run.longestChain >= chainForMaxMultiplier)
+        check(chain4, run.longestChain >= chainForX4)
         check(scarab, (run.caughtBySpecies[BugSpecies.goldenScarab.rawValue] ?? 0) >= 1)
         check(dragonfly, (run.caughtBySpecies[BugSpecies.dragonfly.rawValue] ?? 0) >= 1)
         check(spare50, lifetimeSpared >= 50)
