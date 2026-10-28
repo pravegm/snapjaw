@@ -1239,7 +1239,7 @@ struct RoundFourTests {
                 #expect(!covered)
             }
         }
-        let r = AppRules.roundedRects([CGRect(x: 3, y: 5, width: 10, height: 10), CGRect(x: .nan, y: 0, width: 1,
+        let r = AppRules.roundedRects([CGRect(x: 3, y: 5, width: 10, height: 10), CGRect(x: CGFloat.nan, y: 0, width: 1,
                                                                                          height: 1)])
         #expect(r == [CGRect(x: 0, y: 0, width: 16, height: 16)])
     }
