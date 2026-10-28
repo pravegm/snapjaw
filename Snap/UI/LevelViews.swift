@@ -32,11 +32,12 @@ struct LevelGoalBadge: View {
             HStack(spacing: 6) {
                 if !trailing { icon }
                 Text(level.goal)
-                    .font(.system(size: compact ? 19 : 24, weight: .heavy, design: .rounded))
+                    .font(.system(size: compact ? 17 : 22, weight: .heavy, design: .rounded))
                     .foregroundStyle(level.done ? SnapTheme.limeLight : SnapTheme.cream)
                     .multilineTextAlignment(trailing ? .trailing : .leading)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.55)
+                    // R9 (frame 07: "Never bite the…"): three lines before it shrinks, so a goal is never cut.
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.5)
                     .snapLegible()
                 if trailing { icon }
             }
@@ -231,32 +232,63 @@ struct LevelIntroCard: View {
             .position(x: other.midX, y: other.minY + other.height * 0.46)
             .entrance(0, reduceMotion: reduceMotion)
             .allowsHitTesting(false)
-            VStack(spacing: c ? 10 : 16) {
-                LevelPicture(id: intro.id, size: c ? 104 : 150)
-                Text(intro.goal)
-                    .font(.system(size: c ? 26 : 34, weight: .heavy, design: .rounded))
-                    .foregroundStyle(SnapTheme.cream)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.6)
-                    .fixedSize(horizontal: false, vertical: true)
-                if intro.touch {
-                    SnapButton(kind: .primary, height: c ? 58 : 66, compact: c, action: onGo) {
-                        Text("Go!")
-                    }
-                    .frame(width: c ? 180 : 220)
-                } else {
-                    OpenCue(text: LevelWords.startLine(touch: false), size: c ? 16 : 19)
-                }
-            }
-            .padding(c ? 14 : 22)
-            .frame(width: min(page.width, c ? 320 : 380))
-            .background(LeafPanel(big: 34, small: 12, accent: SnapTheme.goldLight))
-            .position(x: page.midX, y: page.midY)
-            .entrance(1, reduceMotion: reduceMotion)
+            card(c)
+                .padding(c ? 14 : 22)
+                .frame(width: min(page.width, c ? 340 : 380))
+                .background(LeafPanel(big: 34, small: 12, accent: SnapTheme.goldLight))
+                .position(x: page.midX, y: page.midY)
+                .entrance(1, reduceMotion: reduceMotion)
         }
         .frame(width: info.size.width, height: info.size.height)
         .accessibilityElement(children: .contain)
+    }
+
+    /// R9 (frame 05: the tall card ran under the pause button on a phone): a landscape phone's card is wide and low,
+    /// the picture beside the goal; the Duo's (and a portrait page's) stacks.
+    @ViewBuilder
+    private func card(_ c: Bool) -> some View {
+        if c && !info.rotated {
+            HStack(spacing: 14) {
+                LevelPicture(id: intro.id, size: 92)
+                VStack(spacing: 10) {
+                    goalText(c)
+                    start(c)
+                }
+            }
+        } else {
+            VStack(spacing: c ? 10 : 16) {
+                LevelPicture(id: intro.id, size: c ? 104 : 150)
+                goalText(c)
+                start(c)
+            }
+        }
+    }
+
+    private func goalText(_ c: Bool) -> some View {
+        Text(intro.goal)
+            .font(.system(size: c ? 24 : 34, weight: .heavy, design: .rounded))
+            .foregroundStyle(SnapTheme.cream)
+            .multilineTextAlignment(.center)
+            .lineLimit(3)
+            .minimumScaleFactor(0.6)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// How to start: Go (a phone: a tap anywhere too), or the Duo's "Close the phone to start" with the phone closing.
+    @ViewBuilder
+    private func start(_ c: Bool) -> some View {
+        if intro.touch {
+            SnapButton(kind: .primary, height: c ? 56 : 66, compact: c, action: onGo) {
+                Text("Go!")
+            }
+            .frame(maxWidth: c ? 170 : 220)
+        } else {
+            HStack(spacing: 10) {
+                ClosingPhoneGlyph(reduceMotion: reduceMotion)
+                    .frame(width: c ? 40 : 52, height: c ? 40 : 52)
+                OpenCue(text: LevelWords.startLine(touch: false), size: c ? 16 : 19, icon: nil)
+            }
+        }
     }
 }
 
@@ -355,34 +387,82 @@ struct LevelMapView: View {
         }
     }
 
-    /// Where pad `i` (0…9) sits in a box `size`: two rows of five, the path winding back. Pure; tested.
+    /// Where pad `i` (0…9) sits in a box `size` (R9, frame 04: 7 sat on 6 and its stars). A path that reads as one: a
+    /// U of two straight rows of five, left to right along the top, round the outer end, right to left along the
+    /// bottom, every pad on an even grid (a fifth of the width apart, so no pad, ring or star row ever meets the next).
+    /// Pure; tested.
     static func padCenter(_ i: Int, in size: CGSize) -> CGPoint {
-        let row = i / 5
-        let col = row == 0 ? i % 5 : 4 - i % 5
-        let x = size.width * (0.12 + 0.19 * CGFloat(col))
-        let y = size.height * (row == 0 ? 0.30 : 0.72) + (col % 2 == 0 ? -1 : 1) * size.height * 0.06
+        let k = min(max(i, 0), 9)
+        let row = k / 5
+        let col = row == 0 ? k % 5 : 4 - k % 5
+        let x = size.width * (0.1 + 0.2 * CGFloat(col))
+        let y = size.height * (row == 0 ? 0.27 : 0.73)
         return CGPoint(x: x, y: y)
+    }
+
+    /// The pad diameter for a box: as big as the grid allows with a clear gap (and its star row) between pads, at
+    /// most 70 (50 compact). Pure; tested.
+    static func padSize(in size: CGSize, compact: Bool) -> CGFloat {
+        let cap: CGFloat = compact ? 50 : 70
+        let across = size.width * 0.2 - 16
+        // A row holds the pad and its stars (a quarter of the pad more) with 24 pt clear between the rows.
+        let down = (size.height * 0.46 - 24) / 1.3
+        return max(min(cap, across, down), 30)
+    }
+
+    /// The path through the pads 0…`last`: straight along each row, a soft bend round the outer end (it bulges a
+    /// little past the end pads, never into the page's edge). Pure.
+    static func path(in size: CGSize, through last: Int = 9) -> Path {
+        let end = min(max(last, 0), 9)
+        var p = Path()
+        p.move(to: padCenter(0, in: size))
+        guard end > 0 else { return p }
+        for k in 1...end {
+            let to = padCenter(k, in: size)
+            if k == 5 {
+                let from = padCenter(4, in: size)
+                let bulge = size.width * 0.07
+                p.addCurve(to: to, control1: CGPoint(x: from.x + bulge, y: from.y + (to.y - from.y) * 0.1),
+                           control2: CGPoint(x: to.x + bulge, y: to.y - (to.y - from.y) * 0.1))
+            } else {
+                p.addLine(to: to)
+            }
+        }
+        return p
+    }
+
+    /// The pad the gold part of the path reaches: the one after the last level passed in this world (0…9).
+    static func pathReach(_ d: ProgressData, world w: Int) -> Int {
+        let ids = Array(LevelRules.ids(world: w))
+        let passed = ids.lastIndex { LevelRules.passed(d, $0) }.map { $0 + 1 } ?? 0
+        return min(passed, max(ids.count - 1, 0))
     }
 
     private func pads(_ d: ProgressData, world w: Int, next: Int?, _ c: Bool) -> some View {
         let ids = Array(LevelRules.ids(world: w))
-        let pad: CGFloat = c ? 50 : 70
+        let reach = Self.pathReach(d, world: w)
         return GeometryReader { geo in
+            let pad = Self.padSize(in: geo.size, compact: c)
             ZStack {
-                // The path between the pads.
-                Path { p in
-                    for i in 0..<ids.count {
-                        let pt = Self.padCenter(i, in: geo.size)
-                        if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
-                    }
+                // The path between the pads: a dark trail with a faint dotted line, gold as far as the levels passed.
+                Self.path(in: geo.size)
+                    .stroke(SnapTheme.night.opacity(0.5), style: StrokeStyle(lineWidth: 10, lineCap: .round,
+                                                                          lineJoin: .round))
+                Self.path(in: geo.size)
+                    .stroke(SnapTheme.cream.opacity(0.28), style: StrokeStyle(lineWidth: 4, lineCap: .round,
+                                                                           lineJoin: .round, dash: [2, 11]))
+                if reach > 0 {
+                    Self.path(in: geo.size, through: reach)
+                        .stroke(SnapTheme.gold.opacity(0.9), style: StrokeStyle(lineWidth: 4, lineCap: .round,
+                                                                             lineJoin: .round, dash: [2, 11]))
                 }
-                .stroke(SnapTheme.cream.opacity(0.35), style: StrokeStyle(lineWidth: 4, lineCap: .round,
-                                                                       lineJoin: .round, dash: [2, 12]))
                 ForEach(Array(ids.enumerated()), id: \.offset) { item in
                     let id = item.element
                     LevelPad(id: id, stars: LevelRules.stars(d, id), open: LevelRules.isOpen(d, id), next: id == next,
                              size: pad, reduceMotion: controller.reduceMotion,
                              action: { controller.playLevel(id) })
+                        // Centred on its pad (the star row hangs under it, inside the row's clear band).
+                        .offset(y: pad * 0.13)
                         .position(Self.padCenter(item.offset, in: geo.size))
                         .entrance(item.offset + 1, reduceMotion: controller.reduceMotion)
                 }
@@ -406,10 +486,12 @@ struct LevelPad: View {
             VStack(spacing: 4) {
                 ZStack {
                     if next {
+                        // R9: a glow, not a bigger pad (frame 04: the enlarged 7 sat on 6 and its stars).
                         Circle()
-                            .fill(RadialGradient(colors: [SnapTheme.gold.opacity(0.55), SnapTheme.gold.opacity(0)],
-                                                 center: .center, startRadius: size * 0.2, endRadius: size * 0.85))
-                            .frame(width: size * 1.7, height: size * 1.7)
+                            .fill(RadialGradient(colors: [SnapTheme.gold.opacity(0.5), SnapTheme.gold.opacity(0)],
+                                                 center: .center, startRadius: size * 0.3, endRadius: size * 0.72))
+                            .frame(width: size * 1.44, height: size * 1.44)
+                            .allowsHitTesting(false)
                     }
                     LilyPadShape().fill(SnapTheme.night.opacity(0.85)).offset(y: 4)
                     LilyPadShape().fill(open ? AnyShapeStyle(RadialGradient(
@@ -426,8 +508,10 @@ struct LevelPad: View {
                     }
                 }
                 .frame(width: size, height: size)
+                // R9: a locked pad shows no empty stars (frame 04: the dim rows sat awkwardly); the row keeps its
+                // height so every pad lines up on the path.
                 StarRow(earned: stars, size: size * 0.24, spacing: 1)
-                    .opacity(open ? 1 : 0.35)
+                    .opacity(open ? 1 : 0)
             }
             .frame(minWidth: max(size, SnapTheme.minTap), minHeight: max(size, SnapTheme.minTap))
             .contentShape(Rectangle())

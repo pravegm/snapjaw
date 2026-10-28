@@ -1,6 +1,6 @@
 # Snapjaw: App Privacy answers and privacy policy (v1.0)
 
-**Answer: Data Not Collected.** Based on the design (`CLAUDE.md`: "no data collected"; `design/ARCHITECTURE.md`: no third-party packages; persistence is `ProgressStore` and `SettingsStore` in UserDefaults) and the privacy manifest `Snap/PrivacyInfo.xcprivacy` that the CI engineer copies from Swoop (no tracking, no tracking domains, no collected data types; required-reason APIs UserDefaults `CA92.1` and system boot time `35F9.1`). **The build doesn't exist yet:** Claude runs the grep in §3 when Round 1 compiles and again on the release candidate, and pastes the results here.
+**Answer: Data Not Collected.** Based on the design (`CLAUDE.md`: "no data collected"; `design/ARCHITECTURE.md`: no third-party packages; persistence is `ProgressStore` and `SettingsStore` in UserDefaults) and the privacy manifest `Snap/PrivacyInfo.xcprivacy` that the CI engineer copies from Swoop (no tracking, no tracking domains, no collected data types; required-reason APIs UserDefaults `CA92.1` and system boot time `35F9.1`). **R9 (28 Oct):** the §3 grep was run on the R8 source and found nothing that collects or sends data; the R8 hinge reading (angle and the open/closed status) is used only in memory. Run it once more on the release candidate. The privacy policy text in §4 is still exactly true of R8.
 
 The live policy page is `docs/site/privacy.html` (the text in §4 is the same; keep the two in step).
 
@@ -18,7 +18,7 @@ There's no tracking question once you choose "No". For the record, Snapjaw doesn
 
 | Thing | Declare? | Why |
 |---|---|---|
-| **Hinge angle** | No | Read through the public `onHingeChange` API to work the trap while the game is on screen. The rest reference is a rolling value in memory (`SnapDetector.reference`), not saved. Nothing leaves the phone. Apple: "collect" means transmitting data off the device. *If the build ever saves a resting angle, it stays on the device and the answer is unchanged; only the policy sentence in §4 changes (Swoop's wording)* |
+| **Hinge angle and status** | No | Read through the public `onHingeChange` API to work the trap while the game is on screen (R8: the angle and the open/closed status decide the bite). The open reference is a rolling value in memory (`SnapDetector.reference`), not saved. Nothing leaves the phone. Apple: "collect" means transmitting data off the device. *If the build ever saves a resting angle, it stays on the device and the answer is unchanged; only the policy sentence in §4 changes (Swoop's wording)* |
 | **Game Center** (sign-in, leaderboard scores, achievements) | No | Apple collects it under Apple's privacy policy. Apple: "You are not responsible for disclosing data collected by Apple." Snapjaw never sends it anywhere itself |
 | **Crash reports** via iOS "Share With App Developers" | No | Apple-collected and opt-in. We add no crash SDK. *If one is ever added, the label must declare Crash Data first* |
 | **Rating prompt** (if added) | No | Apple's `requestReview` |
@@ -30,17 +30,17 @@ There's no tracking question once you choose "No". For the record, Snapjaw doesn
 
 ## 3. Evidence to collect on the build (Claude runs this; paste the result here)
 
-| Look for, in `Snap/` | Expect | Result (Round 1) | Result (RC) |
+| Look for, in `Snap/` | Expect | Result (R8 source, 28 Oct, store lead) | Result (RC) |
 |---|---|---|---|
-| Networking: `URLSession`, `URLRequest`, `NWConnection`, `import Network`, sockets | none (GameKit is the only outbound path) | [ ] | [ ] |
-| Web/links: `WKWebView`, `SFSafariViewController`, `openURL`, SwiftUI `Link(` | none, or only a link to the support/privacy page (opening Safari is not collection) | [ ] | [ ] |
-| SDKs: Firebase, Crashlytics, Sentry, Mixpanel, Amplitude, AdSupport, `ASIdentifierManager` | none | [ ] | [ ] |
-| Tracking: `AppTrackingTransparency`, `ATTrackingManager` | none | [ ] | [ ] |
-| Cloud: `CloudKit`, `NSUbiquitousKeyValueStore` | none | [ ] | [ ] |
-| Notifications: `UNUserNotificationCenter` | none | [ ] | [ ] |
-| Hinge angle written to disk (`ProgressStore`, `SettingsStore`, files) | nothing (or only a resting angle, on the device: then update §4's hinge paragraph) | [ ] | [ ] |
-| Packages in `project.yml` | none | [ ] | [ ] |
-| `NS*UsageDescription` keys in `project.yml` | none (no camera, microphone, photos, location) | [ ] | [ ] |
+| Networking: `URLSession`, `URLRequest`, `NWConnection`, `import Network`, sockets | none (GameKit is the only outbound path) | [x] none | [ ] |
+| Web/links: `WKWebView`, `SFSafariViewController`, `openURL`, SwiftUI `Link(` | none, or only a link to the support/privacy page (opening Safari is not collection) | [x] none (the only `Link(` hits are `CADisplayLink` and `ShareLink`) | [ ] |
+| SDKs: Firebase, Crashlytics, Sentry, Mixpanel, Amplitude, AdSupport, `ASIdentifierManager` | none | [x] none | [ ] |
+| Tracking: `AppTrackingTransparency`, `ATTrackingManager` | none | [x] none | [ ] |
+| Cloud: `CloudKit`, `NSUbiquitousKeyValueStore` | none | [x] none | [ ] |
+| Notifications: `UNUserNotificationCenter` | none | [x] none | [ ] |
+| Hinge angle written to disk (`ProgressStore`, `SettingsStore`, files) | nothing (or only a resting angle, on the device: then update §4's hinge paragraph) | [x] no angle saved; only `fastestSnap` (a close time in seconds, a game stat, on the device) and R8's `levelStars` | [ ] |
+| Packages in `project.yml` | none | [x] none | [ ] |
+| `NS*UsageDescription` keys in `project.yml` | none (no camera, microphone, photos, location) | [x] none | [ ] |
 | `Snap/PrivacyInfo.xcprivacy` in the built app | present: tracking false, no tracking domains, no collected data types (the TestFlight workflow's upload job checks it in the archive, as Swoop's does) | [ ] | [ ] |
 | Required-reason APIs | UserDefaults `CA92.1`, system boot time `35F9.1` (`CACurrentMediaTime`). If the code uses file timestamps or disk space, add those reasons | [ ] | [ ] |
 

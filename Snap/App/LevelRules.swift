@@ -73,6 +73,47 @@ enum LevelWords {
 
     /// The intro card's start line.
     static func startLine(touch: Bool) -> String { touch ? "Tap to start" : "Close the phone to start" }
+
+    // MARK: R9: every line about the control is input-aware (phones tap, the Duo closes the phone)
+
+    /// A level's goal in the player's control: Core's line with its control words made right for the input (Core's
+    /// goal texts speak of the Duo: "Shut the phone on the fly"). Pure; tested.
+    static func goal(_ s: LevelSpec, touch: Bool) -> String { inputAware(LevelBridge.goal(s), touch: touch) }
+
+    /// Core's level-result line in the player's control ("Out of time. Shut it faster" → a phone: "Out of time. Snap
+    /// sooner"). Pure; tested.
+    static func outcomeLine(_ line: String, touch: Bool) -> String { inputAware(line, touch: touch) }
+
+    /// The control phrases Core's level texts use, and what each says on a phone (a tap) and on the Duo (close the
+    /// phone; "shut" reads as a demand for a full slam, "close" is the founder's word). Longest first. An empty phone
+    /// form drops the phrase (speed is the Duo's skill: a tap is always quick).
+    static let controlPhrases: [(core: String, duo: String, phone: String)] = [
+        ("Shut the phone on the fly", "Close the phone on the fly", "Tap when the fly lands"),
+        ("Close the phone on the fly", "Close the phone on the fly", "Tap when the fly lands"),
+        (". Shut it faster", ". Close it faster", ". Snap sooner"),
+        (". Shut it fast", ". Close it fast", ""),
+        (". Close it fast", ". Close it fast", ""),
+        ("Shut the phone", "Close the phone", "Tap"),
+        ("Close the phone", "Close the phone", "Tap"),
+        ("Shut it", "Close it", "Tap"),
+        ("shut it", "close it", "tap"),
+        ("the lid", "the phone", "the trap"),
+    ]
+
+    /// Rewrites `text`'s control words for the input (see `controlPhrases`). Pure; tested.
+    static func inputAware(_ text: String, touch: Bool) -> String {
+        var out = text
+        for p in controlPhrases where out.contains(p.core) {
+            out = out.replacingOccurrences(of: p.core, with: touch ? p.phone : p.duo)
+        }
+        return out
+    }
+
+    /// Words a phone (no hinge) must never be told: it has nothing to close. Pure; tested.
+    static func speaksOfTheHinge(_ text: String) -> Bool {
+        let t = text.lowercased()
+        return ["close the phone", "close it", "shut", "the phone", "lid"].contains { t.contains($0) }
+    }
 }
 
 /// The levels' rules on the save (R8): ids 1…30, ten a world; a level opens once the one before it is passed (a

@@ -16,9 +16,19 @@ import Foundation
 //   shut (the interpolated 18° crossing; the sample time for a status shut) − the close's start. A shut with no close
 //   start seen (a creep slower than the reference's fall) is Tuning.untimedCloseDuration (a slow close). Then unarmed.
 // - RE-ARM at θ ≥ armAngle (the hysteresis: shut ≤ 18°, open ≥ 35°). The reference restarts at θ.
+//   R9 (real hardware: about ±5° and noisy reports, `.closed` from ~85°): after a shut the re-arm also needs θ at least
+//   Tuning.rearmRise (15°) above the lowest θ since that shut (`rearmAngle`), so a phone hovering where a `.closed`
+//   status shut (25°) and the 35° re-arm are only 10° apart can't flap bite–arm–bite on report noise. A full close
+//   (lowest ≤ 20°) still re-arms at 35° exactly.
 // - While unarmed after a bite the reported closure is measured from the reference at the bite.
-// - `requireShut` (a round's start, founder rule 3): the trap is not armed until the phone has been shut once (the
-//   shut zone) and then opened to armAngle. Without it a fresh detector is armed at once when θ ≥ armAngle.
+// - `requireShut` (a round's start, founder rule 3): the trap is not armed until the phone has been shut once and then
+//   opened to the re-arm angle. R9: for the round's start "shut" is lenient (`isStartShut`: the shut zone, or
+//   θ ≤ Tuning.startShutAngle 25° whatever the status), so a closed phone that reads a little high can never leave
+//   "Close the phone to start" stuck. That starting close never bites (the trap is not armed during it). Without
+//   requireShut a fresh detector is armed at once when θ ≥ armAngle (R9: unless it was built with `rearmLow`, which
+//   carries an unarmed-after-a-shut state across a restart).
+// - R9 `noteFolded(at:)`: independent evidence that the phone is folded (the app is on the outer display): a round
+//   waiting for its first close counts as closed, and the latest angle is read as `.closed` (a bite only at ≤ 25°).
 // - No samples arrive while the hinge is still, so `input(at:)` advances the reference to the frame time.
 // - Founder rule 2 (no pose demands): `tooFlat` is always false.
 // Mirrored by SnapDetector in tools/balance-sim.js (`node tools/balance-sim.js detector=1`).
@@ -86,10 +96,24 @@ struct SnapDetector {
     private var pending: SnapTrigger? = nil
     /// True until the phone has been shut once (only when built with `requireShut`).
     private(set) var waitingForShut: Bool
+    /// R9: the lowest θ since the trap was last shut (a bite, a round's starting close, or a fresh detector on a shut
+    /// phone) while it is not yet armed again; nil while armed or before any shut.
+    private(set) var rearmLow: Double?
 
-    /// `requireShut`: a round's start (the trap is closed until the phone is shut once and opened).
-    init(requireShut: Bool = false) {
+    /// `requireShut`: a round's start (the trap is closed until the phone is shut once and opened). R9 `rearmLow`: a
+    /// restarted detector that carries an unarmed-after-a-shut state (HingeTrapSource's reset), so a restart never
+    /// re-arms a shut trap below its re-arm angle. Ignored with requireShut.
+    init(requireShut: Bool = false, rearmLow: Double? = nil) {
         self.waitingForShut = requireShut
+        var low: Double? = nil
+        if !requireShut, let l = rearmLow, l.isFinite { low = l }
+        self.rearmLow = low
+    }
+
+    /// R9: the angle the trap (re-)arms at now: Tuning.armAngle, or rearmLow + Tuning.rearmRise when that is higher.
+    var rearmAngle: Double {
+        guard let low = rearmLow else { return Tuning.armAngle }
+        return max(Tuning.armAngle, low + Tuning.rearmRise)
     }
 
     /// The open reference θ. 0 before the first sample.
@@ -106,6 +130,12 @@ struct SnapDetector {
         }
     }
 
+    /// R9: closed enough to start a round (founder rule 3): the shut zone, or θ ≤ Tuning.startShutAngle whatever the
+    /// status. Only the round's start uses it; the bite needs `isShut`.
+    static func isStartShut(angle a: Double, status: TrapHingeStatus) -> Bool {
+        return a <= Tuning.startShutAngle || SnapDetector.isShut(angle: a, status: status)
+    }
+
     /// Feed one (filtered) angle sample at `time`. Returns a trigger on the sample that reaches the shut zone while
     /// armed.
     mutating func ingest(angle a: Double, at time: Double, status: TrapHingeStatus = .unknown) -> SnapTrigger? {
@@ -117,8 +147,14 @@ struct SnapDetector {
             angle = a
             lastClosure = 0
             prevTime = time
-            if waitingForShut && shutNow { waitingForShut = false }
-            armed = !waitingForShut && a >= Tuning.armAngle && !shutNow
+            if waitingForShut && SnapDetector.isStartShut(angle: a, status: status) {
+                waitingForShut = false
+                rearmLow = a
+            } else if !waitingForShut && (shutNow || rearmLow != nil) {
+                rearmLow = min(rearmLow ?? a, a)
+            }
+            armed = !waitingForShut && a >= rearmAngle && !shutNow
+            if armed { rearmLow = nil }
             return nil
         }
         let prevAngle: Double = angle
@@ -126,9 +162,14 @@ struct SnapDetector {
         var c: Double = max(0, ref.value - a)
         var fired: SnapTrigger? = nil
         if !armed {
-            if waitingForShut && shutNow { waitingForShut = false }
-            if !waitingForShut && a >= Tuning.armAngle {
+            if waitingForShut && SnapDetector.isStartShut(angle: a, status: status) {
+                waitingForShut = false
+                rearmLow = a
+            }
+            if let low = rearmLow { rearmLow = min(low, a) }
+            if !waitingForShut && a >= rearmAngle {
                 armed = true
+                rearmLow = nil
                 closing = false
                 ref.reset(time: time, angle: a)
                 c = 0
@@ -162,12 +203,29 @@ struct SnapDetector {
                 closing = false
                 biteSeen = true
                 snapReference = ref.value
+                rearmLow = a
             }
         }
         lastClosure = c
         prevTime = time
         angle = a
         return fired
+    }
+
+    /// R9: the phone is folded by other evidence (the app is on the outer display) with no shut report seen. A round
+    /// waiting for its first close counts as closed (never a bite); otherwise the latest angle is fed again as
+    /// `.closed` at `time` (a bite if armed and θ ≤ Tuning.statusShutAngle, exactly as that status would be). Returns
+    /// the trigger, if any. No sample yet: nothing.
+    mutating func noteFolded(at time: Double) -> SnapTrigger? {
+        guard hasSample, time.isFinite else { return nil }
+        if waitingForShut {
+            waitingForShut = false
+            armed = false
+            closing = false
+            rearmLow = angle
+            return nil
+        }
+        return ingest(angle: angle, at: max(time, prevTime), status: .closed)
     }
 
     /// The input for a frame at `time` (closure, armed, creeping = a slow close; `snap` is whatever `ingest` last

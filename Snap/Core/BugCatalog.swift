@@ -169,6 +169,16 @@ enum TrapRules {
         return r
     }
 
+    /// R9: a level's calm (LevelSpec.reactionScale): every catchable bug's reaction × this in that level (a sleepy
+    /// first level, a frantic last one). 1 outside levels and for an unknown level. Protected bugs never change.
+    static func reactionScale(mode: RunMode) -> Double {
+        if case .level(let id) = mode, let l = LevelBook.level(id) {
+            let s: Double = l.reactionScale
+            return s.isFinite && s > 0 ? s : 1
+        }
+        return 1
+    }
+
     /// R2: on the rim when the bug's outer edge (its centre pushed out from the trap centre by its radius) reaches
     /// the rim band, and its centre is in the trap. A bug at the very centre is never on the rim.
     static func onRim(_ g: TrapGeometry, _ p: CGPoint, radius: CGFloat) -> Bool {

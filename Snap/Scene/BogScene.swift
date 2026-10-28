@@ -1092,11 +1092,12 @@ final class BogScene: SKScene {
                      stroke: BogPaint.ui(pal.ink), rise: 18, life: 0.9)
         }
         if wilted && showsEconomy {
-            // R3 (#15): "Too slow! −1 snap", a crimson tag just over the snaps row, and the glyph droops off it.
+            // R3 (#15): "Hungry! −1 snap", a crimson tag over the snaps row, and the glyph droops off it.
+            // R9: it starts above the row's "SNAPS" label (at + 46 it sat on the label, frame 34).
             let anchor = snapsAnchor
             var size: CGFloat = 28
             let text = BogScene.wiltedLabel
-            let p = placePop(text, size: &size, near: CGPoint(x: anchor.x + 60, y: anchor.y + 46),
+            let p = placePop(text, size: &size, near: CGPoint(x: anchor.x + 60, y: anchor.y + 84),
                              side: sideOf(anchor.x), hero: false, rise: 18, inTrap: false, minSize: 20,
                              avoid: obstacles)
             pops.pop(text, at: p, size: size, fill: BogPaint.ui(BogScene.wiltColor), stroke: BogPaint.ui(pal.ink),
@@ -1272,7 +1273,7 @@ final class BogScene: SKScene {
     static func luckyLabel(_ s: BugSpecies, snaps: Bool = true) -> String { AppRules.luckyText(s, snaps: snaps) }
 
     /// The hunger wilt's pop (R3 #15: says what happened and what it cost).
-    static let wiltedLabel = "Too slow! −1 snap"
+    static let wiltedLabel = "Hungry! −1 snap"
     /// Its crimson.
     static let wiltColor = RGBA(hex: 0xFF4D5E)
     /// R3 (#15): the smallest a catch pop is ever drawn (points, before its overshoot).

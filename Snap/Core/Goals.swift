@@ -43,7 +43,7 @@ enum GoalScope: String, Codable, CaseIterable, Sendable {
     var label: String {
         switch self {
         case .anyMode: return "Any mode"
-        case .standard: return "Feed or Daily"
+        case .standard: return "Endless or Daily"
         case .daily: return "Daily"
         case .zen: return "Zen"
         }

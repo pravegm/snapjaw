@@ -33,7 +33,7 @@ for (const L of LEVELS) {
   for (const b of L.bugs) {
     lines.push(`                    LevelBug(.${b.s}, at: ${num(b.at)}, u: ${num(b.u)}, v: ${num(b.v)}, linger: ${num(b.linger)}, sip: ${b.sip ? 'true' : 'false'}),`);
   }
-  lines.push('                  ]),');
+  lines.push(`                  ], reactionScale: ${num(L.calm == null ? 1 : L.calm)}),`);
 }
 lines.push('    ]');
 lines.push('}');

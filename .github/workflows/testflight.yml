@@ -63,8 +63,8 @@ jobs:
           # DEBUG-only (design/ROUND-1.md), so finding one in the Release binary means demo code leaked out of #if DEBUG.
           # NOTE: Swift keeps string literals of <= 15 UTF-8 bytes inline in the machine code ("small strings"), so
           # `strings` may not see "freezeAfter" (11 bytes) even in Debug. It stays as the named key, and the 21-byte log
-          # literal "SNAP-T paused closing" is the leg that can surely fire (ci.yml checks it IS seen in a Debug build).
-          if strings "$APP/Snap" | grep -qE "^freezeAfter$|SNAP-T paused closing"; then echo "::error::demo-mode code found in the Release binary"; exit 1; else echo "no demo strings in Release"; fi
+          # literal "SNAP-T variety grown" is the leg that can surely fire (ci.yml checks it IS seen in a Debug build).
+          if strings "$APP/Snap" | grep -qE "^freezeAfter$|SNAP-T variety grown"; then echo "::error::demo-mode code found in the Release binary"; exit 1; else echo "no demo strings in Release"; fi
           du -sh "$APP"
       - name: Upload log
         if: always()
@@ -167,7 +167,7 @@ jobs:
           fi
           # The shipped binary itself carries no demo-mode code (App Review and the App Store run this same binary).
           # Same guard as release-check: no DEBUG-only demo keys or SNAP-T log literals in what goes to testers.
-          if strings "$APP/Snap" | grep -qE "^freezeAfter$|SNAP-T paused closing"; then echo "::error::demo-mode code found in the Release binary"; exit 1; else echo "no demo strings in Release"; fi
+          if strings "$APP/Snap" | grep -qE "^freezeAfter$|SNAP-T variety grown"; then echo "::error::demo-mode code found in the Release binary"; exit 1; else echo "no demo strings in Release"; fi
 
       - name: Export locally and check the App Store signature
         run: |

@@ -96,7 +96,17 @@ struct CoverCard: View {
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .minimumScaleFactor(0.7)
-                if midRun {
+                if midRun && controller.awaitingFirstBite {
+                    // R9 (frame 59: "0 score so far"): before the first bite, what the round is for (a level's goal).
+                    if let goal = controller.levelGoalLine {
+                        Text(goal)
+                            .font(CoverLayout.swiftFont(l.bodySize + 2, .bold))
+                            .foregroundStyle(SnapTheme.gold)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.6)
+                    }
+                } else if midRun {
                     Text(Self.scoreLine(controller.hud.values.score) + " " + Self.scoreCaption)
                         .font(CoverLayout.swiftFont(l.bodySize + 2, .bold).monospacedDigit())
                         .foregroundStyle(SnapTheme.gold)

@@ -1,64 +1,58 @@
-# Snapjaw App Store frames, iPhone Duo inner-display set (docs/appstore/screenshots.md, section B, 27 Oct). Run by
+# Snapjaw App Store frames, iPhone Duo inner-display set (docs/appstore/screenshots.md, section B). Run by
 # .github/workflows/store.yml: ci/store-capture.sh duo → ci/duo.sh store pass (STORE_LIST=this file,
 # STORE_FILTER='^D[0-9]'; the Duo simulator starts in book pose with a real fold and the pass holds the hinge at 150°,
-# open, so a run never pauses), writing store-<name>.png at 2853 x 2007 (fold band x ≈ 1368–1488 px: the app logs
+# open), writing store-<name>.png at 2853 x 2007 (fold band x ≈ 1368–1488 px: the app logs
 # "SNAP-T fold active 456,0 40x669"). ci/store-set.sh then captions them with REQUIRE_LOG
-# 'SNAP-T canvas 951x669 fold=1 hudLeft=0', and D01 also feeds frame 1 of the iPhone sets. Names are zero-padded
-# (D01–D10) and are exactly the file names docs/appstore/asc-metadata.json lists.
+# 'SNAP-T canvas 951x669 fold=1 hudLeft=0', and D01 also feeds frame 1 of the iPhone sets and the header/search art
+# (ci/store-placements.sh: D01-book-hero, else D03-feast). Names are zero-padded (D01–D10) and are exactly the names
+# tools/appstore/build-metadata.js lists (DFRAMES).
 #
 # Same format as ci/store-scenarios.txt: name|demo args|wait|caption|expect|frame (frame: flat or book).
-#  - Not ci/duo-scenarios.txt: that file is duo.yml's review set (16 frames, the HUD mirrored, settings, the late Bug
-#    Book). This one is the upload set, in screenshots.md's order, with captions. Their play frames share the seeds,
-#    waves and pilots proven in duo run 40603497021 (crowd wave 6, feast wave 8 count=5, bee wave 15, all perfect).
+#  - Not ci/duo-scenarios.txt: that file is duo.yml's review set. This one is the upload set, in screenshots.md's
+#    order, with captions.
 #  - HUD on the right half (the sharp half, the Duo default): the workflow requires hudLeft=0, so never add hudLeft=1
-#    to a D line (the DR reserve of R4 frame 23 has it, and is FLAGGED by design: review only).
-#  - D01 `book`: this capture, split at the fold and drawn on a stylised Duo held open like a book (store-frame --book):
-#    the two lobes on the two pages, the midrib on the hinge. The split is geometric, so the layout is kept exactly.
-#  - No `fold=`: the Duo has a real one. The pilot plays every play frame (the held hinge never pauses a run).
-#  - D02 is an open-after-bite moment (REVIEW-4 #3, #15; Duo P2-3), not the hold or the release: `ciShootOn=feast`
-#    (a CI-only key, stripped by ci/duo.sh) shoots the live run CI_SHOOT_DELAY (0.5) s after `SNAP-T event feast`,
-#    when the lobes are open again with the pop and "Feast! +1 snap" still up. (The old `freezeOn=feast` froze 0.3 s
-#    after the bite: the dark, narrow release that read as "a plum".)
-#  - Same glossary and truthfulness notes as ci/store-scenarios.txt. "Snap it a little shut" is fine; "shut" on its
-#    own is flagged.
-
-# R7 (SCORE-R6 #6, #9; design/notes/ci-R7.md): the same progress state (`late`), P02's gulp, P04's sub-line and
-# P08's calm Zen as ci/store-scenarios.txt. D01 is shot with the real hinge at 140° (`ciHinge=140`: ci/duo.sh moves
-# the hinge there after the launch; the pilot drives the trap, so the angle changes nothing in play), so the book
-# composite's angle is the logged hinge angle (~140°, store-set.sh book_angle) and P01, D01 and the search art read as
-# a fold, not a flat page. D02 no longer uses ciShootOn: the gulp is a freeze, the same on every device.
+#    to a D line (DR10 has it, and is FLAGGED by design: review only).
+#  - D01 `book`: this capture, split at the fold and drawn on a stylised Duo standing open (store-frame --book): the
+#    two lobes on the two pages, the midrib on the hinge. Shot with the real hinge at 140° (`ciHinge=140`, a CI-only
+#    key ci/duo.sh strips), so the composite's angle is the logged one (store-set.sh book_angle).
+#  - The pilot plays every play frame (input `pilot`, so the Scene plays its own bite; the frames freeze on open-trap
+#    moments only: a crowd, a bee, the FEAST pop after the lobes reopen. Never a frame with the lobes drawn shut on
+#    the inner screen: on a real Duo they never are, the phone itself closes).
+#  - Same glossary and truthfulness notes as ci/store-scenarios.txt. "shut" on its own and "fast" are flagged.
+#
+# R9 (design/notes/store-R9.md), the R8 game: the phone IS the trap. The set sells it in its first three frames:
+#   D01 the Duo is the flytrap (open phone, open trap), D02 close the phone: the outer screen's CHOMP card (the bite's
+#   result while the Duo is shut: "CHOMP! n bugs · +points", a bump per bug, "Open to keep feeding"), D03 wait for a
+#   crowd: the FEAST. Then the bee, the 30 levels, the night, the Garden, the Bug Book, Zen and the goals.
+#  - D02 is `screen=chomp` on the inner display (the hinge open at 150°: the demo forces the cover card onto the
+#    panel it is shot from): a real bite of 3+ bugs played headless by the pilot first, so the numbers are real (the
+#    expect FLAGS a made-up one: "SNAP-T chomp card catchBite made up"). The card as it shows on the real outer display
+#    is DR12 (1398 x 2034, Apple's iPhone Duo OUTER size: not this set's slot, so FLAGGED here by design).
+#  - One progress state, `late` (D03, D05, D07–D10), as the iPhone sets.
 # ---- iPhone Duo inner display (2853 x 2007): ten frames -------------------------------------------------------------
-D01-book-hero|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd;ciHinge=140|60|Your Duo is a *flytrap* / Hold it open like a book.|SNAP-T freeze crowd|book
-D02-feast|screen=play;mode=feed;pilot=expert;progress=late;freezeOn=snap;freezeAfter=10.5|240|Wait for a crowd. *FEAST!* / Snap it a little shut. Open again.|SNAP-T event snapped caught=[5-9] escaped
-D03-bee|screen=play;seed=7;wave=15;pilot=perfect;freezeOn=bee|60|Never eat a *bee* / Bees cost snaps. Wait them out.|SNAP-T freeze bee
-D04-garden|screen=garden;progress=late|8|Grow *8 flytraps* / From Red Dragon to B52, and one of gold.|SNAP-T screen garden
-D05-night|screen=play;seed=7;wave=24;pilot=expert;freezeOn=crowd;freezeAfter=3|60|Fireflies light the *night* / New bugs as the day goes on.|SNAP-T start wave 24
-D06-goals|screen=home;progress=late|8|Three *goals* every run / And a Daily Bog with a streak.|SNAP-T canvas
-D07-bug-book|screen=book;progress=late|6|Fill the *Bug Book* / 16 species, each with a joke.|SNAP-T screen book
-D08-zen|screen=play;mode=zen;pilot=casual;progress=late;freezeOn=crowd;freezeAfter=25|60|Or just *relax* / Zen Bog: no rush, no end.|SNAP-T freeze crowd
-D09-results|screen=results;pilot=casual;progress=late|240|One more *go*? / Goals, growth and a best to beat.|SNAP-T results goals [1-3] growth=
-# D10 (R8): the First Bite is retired; Levels 1–5 teach. On the Duo the intro card says "Close the phone to start".
-D10-first-bite|screen=levelIntro;level=3|8|30 *levels* to master / Then the endless bog.|SNAP-T level intro 3
+D01-book-hero|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd;ciHinge=140|60|Your Duo is a *flytrap* / Open phone, open trap. Close it to bite.|SNAP-T freeze crowd|book
+D02-chomp|screen=chomp;chomp=catch|60|Close the phone. *CHOMP!* / The outer screen shows your catch.|SNAP-T chomp card catchBite caught=
+D03-feast|screen=play;mode=feed;pilot=expert;progress=late;freezeOn=bigFeast|240|Wait for a crowd. *FEAST!* / A slow close? The flies escape.|SNAP-T event feast count=[5-9] snapsBack=2
+D04-bee|screen=play;seed=7;wave=15;pilot=perfect;freezeOn=bee|60|Never eat a *bee* / Bees cost snaps. Wait them out.|SNAP-T freeze bee
+D05-levels|screen=levels;progress=late|8|30 *levels* to master / Morning Bog, Dusk and Night. Three stars each.|SNAP-T screen levels
+D06-night|screen=play;seed=7;wave=24;pilot=expert;freezeOn=landed|60|Fireflies light the *night* / Endless runs from morning to night.|SNAP-T freeze landed
+D07-garden|screen=garden;progress=late|8|Grow *8 flytraps* / From Red Dragon to B52, and one of gold.|SNAP-T screen garden
+D08-bug-book|screen=book;progress=late|6|Fill the *Bug Book* / 16 species, each with a joke.|SNAP-T screen book
+D09-zen|screen=play;mode=zen;pilot=casual;progress=late;freezeOn=crowd;freezeAfter=25|60|Or just *relax* / Zen Bog: no rush, no end.|SNAP-T freeze crowd
+D10-goals|screen=home;progress=late|8|Three *goals* at a time / Plus Endless, a Daily Bog and Zen.|SNAP-T canvas
 
 # reserves (Duo): not captured by default; run them with a filter like '^(D[0-9]|DR)'.
-DR1-closing|screen=play;mode=attract;seed=7;wave=6;closure=60;freezeAfter=12|20|The bugs feel you *close* / Shut it fast or they fly.|SNAP-T trap closure 60
 DR2-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=sting|90|A wasp? *Bzzt!* / Wasps sting: two extra snaps.|SNAP-T event stung .*species=wasp
-
-# R5 reserves (REVIEW-4 #1, #11, #15): the R4 phone frames the panel asked to see at Duo aspect (same args as
-# ci/scenarios.txt, "(R4 nn)"), in the upload format so a clean one can be promoted to a D slot. Two are review only
-# and FLAGGED by design: DR10 (hudLeft=1) and DR12 (the cover display is 1398 x 2034, not a Duo slot size; under a
-# '^(D[0-9]|DR)' filter store-capture.sh will also retry it as wrong-size).
-DR3-home|screen=home;progress=mid|6|Feed the *flytrap* / Spare the bees.|SNAP-T canvas|flat
-# DR4 (R8 portrait): `screen=pose` is now the portrait Duo laid out turned onto the book-pose capture (its log says
-# `SNAP-T canvas 669x951 … turned=1`, so REQUIRE_LOG flags it by design: review only, never a D slot as is).
-DR4-pose|screen=pose|5|Any *angle* plays / Open it like a laptop too.|turned=1|flat
-DR5-lesson-2|screen=play;mode=level;level=1;pilot=casual;fold=1;freezeOn=landed|40|Your first *bite* / Wait for it to sip, then close.|SNAP-T freeze landed|flat
-DR6-lesson-3|screen=chomp;fold=1|60|Shut is a *CHOMP* / The outer screen shows the catch.|SNAP-T chomp card|flat
-DR7-landed|screen=play;seed=7;pilot=expert;freezeOn=landed|30|A fly stops to *sip* / Let it settle in the lobes.|SNAP-T freeze landed|flat
-DR8-snap|screen=play;seed=7;pilot=casual;freezeOn=snap|45|One bite, one *CHOMP* / Close the phone to bite.|SNAP-T event snapped|flat
+DR3-results|screen=results;seed=7;pilot=expert;progress=late|240|One more *go*? / Goals, growth and a best to beat.|SNAP-T results goals [1-3] growth=
+DR4-portrait|screen=pose|5|Any *angle* plays / Open it like a laptop too.|turned=1|flat
+DR5-level-5|screen=play;mode=level;level=5;pilot=perfect;freezeOn=crowd|60|Levels that *teach* / Five short lessons, then the real bog.|SNAP-T freeze crowd
+DR6-chomp-sting|screen=chomp;chomp=sting|60|Bit a bee? *Bzzt!* / The outer screen tells you straight away.|SNAP-T chomp card sting
+DR7-landed|screen=play;seed=7;pilot=expert;freezeOn=landed|30|A fly stops to *sip* / Let it settle, then close.|SNAP-T freeze landed|flat
 DR9-play|screen=play;seed=7;pilot=casual;freezeAfter=8|16|Bugs land on *both* pages / The fold is the midrib.|SNAP-T input pilot|flat
+# DR10 (hudLeft=1) and DR12 (the real outer display, 1398 x 2034, Apple's iPhone Duo OUTER slot; ciHinge=0 shuts the
+# Duo and shoots the cover panel) are FLAGGED by design in this set: review only (DR12 could be uploaded by hand to the
+# Duo outer slot; see design/notes/store-R9.md).
 DR10-hud-left|screen=play;seed=7;pilot=casual;fold=1;hudLeft=1;freezeAfter=8|16|The score on the *left* / For left-handed holds.|hudLeft=1|flat
-DR11-daily|screen=play;mode=daily;seed=7;progress=mid;pilot=expert;freezeAfter=10|18|Today's *Daily Bog* / Same bugs for everyone.|SNAP-T input pilot|flat
-DR12-cover|screen=chomp;ciHinge=0|60|Closed? It's *eating* / Open to keep feeding.|SNAP-T chomp card|flat
-DR13-results|screen=results;seed=7;progress=mid;pilot=casual|8|How did you *do*? / Best bite, longest chain, bees spared.|SNAP-T run score=|flat
+DR11-daily|screen=play;mode=daily;seed=7;progress=late;pilot=expert;freezeAfter=10|18|Today's *Daily Bog* / Same bugs for everyone. One try.|SNAP-T input pilot|flat
+DR12-cover|screen=chomp;chomp=catch;ciHinge=0|60|Closed? It's *eating* / Open to keep feeding.|SNAP-T chomp card|flat
 DR14-chain5|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=chain5;freezeAfter=50|300|Chain bites to *x5* / Clean bites keep the chain going.|SNAP-T event chainUp count=[0-9]+ multiplier=5|flat

@@ -38,12 +38,25 @@ enum ChompWords {
         }
     }
 
-    /// The bite's verdict without the count the callout already says ("Fast close", "2 got away"); a sting or a dry
-    /// bite keeps its whole line.
+    /// The bite's verdict without the count the callout already says ("Fast close", "2 got away"). R9 (frames 57, 58:
+    /// "A bee · −1 snap" over "Bee! −1 snap", "They all flew" over "Too slow, they flew"): a sting or a dry bite says
+    /// what to do next instead of saying the callout twice. The outer display is the Duo's, so it speaks of closing.
     static func note(_ c: ChompInfo) -> String {
-        guard c.kind == .catchBite, let r = c.verdict.range(of: "! ") else { return c.verdict }
-        return String(c.verdict[r.upperBound...])
+        switch c.kind {
+        case .catchBite:
+            guard let r = c.verdict.range(of: "! ") else { return c.verdict }
+            return String(c.verdict[r.upperBound...])
+        case .sting:
+            return c.stingers.contains(.wasp) ? stingTipWasp : stingTip
+        case .dry:
+            return c.escaped > 0 ? slowTip : emptyTip
+        }
     }
+
+    static let stingTip = "Wait for bees to leave"
+    static let stingTipWasp = "Wait for wasps to leave"
+    static let slowTip = "Close faster: flies flee"
+    static let emptyTip = "Wait for bugs to land"
 }
 
 /// The closed trap seen from outside (R8), drawn in one `Canvas` in a 300 × 210 design box: the two lobes pressed
@@ -387,12 +400,16 @@ struct ChompCard: View {
 struct OpenCue: View {
     let text: String
     var size: CGFloat = 18
+    /// R9: nil for a cue that isn't an opening (the intro's "Close the phone to start" has its closing phone beside it).
+    var icon: String? = "arrow.left.and.right"
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "arrow.left.and.right")
-                .font(.system(size: size * 0.9, weight: .heavy))
-                .foregroundStyle(SnapTheme.limeLight)
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: size * 0.9, weight: .heavy))
+                    .foregroundStyle(SnapTheme.limeLight)
+            }
             Text(text)
                 .font(.system(size: size, weight: .heavy, design: .rounded))
                 .foregroundStyle(SnapTheme.cream)

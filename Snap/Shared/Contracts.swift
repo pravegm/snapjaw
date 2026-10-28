@@ -282,7 +282,7 @@ public enum RunPhase: Equatable, Sendable {
 
 /// One short instruction the HUD shows (Core decides which applies; UI owns the words).
 public enum TrapHint: String, Codable, Sendable {
-    case bendALittle      // tooFlat: "Bend it a little, like a book"
+    case bendALittle      // R8/R9: never sent (founder rule 2: no pose demands); kept so switches compile
     case quick            // creeping: "Snap it — quick!"
     case openUp           // not armed for > 1 s after a snap: "Open up to reset"
     case beeInside        // a protected bug is sipping in the trap: "Bee! Wait…"

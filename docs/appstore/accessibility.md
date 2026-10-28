@@ -3,13 +3,13 @@
 *Decided Tue 27 Oct 2026 by the launch lead, from the design (`design/GAME-DESIGN.md` §3–§10, `design/ROUND-1.md` Settings and Scene briefs); the build doesn't exist yet. The rule, the same as Squish, Brim, Swoop and Hush: **claim a label only when the build earns it across every common task**, and verify on the release build first. Labels are voluntary, per device, and can only be published once a version is live, so this happens on **launch day, Tue 8 Dec** (runbook §6). The App Store Connect tool doesn't set labels: the founder ticks them by hand.*
 
 Common tasks for Snapjaw:
-1. the first launch: get through **First Bite** (or skip it after step 2);
-2. start **Feed**, the **Daily Bog** or the **Zen Bog** from Home, and read the **Goals** card there;
-3. play: watch bugs land, tell a bee from a fly, snap (a short fold on a Duo; a tap elsewhere), open again, read the HUD (score, snaps as little trap icons, the chain chip, the one-line hint) and the in-world pops ("TRIPLE ×3", "Feast! +1 snap", the big "FEAST!" banner, "Goal done!", "Bzzt!");
+1. the first launch: Home opens, **Play** starts Level 1 (R8: the First Bite lesson is gone; Levels 1–5 teach, with one-line coach hints);
+2. start a **Level** (the level map, its intro card and goal, its stars), **Endless**, the **Daily Bog** or the **Zen Bog** from Home, and read the **Goals** card there;
+3. play: watch bugs land, tell a bee from a fly, bite (R8: close the phone on a Duo, a tap elsewhere), read the outer display's CHOMP card while shut, open again, read the HUD (score, snaps as little trap icons, the chain chip, the one-line hint) and the in-world pops ("TRIPLE ×3", "Feast! +1 snap", the big "FEAST!" banner, "Goal done!", "Bzzt!");
 4. pause (Resume, Restart, Home; the run's goals; **End** in the Zen Bog);
 5. read the Results card (the score, or bugs caught in the Zen Bog; best bite, best chain, bees spared, the goals ticked and their growth, the Daily streak and **Share**, new Bug Book pages, the next Bug Book clue, rank bar, a new flytrap);
 6. open the **Bug Book**, and the **Garden** to pick a flytrap;
-7. change **Settings** (Sound, Haptics, Respect silent switch, Score on the left, Reduce motion, Replay First Bite).
+7. change **Settings** (Sound, Haptics, Respect silent switch, Score on the left, Reduce motion; R9: "Replay Level 1" replaced Replay First Bite).
 
 ## What the design gives us (to be confirmed on the build)
 
@@ -56,7 +56,7 @@ Common tasks for Snapjaw:
 ### B. Sufficient Contrast
 Apple's bar: about 4.5:1 for text, 3:1 for large text, controls and state indicators.
 - [ ] HUD text (score, the chain chip, the hint line) and the in-world pops ("TRIPLE ×3", "Feast! +1 snap", "Bzzt!") keep ≥ 4.5:1 (3:1 for the large ones) against **every** phase's light (warm gold morning, white noon, peach dusk, blue night) and over the crimson lobes. White on noon light won't pass without an outline or plate.
-- [ ] The snaps icons, the pause button and First Bite's Skip reach 3:1 against what's behind them.
+- [ ] The snaps icons, the pause button, the level map's stars and locks, and the CHOMP card's text reach 3:1 against what's behind them.
 - [ ] Menu, Bug Book and Results text ≥ 4.5:1 on its panel, the quiet lines included.
 - [ ] Check with Increase Contrast and Bold Text on.
 

@@ -14,25 +14,25 @@
 # both opaque sRGB PNGs, plus <out>/MANIFEST.txt, and for review only <out>/review/: the same art with Apple's template
 # safe areas drawn on (*-guides.png), the search art at card size (365 pt wide at 1x and 3x), the header at iPhone
 # width (402 pt at 3x), and alternatives (search-side.png: the side layout; search-feast.png / search-bee.png: the
-# D02 / D03 frames with their own captions; header-feast.png). Upload only the two files at the top of <out>.
+# D03 / D04 frames with their own captions; header-feast.png). Upload only the two files at the top of <out>.
 #
 # A capture is used only if it is clean: <dir>/store-<name>.png is 2853 x 2007 (the inner display, not turned, not the
 # cover), its captioned frame passed every ci/store-set.sh check (<dir>/store/<name>.png exists, not _flagged/), and
 # its app log shows the folded inner canvas (`SNAP-T canvas 951x669 fold=1`). The light side follows the log's last
 # canvas line (the HUD's half: right, or left with hudLeft=1), the book angle its real hinge angle (as store-set.sh).
-# Hero for both: D01-book-hero (a crowd sipping across both lobes, the midrib on the hinge), else D02-feast (noted as
+# Hero for both: D01-book-hero (a crowd sipping across both lobes, the midrib on the hinge), else D03-feast (noted as
 # a fallback). The search caption is the hero scenario's own caption from ci/duo-store-scenarios.txt, so the words
 # always match the picture; the header has no caption (the wordmark and the app's tagline only).
 # Never fails the job: always exits 0. Every problem is a MANIFEST line (and a ::warning:: in the Actions log). The
 # summary line is `summary: ok <n>  problems <n>`; tools/appstore/asc.swift refuses a folder with problems.
 # Env: SOURCE_RUN (the run the captures came from, for the MANIFEST); STORE_BANNER_BIN (compiled renderer cache;
 #      default $RUNNER_TEMP or $TMPDIR); HERO_HEADER / HERO_SEARCH (scenario names tried in order, default
-#      "D01-book-hero D02-feast"); BOOK_ANGLE (degrees, or auto = the capture's logged hinge angle if 130–150, else
+#      "D01-book-hero D03-feast"); BOOK_ANGLE (degrees, or auto = the capture's logged hinge angle if 130–150, else
 #      140); BANNER_ARGS: "header=<opts>; search=<opts>; <name>=<opts>; …" — extra ci/store-banner.swift options for
 #      the header, the search art, and any other name = a review-only variant (review/variant-<name>.png; give it
 #      `--kind header` or `--kind search`, default search). Options are split like a shell line (quotes work), and
 #      `--from <scenario>` swaps in another clean capture (its light, angle and, for search, its caption; put an
-#      explicit --caption after it). E.g. BANNER_ARGS="search=--yaw 6; bee=--kind search --from D03-bee".
+#      explicit --caption after it). E.g. BANNER_ARGS="search=--yaw 6; bee=--kind search --from D04-bee".
 #      BANNER_ARGS_HEADER, BANNER_ARGS_SEARCH and BANNER_VARIANTS ("name=<opts>; …") are also read.
 DIR="${1:?usage: store-placements.sh <duo dir> <out dir>}"
 OUT="${2:-store-placements}"
@@ -42,8 +42,8 @@ SCEN="$HERE/duo-store-scenarios.txt"
 CACHE="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 BIN="${STORE_BANNER_BIN:-${CACHE%/}/snap-store-banner}"
 BOOK_ANGLE="${BOOK_ANGLE:-auto}"
-read -r -a HERO_HEADER_LIST <<< "${HERO_HEADER:-D01-book-hero D02-feast}"
-read -r -a HERO_SEARCH_LIST <<< "${HERO_SEARCH:-D01-book-hero D02-feast}"
+read -r -a HERO_HEADER_LIST <<< "${HERO_HEADER:-D01-book-hero D03-feast}"
+read -r -a HERO_SEARCH_LIST <<< "${HERO_SEARCH:-D01-book-hero D03-feast}"
 
 mkdir -p "$OUT/review"
 OUT="$(cd "$OUT" && pwd)"
@@ -306,9 +306,9 @@ done
 # Review only: alternatives to compare at full size and at card size.
 note ""
 if hero_args D01-book-hero search; then review search-side.png --kind search --layout side "${HA[@]}"; fi
-if hero_args D02-feast search; then review search-feast.png --kind search "${HA[@]}"; fi
-if hero_args D03-bee search; then review search-bee.png --kind search "${HA[@]}"; fi
-if hero_args D02-feast header; then review header-feast.png --kind header "${HA[@]}"; fi
+if hero_args D03-feast search; then review search-feast.png --kind search "${HA[@]}"; fi
+if hero_args D04-bee search; then review search-bee.png --kind search "${HA[@]}"; fi
+if hero_args D03-feast header; then review header-feast.png --kind header "${HA[@]}"; fi
 i=0
 while (( i < ${#VARIANT_NAMES[@]} )); do
   vname="${VARIANT_NAMES[$i]}"; vargs="${VARIANT_ARGS[$i]}"; i=$((i + 1))

@@ -175,8 +175,40 @@ final class HingeTrapSource: TrapSource {
     /// Forget the motion history and start a fresh detector from the last reading (keeps `hasHinge`). Call it when a
     /// paused run resumes and when the app becomes active again, so a stale reference can't make the first frames
     /// bite. The fresh detector is armed at once if the phone is open (≥ 35°). `time` defaults to the clock.
-    func reset(at time: TimeInterval? = nil) {
-        restart(requireShut: false, at: time)
+    /// R9 (real hardware): a reset never skips a round's closed start, and never re-arms a shut trap early. With
+    /// `keepsRoundStart` (the default) a detector still waiting for the round's first close keeps waiting: closing the
+    /// phone to start moves the app to the outer display, which re-activates the scene (a reset) mid-close, and without
+    /// this the fresh detector armed at once and that starting close BIT. A trap that is shut (unarmed since a bite)
+    /// stays unarmed until the phone opens past its re-arm angle. Pass `keepsRoundStart: false` when no round is in
+    /// play (going Home), so Home's trap never waits.
+    func reset(at time: TimeInterval? = nil, keepsRoundStart: Bool = true) {
+        restart(requireShut: keepsRoundStart && detector.waitingForShut, at: time)
+    }
+
+    /// R9: the app is showing on the outer (cover) display during a hinge round: the phone is folded, whether or not a
+    /// shut report has arrived (iOS hands the app over before the hinge reaches the shut zone, and reports can stop
+    /// there). A round waiting for its first close counts as closed now (never a bite); otherwise the latest angle is
+    /// read as `.closed`, so it bites only when that angle is at or below `Tuning.statusShutAngle` (25°), exactly as the
+    /// hardware status would. Safe to call on every handover.
+    func noteFolded(at time: TimeInterval? = nil) {
+        guard hasHinge else { return }
+        var stamp = time ?? clock()
+        if !stamp.isFinite { stamp = lastSampleTime ?? 0 }
+        if let last = lastDetectorTime { stamp = max(stamp, last) }
+        if let last = lastSampleTime { stamp = max(stamp, last) }
+        lastDetectorTime = stamp
+        let fired = detector.noteFolded(at: stamp)
+        if let found = fired {
+            let trigger = Self.sane(found)
+            pendingSnap = trigger
+            snapsFired += 1
+            biteSinceArm = true
+            if FeelDemoLog.isEnabled {
+                FeelDemoLog.line(String(format: "SNAP-T shut d=%.3f angle %.1f status folded", trigger.duration,
+                                        angle ?? -1))
+            }
+        }
+        wasArmed = detector.armed
     }
 
     /// R8 (founder rule 3): a round's start. Like `reset`, but the trap is closed until the phone has been shut once and
@@ -193,7 +225,10 @@ final class HingeTrapSource: TrapSource {
         // display, which can re-activate the scene right after the bite); the stale rule still drops an old one. A new
         // round never inherits one.
         let keep: SnapTrigger? = requireShut ? nil : pendingSnap
-        detector = SnapDetector(requireShut: requireShut)
+        // R9: a plain reset of a shut trap (unarmed since a bite) keeps it shut until the phone opens past its re-arm
+        // angle (`SnapDetector.rearmLow`); a new round starts from scratch.
+        let carriedLow: Double? = requireShut ? nil : (detector.armed ? nil : detector.rearmLow)
+        detector = SnapDetector(requireShut: requireShut, rearmLow: carriedLow)
         snapFilter.reset()
         predictor.reset()
         pendingSnap = nil

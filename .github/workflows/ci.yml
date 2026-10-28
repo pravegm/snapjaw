@@ -120,17 +120,17 @@ jobs:
           fi
 
       - name: Demo-guard positive control
-        # testflight.yml fails a Release binary that contains "SNAP-T paused closing" (a DEBUG-only log literal) or the
+        # testflight.yml fails a Release binary that contains "SNAP-T variety grown" (a DEBUG-only log literal) or the
         # key "freezeAfter". That guard only means something if the literal is visible to `strings` in a Debug build
         # (Xcode puts Debug code in Snap.debug.dylib), so check it here (sister R1). Non-fatal.
         if: success()
         continue-on-error: true
         run: |
           APP=build/Build/Products/Debug-iphonesimulator/Snap.app
-          if strings "$APP/Snap" "$APP"/*.debug.dylib 2>/dev/null | grep -q "SNAP-T paused closing"; then
-            echo "The Debug binary carries the SNAP-T paused closing literal: the Release demo guard is live."
+          if strings "$APP/Snap" "$APP"/*.debug.dylib 2>/dev/null | grep -q "SNAP-T variety grown"; then
+            echo "The Debug binary carries the SNAP-T variety grown literal: the Release demo guard is live."
           else
-            echo "::warning::No SNAP-T paused closing literal in the Debug build, so the demo-strings guard in testflight.yml cannot fire. Print that line as one literal, or pick another long DEBUG-only literal for the guard."
+            echo "::warning::No SNAP-T variety grown literal in the Debug build, so the demo-strings guard in testflight.yml cannot fire. Print that line as one literal, or pick another long DEBUG-only literal for the guard."
           fi
           if strings "$APP/Snap" "$APP"/*.debug.dylib 2>/dev/null | grep -qx "freezeAfter"; then echo "freezeAfter is visible to strings in Debug."; else echo "freezeAfter is not visible to strings (Swift small string): expected."; fi
 

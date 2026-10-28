@@ -783,7 +783,7 @@ if [[ " $PASSES " == *" hinge "* ]]; then
   run_check no-bite-deep check_nobite
 fi
 
-# ---- pass: the book-pose frames (open 165, half closed 150, snapped 130, cover shut, reopened, pose card) ---------
+# ---- pass: the book-pose frames (open 165, half closed 150, snapped 130, cover shut, reopened, portrait) ----------
 if [[ " $PASSES " == *" frames "* ]]; then
   # Attract runs on the real hinge (no pilot: the hinge drives the jaws; snaps never run out).
   hinge_set 165
@@ -821,11 +821,11 @@ if [[ " $PASSES " == *" frames "* ]]; then
   o0=$(nlines "$FC")
   hinge_sweep 165 2.5; sleep 3; shoot duo-05-reopened-165 inner
   result SHUT-FRAMES INFO "bites $(count 'SNAP-T event snapped' "$FC"); shut lines $(count 'SNAP-T shut ' "$FC"); rearmed after the reopen: $(first_line "$FC" "SNAP-T event rearmed" "$o0" | grep . || echo none); $(canvas_line "$FC")$(simnote)"
-  # The pose card ("Hold it open like a book"). The Duo sim stays in book pose (no CLI rotate), so the card is shown
-  # with `screen=pose`; a real portrait frame needs the app's own orientation request (none in R1).
+  # R8b: portrait plays (no pose card). The Duo sim stays in book pose (no CLI rotate), so `screen=pose` lays the app
+  # out at the turned canvas over Home; the PNG comes out turned and reads after `sips -r 90`. Want `turned=1`.
   launch frames-pose "screen=pose"
-  sleep 2; shoot duo-06-pose-card inner
-  result POSE-CARD INFO "frame $(png_wh "$OUT_ABS/duo-06-pose-card.png"); $(canvas_line "$OUT_ABS/logs/frames-pose.txt")$(simnote)"
+  sleep 2; shoot duo-06-portrait inner
+  result PORTRAIT INFO "frame $(png_wh "$OUT_ABS/duo-06-portrait.png"); $(canvas_line "$OUT_ABS/logs/frames-pose.txt")$(simnote)"
 fi
 
 # ---- pass: UI frames -----------------------------------------------------------------------------------------------

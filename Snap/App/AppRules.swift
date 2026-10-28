@@ -147,10 +147,13 @@ enum AppRules {
             return (who + " Let it leave", false)
         }
         if n == 0 {
-            return r.escaped > 0 ? ("Too slow, they flew", false) : ("Empty bite", false)
+            // R9: a tap has no speed, so a phone is never told it was slow.
+            if r.escaped > 0 { return (touch ? "Missed, they flew" : "Too slow, they flew", false) }
+            return ("Empty bite", false)
         }
         let ratio = r.catchRatio.isFinite ? r.catchRatio : 1
-        if r.escaped > 0 && ratio < slowRatio && !touch {
+        // R9 (frame 46: "FEAST!" under "Too slow, 1 flew"): a crowd caught is good news, whatever flew.
+        if r.escaped > 0 && ratio < slowRatio && !touch && n < 3 {
             return ("Too slow, \(r.escaped) flew", false)
         }
         let head = n == 1 ? "Got it!" : "\(n) bugs!"
@@ -164,7 +167,7 @@ enum AppRules {
     static var verdictSamples: [String] {
         ["Got it! Fast close", "3 bugs! Fast close", "12 bugs! 3 got away", "Too slow, they flew",
          "Too slow, 11 flew", "Empty bite", "Bee! \u{2212}2 snaps", "Wasp! Let it leave", "5 bugs! Feast!",
-         "2 bugs! Clean bite"]
+         "2 bugs! Clean bite", "Missed, they flew"]
     }
 
     // MARK: R8: the teaching levels' coach (Levels 1–5 replace the First Bite)

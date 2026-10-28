@@ -222,7 +222,7 @@ final class GameController: ObservableObject, SceneDriver {
     /// R8: the level's goal for the cover ("Level 3 · Catch 3 flies").
     var levelGoalLine: String? {
         guard isLiveRun, let spec = levelSpec else { return nil }
-        return LevelWords.levelName(LevelBridge.id(spec)) + " · " + LevelBridge.goal(spec)
+        return LevelWords.levelName(LevelBridge.id(spec)) + " · " + LevelWords.goal(spec, touch: hintTouch)
     }
     /// R8: Home's and the cover's next level ("Next: Level 4"), nil when every level is done.
     var nextLevelLine: String? {
@@ -565,7 +565,9 @@ final class GameController: ObservableObject, SceneDriver {
         if phase == .active {
             appActive = true
             // A fresh snap detector from the last reading: a stale reference can't make the first frames snap.
-            if hinge.hasHinge { hinge.reset(at: CACurrentMediaTime()) }
+            // R9 (core-R9): in a round the reset keeps a waiting round start (the outer-display handover re-activates
+            // the scene mid-close); off a round nothing waits.
+            if hinge.hasHinge { hinge.reset(at: CACurrentMediaTime(), keepsRoundStart: route.isPlay) }
             if checkpointSaved {
                 checkpointSaved = false
                 store.clearCheckpoint()
@@ -598,6 +600,12 @@ final class GameController: ObservableObject, SceneDriver {
         pose = newPose
         AppTrace.t("SNAP-T pose \(newPose.rawValue)")
         setPause(.pose, newPose != .play)
+        // R9 (core-R9): the outer display took over a hinge round, so the phone is folded even if the hinge's reports
+        // stopped short of the shut zone. A waiting round start counts as closed; a shut bites at once (headless step).
+        if newPose == .cover && route.isPlay && input == .hinge && hinge.hasHinge && isLiveRun {
+            hinge.noteFolded(at: CACurrentMediaTime())
+            stepFromHinge()
+        }
     }
 
     func setSystemReduceMotion(_ on: Bool) {
@@ -980,8 +988,8 @@ final class GameController: ObservableObject, SceneDriver {
         // QA-2 #7: Home has no snaps row. R6: Home's HUD corners are the Scene's defaults.
         SceneHooks.setShowsEconomy(scene, false)
         SceneHooks.setHUDKeepOut(scene, nil)
-        // A snap made on a menu is never delivered on Home's first frame either.
-        if hinge.hasHinge { hinge.reset(at: CACurrentMediaTime()) }
+        // A snap made on a menu is never delivered on Home's first frame either. R9: Home's trap never waits for a close.
+        if hinge.hasHinge { hinge.reset(at: CACurrentMediaTime(), keepsRoundStart: false) }
         setRoute(.home)
         refreshIdleTimer()
     }
@@ -1027,7 +1035,7 @@ final class GameController: ObservableObject, SceneDriver {
     private func showIntro(_ spec: LevelSpec) {
         let id = LevelBridge.id(spec)
         levelIntro = LevelIntro(id: id, world: LevelRules.world(of: id), title: LevelBridge.title(spec),
-                                goal: LevelBridge.goal(spec), touch: input != .hinge)
+                                goal: LevelWords.goal(spec, touch: hintTouch), touch: input != .hinge)
         introUntil = CACurrentMediaTime() + Self.introSeconds
         if input == .touch || input == .fixed { setPause(.intro, true) }
         AppTrace.t("SNAP-T level intro \(id)")
@@ -1083,9 +1091,13 @@ final class GameController: ObservableObject, SceneDriver {
         let next = LevelRules.nextAfter(id, in: store.data)
         AppTrace.t("SNAP-T level result \(id) stars=\(stars) passed=\(judged.passed ? 1 : 0) best=\(kept.after)"
                    + (kept.opened.map { " world=\($0)" } ?? ""))
+        // R9: the goal and Core's line in the player's control (a phone never reads "Shut it faster").
+        let phoneWords = hintTouch
         return LevelResult(id: id, world: LevelRules.world(of: id), title: spec.map { LevelBridge.title($0) } ?? "",
-                           goal: spec.map { LevelBridge.goal($0) } ?? "", stars: stars, bestStars: kept.after,
-                           passed: judged.passed, line: judged.line, next: next, worldOpened: kept.opened)
+                           goal: spec.map { LevelWords.goal($0, touch: phoneWords) } ?? "", stars: stars,
+                           bestStars: kept.after, passed: judged.passed,
+                           line: LevelWords.outcomeLine(judged.line, touch: phoneWords), next: next,
+                           worldOpened: kept.opened)
     }
 
     /// Files a run once (the store, Game Center, the level's stars) and builds its summary.
@@ -1192,7 +1204,8 @@ final class GameController: ObservableObject, SceneDriver {
         applyVariety()
         touch = TouchTrapSource()
         fixedSource.closure = demo?.closure ?? 0
-        pilotRun = demo?.pilot.map { PilotRun(skill: $0, seed: runSeed &+ 101) }
+        // R9: a level's pilot reads the level's goal (`DemoRunner.pilot`); every other mode's is unchanged.
+        pilotRun = demo?.pilot.map { PilotRun(pilot: DemoRunner.pilot(skill: $0, seed: runSeed &+ 101, mode: m)) }
         setInput(chooseInput(), force: true)
         // QA-1 #2: a snap made on Results, a menu or the pause menu must never fire at t = 0 of this run.
         // R8 (founder rule 3, Core): every hinge round starts closed (shut once, then open).
@@ -1458,7 +1471,8 @@ final class GameController: ObservableObject, SceneDriver {
         values.waitingForClose = waiting && levelIntro == nil
         if let spec = levelSpec {
             let left = LevelBridge.timeLimit(spec).map { max(Int(($0 - s.time).rounded(.up)), 0) }
-            values.level = LevelHUD(id: LevelBridge.id(spec), goal: LevelBridge.goal(spec), done: levelPassed,
+            values.level = LevelHUD(id: LevelBridge.id(spec), goal: LevelWords.goal(spec, touch: hintTouch),
+                                    done: levelPassed,
                                     secondsLeft: left)
         }
         values.hunger = AppRules.hudHunger(s.hunger, live: AppRules.isLive(s.phase))
@@ -1639,8 +1653,10 @@ final class GameController: ObservableObject, SceneDriver {
         var t = tally
         var played = 0.0
         let skill = d.pilot ?? (want == .catchBite ? .expert : .novice)
+        // R9: one pilot for the whole search (a fresh one per slice never finished a close).
+        var pilot = DemoRunner.pilot(skill: skill, seed: session.seed &+ 101, mode: session.mode)
         while found == nil && played < Self.chompSearchSeconds && !session.isFinished {
-            played += DemoRunner.play(session, skill: skill, seed: session.seed &+ UInt64(played * 10), seconds: 0.5,
+            played += DemoRunner.play(session, pilot: &pilot, seconds: 0.5,
                                       onEvent: { e in
                                           t.note(e)
                                           guard case let .snapped(r) = e else { return }
@@ -1675,10 +1691,11 @@ final class GameController: ObservableObject, SceneDriver {
         dismissIntro()
         var t = tally
         var played = 0.0
+        // R9 (frames 08, 62 scored 0): one pilot for the whole level, reading its goal (`DemoRunner.pilot`).
+        var pilot = DemoRunner.pilot(skill: d.pilot ?? .perfect, seed: session.seed &+ 101, mode: session.mode)
         // Core ends a level itself (its goal met, or its bites or time out).
         while played < Self.levelSearchSeconds && !session.isFinished {
-            played += DemoRunner.play(session, skill: d.pilot ?? .perfect, seed: session.seed &+ UInt64(played * 10),
-                                      seconds: 0.5, onEvent: { e in t.note(e) })
+            played += DemoRunner.play(session, pilot: &pilot, seconds: 0.5, onEvent: { e in t.note(e) })
         }
         tally = t
         AppTrace.t("SNAP-T level demo \(id) played=" + AppTrace.fixed(played, 1))

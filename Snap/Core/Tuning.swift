@@ -8,7 +8,8 @@ import Foundation
 // changed some GAME-DESIGN starting values; each change is marked "R1". R2 changes (design/notes/core-R2.md) are
 // marked "R2", R3 changes (design/notes/core-R3.md) "R3", R4 changes (design/notes/core-R4.md) "R4", R5 changes
 // (design/notes/core-R5.md) "R5", R6 changes (design/notes/core-R6.md) "R6", R7 changes (design/notes/core-R7.md) "R7",
-// R8 changes (design/notes/core-R8.md) "R8".
+// R8 changes (design/notes/core-R8.md) "R8", R9 changes (design/notes/core-R9.md) "R9" (rearmRise, startShutAngle: the
+// detector on real hardware; no economy number changed in R9).
 // The R6 goal and halo values are not in the sim (it has no goals or hints); lastLightWave and zenDayWaves are. R7's
 // feastMultiplier, night pool weights and late decays are; wellFedScore is not.
 
@@ -24,6 +25,13 @@ enum Tuning {
     /// … or the hinge status `.closed` with θ at or below this. Hardware reads `.closed` from about 85° (CLAUDE.md), so
     /// the status alone would bite an open phone; this guard keeps "partial closes never bite".
     static let statusShutAngle: Double = 25
+    /// R9 (real hardware: about ±5° accuracy and noisy reports): after a shut, the trap re-arms only once θ is also this
+    /// far (°) above the lowest θ since that shut (SnapDetector.rearmAngle). A full close (lowest ≤ 20°) re-arms at
+    /// armAngle exactly; a `.closed` shut that hovers at 25–30° needs 40–45°, so report noise can't flap bite–arm–bite.
+    static let rearmRise: Double = 15
+    /// R9 (founder rule 3, never stuck): a round waiting for its first close counts the phone as closed at or below this
+    /// (°) whatever the status (SnapDetector.isStartShut). The bite itself still needs the shut zone.
+    static let startShutAngle: Double = 25
     /// R8: a close starts when the closure passes this (the bite's duration is timed from here) …
     static let closeStart: Double = 8
     /// … and is abandoned (a partial close opened again) when the closure falls back under this …

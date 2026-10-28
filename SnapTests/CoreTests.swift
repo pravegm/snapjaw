@@ -2781,3 +2781,372 @@ struct CoreTests {
         #expect(TrapRules.touchesKeepOut([zone], 700, 500, clearance: 0.5), "inside the rect")
     }
 }
+
+// MARK: - R9 (design/notes/core-R9.md): the hinge detector on real hardware, and the R9 level rules
+//
+// A real Duo: about ±5° accuracy, noisy reports every 25–45 ms (and a 150 ms gap now and then), `DeviceHinge.status`
+// `.closed` from ~85° down. These traces mirror tools/balance-sim.js `noisyTrace` (`node tools/balance-sim.js
+// detector=1` runs each over 200 seeds); here each runs over 40 seeds of SeededRandom. Properties, never exact numbers.
+
+/// A noisy hinge (the sim's noisyTrace): legs of the hand's true angle (from, to, seconds), each report ± `amp`° of
+/// uniform noise plus `bias`, the hardware's status when `status`.
+private struct R9NoisyHinge {
+    var rng: SeededRandom
+    var amp: Double
+    var bias: Double
+    var status: Bool
+    var t: Double = 0
+    var fires: [SnapTrigger] = []
+    var armedEver: Bool = false
+    var maxClosure: Double = 0
+
+    init(seed: UInt64, amp: Double = 3, bias: Double = 0, status: Bool = true) {
+        self.rng = SeededRandom(seed: seed)
+        self.amp = amp
+        self.bias = bias
+        self.status = status
+    }
+
+    mutating func run(_ d: inout SnapDetector, _ legs: [(Double, Double, Double)]) {
+        for leg in legs {
+            let from: Double = leg.0
+            let to: Double = leg.1
+            let secs: Double = leg.2
+            let end: Double = t + secs
+            var lt: Double = t
+            while lt < end {
+                lt += rng.chance(0.05) ? 0.15 : rng.between(0.025, 0.045)
+                let u: Double = min(1, (lt - t) / max(secs, 1e-9))
+                let truth: Double = from + (to - from) * u
+                let a: Double = min(max(truth + bias + rng.between(-amp, amp), 0), 180)
+                var st: TrapHingeStatus = .unknown
+                if status { st = truth <= 85 ? .closed : (truth >= 175 ? .fullyOpen : .partiallyOpen) }
+                if let f = d.ingest(angle: a, at: lt, status: st) { fires.append(f) }
+                let inp: TrapInput = d.input(at: lt + 0.001)
+                maxClosure = max(maxClosure, inp.closure)
+                if d.armed { armedEver = true }
+            }
+            t = end
+        }
+    }
+}
+
+struct CoreR9Tests {
+
+    private let geo = TrapGeometry(sceneSize: CGSize(width: 952, height: 670))
+    private let frame: Double = 1.0 / 60.0
+    private let seeds: [UInt64] = (0..<40).map { (k: Int) -> UInt64 in UInt64(9000 + k) }
+
+    @Test func aNoisySlamBitesOnceAndANoisySlowCloseStillBitesAtTheShut() {
+        for seed in seeds {
+            var a = SnapDetector()
+            var h = R9NoisyHinge(seed: seed)
+            h.run(&a, [(150, 150, 1), (150, 3, 0.3), (3, 3, 1)])
+            #expect(h.fires.count == 1, "seed \(seed): a slam bit \(h.fires.count) times")
+            if let f = h.fires.first { #expect(f.duration <= 0.4, "seed \(seed): slam d \(f.duration)") }
+            // 40°/s with stick-slip stops: one bite, at the shut, slow.
+            var b = SnapDetector()
+            var s = R9NoisyHinge(seed: seed &+ 1000)
+            s.run(&b, [(150, 150, 1), (150, 110, 1), (110, 110, 0.4), (110, 60, 1.25), (60, 60, 0.3), (60, 3, 1.4),
+                       (3, 3, 1)])
+            #expect(s.fires.count == 1, "seed \(seed): a slow close bit \(s.fires.count) times")
+            if let f = s.fires.first { #expect(f.duration >= 1.0, "seed \(seed): slow d \(f.duration)") }
+            // A creep at 8°/s: still one bite at the shut (it just catches less).
+            var c = SnapDetector()
+            var k = R9NoisyHinge(seed: seed &+ 2000)
+            k.run(&c, [(150, 150, 1), (150, 3, 18), (3, 3, 1)])
+            #expect(k.fires.count == 1, "seed \(seed): a creep bit \(k.fires.count) times")
+        }
+    }
+
+    @Test func noisyPartialClosesNeverBiteEvenWithTheClosedStatus() {
+        for seed in seeds {
+            var d = SnapDetector()
+            var h = R9NoisyHinge(seed: seed)
+            h.run(&d, [(150, 150, 1), (150, 40, 0.4), (40, 40, 1), (40, 150, 0.5), (150, 60, 0.3), (60, 60, 2),
+                       (60, 150, 0.4)])
+            #expect(h.fires.isEmpty, "seed \(seed): \(h.fires.count) bites")
+            #expect(d.armed)
+            #expect(h.maxClosure >= 90, "seed \(seed): the closure followed the phone (\(h.maxClosure))")
+        }
+    }
+
+    @Test func aClosedPhoneHoveringNearTheShutNeverFlaps() {
+        // `.closed` at ≤ 25° bites and 35° re-arms: only 10° apart, so ±6° of noise at 30° flapped bite–arm–bite
+        // before R9. The re-arm now also needs Tuning.rearmRise above the lowest θ since the shut.
+        for seed in seeds {
+            var d = SnapDetector()
+            var h = R9NoisyHinge(seed: seed, amp: 6)
+            h.run(&d, [(150, 150, 1), (150, 30, 0.4), (30, 30, 6)])
+            #expect(h.fires.count <= 1, "seed \(seed): \(h.fires.count) bites while hovering")
+        }
+        // The re-arm angle: after a full close it is armAngle exactly; after a high shut it is rearmRise above it.
+        var full = SnapDetector()
+        _ = full.ingest(angle: 150, at: 0)
+        _ = full.ingest(angle: 3, at: 0.1)
+        #expect(!full.armed)
+        #expect(abs(full.rearmAngle - Tuning.armAngle) < 1e-9)
+        var high = SnapDetector()
+        _ = high.ingest(angle: 150, at: 0)
+        let low: Double = Tuning.statusShutAngle - 1
+        _ = high.ingest(angle: low, at: 0.1, status: .closed)
+        #expect(!high.armed)
+        #expect(abs(high.rearmAngle - max(Tuning.armAngle, low + Tuning.rearmRise)) < 1e-9)
+        _ = high.ingest(angle: Tuning.armAngle + 1, at: 0.2)
+        #expect(high.armed == (Tuning.armAngle + 1 >= low + Tuning.rearmRise))
+        _ = high.ingest(angle: low + Tuning.rearmRise + 1, at: 0.3)
+        #expect(high.armed)
+    }
+
+    @Test func jitterRoundTheShutLineBitesOnce() {
+        for seed in seeds {
+            var d = SnapDetector()
+            var h = R9NoisyHinge(seed: seed, amp: 4)
+            h.run(&d, [(150, 150, 1), (150, 20, 2), (20, 16, 3), (16, 22, 2), (22, 3, 1)])
+            #expect(h.fires.count == 1, "seed \(seed): \(h.fires.count) bites")
+        }
+    }
+
+    @Test func aPhoneOpenedOnlyTo45StillPlays() {
+        // Founder rule (literal mapping): any opening is open.
+        for seed in seeds {
+            var d = SnapDetector(requireShut: true)
+            var h = R9NoisyHinge(seed: seed, amp: 2)
+            h.run(&d, [(3, 3, 0.5), (3, 45, 0.5), (45, 45, 1.5), (45, 3, 0.3), (3, 3, 0.5)])
+            #expect(h.armedEver, "seed \(seed): 45° never opened the trap")
+            #expect(h.fires.count == 1, "seed \(seed): \(h.fires.count) bites")
+        }
+    }
+
+    @Test func aRoundsStartingCloseNeverBitesAndTheNextCloseDoes() {
+        for seed in seeds {
+            var d = SnapDetector(requireShut: true)
+            var h = R9NoisyHinge(seed: seed)
+            h.run(&d, [(150, 150, 1), (150, 3, 0.3), (3, 3, 0.5)])
+            #expect(h.fires.isEmpty, "seed \(seed): the starting close bit")
+            #expect(!d.waitingForShut && !d.armed)
+            h.run(&d, [(3, 150, 0.6), (150, 150, 1), (150, 3, 0.3), (3, 3, 0.5)])
+            #expect(h.fires.count == 1, "seed \(seed): \(h.fires.count) bites")
+        }
+    }
+
+    @Test func aRoundStartingLowIsNeverStuckWaiting() {
+        // A phone at 10° whose status isn't `.closed`, and one reading 22° with no status: both count as closed for
+        // the round's start (SnapDetector.isStartShut), so opening them opens the trap.
+        for start in [10.0, Tuning.startShutAngle - 3] {
+            var d = SnapDetector(requireShut: true)
+            var h = R9NoisyHinge(seed: 77, amp: 1, status: false)
+            h.run(&d, [(start, start, 0.5)])
+            #expect(!d.waitingForShut, "start \(start)")
+            h.run(&d, [(start, 150, 0.6), (150, 150, 0.5)])
+            #expect(d.armed, "start \(start)")
+            #expect(h.fires.isEmpty)
+        }
+        #expect(SnapDetector.isStartShut(angle: Tuning.startShutAngle, status: .unknown))
+        #expect(!SnapDetector.isStartShut(angle: Tuning.startShutAngle + 1, status: .partiallyOpen))
+        #expect(!SnapDetector.isShut(angle: Tuning.startShutAngle, status: .unknown), "the bite still needs the shut")
+    }
+
+    @Test func aBiasedHingeStillBitesOncePerClose() {
+        for seed in seeds {
+            var d = SnapDetector()
+            var h = R9NoisyHinge(seed: seed, bias: 8)
+            h.run(&d, [(150, 150, 1), (150, 0, 0.3), (0, 0, 0.6), (0, 150, 0.6), (150, 150, 1), (150, 0, 0.3),
+                       (0, 0, 0.6)])
+            #expect(h.fires.count == 2, "seed \(seed): \(h.fires.count) bites")
+        }
+    }
+
+    @Test func noteFoldedStartsARoundAndBitesOnlyLow() {
+        var waiting = SnapDetector(requireShut: true)
+        _ = waiting.ingest(angle: 150, at: 0)
+        let started: SnapTrigger? = waiting.noteFolded(at: 0.5)
+        #expect(started == nil)
+        #expect(!waiting.waitingForShut && !waiting.armed, "the outer display: the round's close")
+        var high = SnapDetector()
+        _ = high.ingest(angle: 150, at: 0)
+        _ = high.ingest(angle: 40, at: 0.2)
+        let none: SnapTrigger? = high.noteFolded(at: 0.3)
+        #expect(none == nil && high.armed, "40° is open: no bite")
+        var low = SnapDetector()
+        _ = low.ingest(angle: 150, at: 0)
+        _ = low.ingest(angle: 22, at: 0.2)
+        let bite: SnapTrigger? = low.noteFolded(at: 0.3)
+        #expect(bite != nil && !low.armed)
+        var fresh = SnapDetector()
+        let nothing: SnapTrigger? = fresh.noteFolded(at: 1)
+        #expect(nothing == nil)
+    }
+
+    @Test func aRestartCarriesAShutTrapsReArmAngle() {
+        var d = SnapDetector(rearmLow: Tuning.statusShutAngle)
+        _ = d.ingest(angle: Tuning.armAngle + 1, at: 0)
+        #expect(!d.armed, "a shut trap is not re-armed by a restart at 36°")
+        _ = d.ingest(angle: Tuning.statusShutAngle + Tuning.rearmRise + 1, at: 0.1)
+        #expect(d.armed)
+        var plain = SnapDetector()
+        _ = plain.ingest(angle: Tuning.armAngle + 1, at: 0)
+        #expect(plain.armed)
+        var ignored = SnapDetector(requireShut: true, rearmLow: 10)
+        #expect(ignored.rearmLow == nil && ignored.waitingForShut)
+        _ = ignored.ingest(angle: 150, at: 0)
+        #expect(!ignored.armed)
+    }
+
+    // MARK: The session with the detector
+
+    /// A feed session without waves; one housefly sipping at the first drop (6 s to land and sip).
+    private func quietWithAFly() -> TrapSession {
+        var o = SessionOptions(snapsRunOut: true, waves: false, stingCosts: true)
+        o.startSnaps = 10
+        let s = TrapSession(mode: .feed, seed: 7, best: 0, geometry: geo, options: o)
+        let p: CGPoint = s.snapshot.nectar[0].position
+        _ = s.spawnScripted(.housefly, entry: CGPoint(x: p.x < 476 ? -30 : 982, y: p.y), target: p, linger: .infinity)
+        var t: Double = 0
+        while t < 6 {
+            _ = s.step(dt: frame, input: TrapInput())
+            t += frame
+        }
+        return s
+    }
+
+    /// Steps `s` at 60 Hz along the legs, the detector hearing a noisy report every other frame. Returns the snapped
+    /// events, the session times seen while the snapshot said shut, and the clock at the end.
+    private func drive(_ s: TrapSession, _ d: inout SnapDetector, _ rng: inout SeededRandom, start: Double,
+                       _ legs: [(Double, Double, Double)]) -> (bites: Int, shutTimes: [Double], end: Double) {
+        var bites: Int = 0
+        var shutTimes: [Double] = []
+        var clock: Double = start
+        var i: Int = 0
+        for leg in legs {
+            let n: Int = max(1, Int((leg.2 * 60).rounded()))
+            var k: Int = 1
+            while k <= n {
+                clock += frame
+                i += 1
+                // The first frame always hears a report (a detector with no sample reads as an open trap).
+                if i % 2 == 1 {
+                    let truth: Double = leg.0 + (leg.1 - leg.0) * Double(k) / Double(n)
+                    let a: Double = min(max(truth + rng.between(-3, 3), 0), 180)
+                    _ = d.ingest(angle: a, at: clock, status: truth <= 85 ? .closed : .partiallyOpen)
+                }
+                for e in s.step(dt: frame, input: d.input(at: clock)) {
+                    if case .snapped = e { bites += 1 }
+                }
+                if s.snapshot.shut { shutTimes.append(s.snapshot.time) }
+                k += 1
+            }
+        }
+        return (bites, shutTimes, clock)
+    }
+
+    @Test func theClockIsFrozenWhileTheNoisyPhoneIsShut() {
+        let s: TrapSession = quietWithAFly()
+        var d = SnapDetector()
+        var rng = SeededRandom(seed: 3)
+        let a = drive(s, &d, &rng, start: 100, [(150, 150, 0.5), (150, 3, 0.3)])
+        #expect(a.bites == 1)
+        #expect(s.snapshot.shut)
+        let frozen: Double = s.snapshot.time
+        let b = drive(s, &d, &rng, start: a.end, [(3, 3, 4)])
+        #expect(b.bites == 0)
+        let still: Bool = b.shutTimes.allSatisfy { (x: Double) -> Bool in abs(x - frozen) < 1e-9 }
+        #expect(still && b.shutTimes.count > 200, "frozen at \(frozen) while shut")
+        let c = drive(s, &d, &rng, start: b.end, [(3, 150, 0.6), (150, 150, 1)])
+        #expect(c.bites == 0 && !s.snapshot.shut)
+        #expect(s.snapshot.time > frozen + 0.5, "the clock runs again once the phone opens")
+    }
+
+    @Test func aSessionsStartingCloseIsNotItsFirstBite() {
+        let s = TrapSession(mode: .feed, seed: 4, best: 0, geometry: geo, options: SessionOptions())
+        var d = SnapDetector(requireShut: true)
+        var rng = SeededRandom(seed: 11)
+        let a = drive(s, &d, &rng, start: 50, [(150, 150, 1), (150, 3, 0.3), (3, 3, 0.5)])
+        #expect(a.bites == 0)
+        #expect(s.snapshot.waitingForClose)
+        #expect(abs(s.snapshot.time) < 1e-9, "the clock waits for the round's opening")
+        let b = drive(s, &d, &rng, start: a.end, [(3, 150, 0.6), (150, 150, 6), (150, 3, 0.3), (3, 3, 0.3)])
+        #expect(!s.snapshot.waitingForClose)
+        #expect(b.bites == 1, "the first real close is the first bite")
+    }
+
+    @Test func aFallingClosureNeverStartsAClose() {
+        // R9: the pilot reports its reopen as a closure falling from ~115° once re-armed; bugs landing then must not
+        // startle (the hinge's closure is ~0 there). Only a rising closure starts a close.
+        let s: TrapSession = quietWithAFly()
+        var spooked: Int = 0
+        var started: Int = 0
+        // The frame before the re-arm: closed deep and not armed (no bite in this test, so not shut either).
+        _ = s.step(dt: frame, input: TrapInput(closure: 117, armed: false, angle: 33))
+        var c: Double = 115
+        while c > 0 {
+            for e in s.step(dt: frame, input: TrapInput(closure: c, armed: true, angle: 150 - c)) {
+                if case .bugSpooked = e { spooked += 1 }
+                if case .snapStarted = e { started += 1 }
+            }
+            c -= 2
+        }
+        #expect(spooked == 0 && started == 0, "spooked \(spooked), closes \(started)")
+        // A rising one still does.
+        var rising: Int = 0
+        var r: Double = 0
+        while r < 40 {
+            r += 2
+            for e in s.step(dt: frame, input: TrapInput(closure: r, armed: true, angle: 150 - r)) {
+                if case .snapStarted = e { rising += 1 }
+            }
+        }
+        #expect(rising == 1)
+    }
+
+    // MARK: Levels (R9)
+
+    @Test func levelOnesFlyIsNeverLostToASlowClose() {
+        // "Impossible to fail confusingly": even a close too slow to time (untimedCloseDuration) catches the fly.
+        guard let s = LevelBook.session(id: 1, geometry: geo), let l = LevelBook.level(1) else {
+            Issue.record("no level 1")
+            return
+        }
+        #expect(l.reactionScale > 1)
+        #expect(abs(s.reactionScale - l.reactionScale) < 1e-12)
+        var t: Double = 0
+        var sipping: Bool = false
+        while t < 8 && !sipping {
+            _ = s.step(dt: frame, input: TrapInput())
+            sipping = s.snapshot.bugs.contains { (b: BugState) -> Bool in
+                if case .sipping = b.activity { return true }
+                return false
+            }
+            t += frame
+        }
+        #expect(sipping)
+        let slow = TrapInput(closure: 132, armed: false,
+                             snap: SnapTrigger(duration: Tuning.untimedCloseDuration, time: 0), angle: 5)
+        var caught: Int = -1
+        for e in s.step(dt: frame, input: slow) {
+            if case .snapped(let r) = e { caught = r.caught.count }
+        }
+        #expect(caught == 1, "a 2 s close still catches level 1's fly")
+        #expect(abs(TrapRules.reactionScale(mode: .feed) - 1) < 1e-12)
+        #expect(abs(TrapRules.reactionScale(mode: .level(999)) - 1) < 1e-12)
+    }
+
+    @Test func goalTextsAreShortAndInputNeutral() {
+        // A phone taps, a Duo closes the phone: Core's words name neither (App's LevelWords adds the control words).
+        for l in LevelBook.all {
+            let t: String = l.goalText.lowercased()
+            #expect(l.goalText.count <= 26, "level \(l.id): \(l.goalText)")
+            for word in ["shut", "close", "tap", "lid", "phone", "fold"] {
+                #expect(!t.contains(word), "level \(l.id): \(l.goalText)")
+            }
+        }
+        let late = RunResult(mode: .level(16), seed: 1, score: 0, seconds: 41, snaps: 6, bugsCaught: 10,
+                             caughtBySpecies: [:], sparedBySpecies: [:], bestBitePoints: 0, biggestBite: 3,
+                             longestChain: 0, beesSpared: 0, stings: 0, feasts: 0, waves: 1, drySnaps: 0,
+                             fastestSnap: 0, escapes: 0)
+        if let l16 = LevelBook.level(16) {
+            let o: LevelOutcome = LevelBook.evaluate(late, l16)
+            #expect(!o.line.lowercased().contains("shut"), "\(o.line)")
+        }
+    }
+}

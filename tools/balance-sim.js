@@ -48,6 +48,14 @@
 // breaks the chain, 12 start snaps, hunger 18/14/12/12, the sleepy morning; and the 30 levels (tools/levels.js):
 //   node tools/balance-sim.js levels=1 [levelSeeds=8] [ids=1,2] [debug=1] [all=1]   # every level by the four pilots
 //   node tools/balance-sim.js detector=1           # the R8 SnapDetector rules (founder: arm 35, shut 18, start closed)
+// R9 (design/notes/core-R9.md): only a RISING closure starts a close (the pilot's reopen never startles bugs); the
+// detector's re-arm also needs rearmRise above the lowest theta since the shut, a round's start counts theta <=
+// startShutAngle as closed, noteFolded (the outer display); detector=1 adds noisy hardware traces (noisySeeds=200);
+// a level's calm (LevelSpec.reactionScale, levels.js `calm`); the level table draws the pilot's first close
+// (TrapPilot.drawFirstClose) and prints the star spread, world sums (best of 3 tries) and the R9 level targets;
+//   node tools/balance-sim.js levels=1 levelSeeds=24 [ends=1] [debug=1]
+//   node tools/balance-sim.js trace=1 seed=7 skill=expert      # one Feed run's bites (the CI demo: pilot seed + 101)
+// and the novice's first 20 s (caught by 20 s, first catch) in the main table's checks.
 'use strict';
 const { LEVELS, goalOf } = require('./levels.js');
 
@@ -117,6 +125,9 @@ const T = {
   // bug that startles at s degrees is duration x (1 - (s - closeStart) / modelCloseSpan).
   armAngle: 35, shutAngle: 18, closeStart: 8, closeCancel: 4, reopenCancel: 10, modelCloseSpan: 124, slowCloseAfter: 0.6,
   untimedCloseDuration: 2.0,
+  // R9 (real hardware): re-arm also >= rearmRise above the lowest theta since the shut; a round's start is closed at
+  // theta <= startShutAngle whatever the status (SnapDetector.rearmAngle / isStartShut)
+  rearmRise: 15, startShutAngle: 25,
   // R8 (ROUND-8 §4): a level whose script has nothing left to catch ends after this long (s)
   levelIdleEnd: 2.5,
   // R8 (§2): a dry bite costs this many extra snaps; a bite that lets a bug escape breaks the chain
@@ -204,9 +215,10 @@ function lateFactor(wave) {
   if (wave <= T.lateWaveStart) return 1;
   return Math.max(T.lateReactionFloor, Math.pow(T.lateReactionDecay, wave - T.lateWaveStart));
 }
-function reaction(inf, sipping, flying, onRim, wave) {
+// R9: scale = a level's calm (LevelSpec.reactionScale / TrapRules.reactionScale; 1 outside levels), x catchable bugs only
+function reaction(inf, sipping, flying, onRim, wave, scale) {
   let r = inf.reaction;
-  if (!isProtected(inf.species)) r *= lateFactor(wave);
+  if (!isProtected(inf.species)) r *= lateFactor(wave) * (scale == null ? 1 : scale);
   if (sipping) r *= T.sipReactionFactor;
   if (flying) r *= T.flyingReactionFactor;
   if (onRim) r *= T.rimReactionFactor;
@@ -599,6 +611,7 @@ class Session {
     // R8 (ROUND-8 §4): a level (LevelBook): its scripted bugs, pace wave, bite limit; no waves, hunger or refunds
     this.level = this.mode === 'level' ? opts.level : null;
     this.bySpecies = {}; this.levelEnd = null; this.idleFor = 0;
+    this.reactionScale = this.level && this.level.calm ? this.level.calm : 1;
     if (this.level) {
       const L = this.level;
       this.wave = L.pace; this.dayPhase = phaseForWave(L.pace);
@@ -654,9 +667,12 @@ class Session {
     const now = this.time;
     const open = input.armed && !this.shut && !this.waiting;
     if (!this.closing) {
-      if ((open && c >= T.closeStart) || input.snap) {
+      // R9: only a rising closure starts a close (the pilot reports its reopen as a falling closure from ~115 deg; the
+      // hinge's closure is ~0 then, as its reference restarts at the re-arm)
+      const starts = open && c >= T.closeStart && c > this.prevClosure;
+      if (starts || input.snap) {
         this.closing = true; this.fled = 0; this.closeBugs = new Set();
-        this.closeStartAt = (open && c >= T.closeStart) ? crossing(this.prevTime, this.prevClosure, now, c, T.closeStart) : now;
+        this.closeStartAt = starts ? crossing(this.prevTime, this.prevClosure, now, c, T.closeStart) : now;
       }
     } else if (c < T.closeCancel && !input.snap) {
       // the close was abandoned (a partial close, opened again): the startled bugs that stayed calm down
@@ -675,7 +691,7 @@ class Session {
         b.startledAt = this.prevClosure < b.info.nerve ? crossing(this.prevTime, this.prevClosure, now, c, b.info.nerve) : now;
       }
       if (b.startledAt == null || input.snap) continue;
-      const r = reaction(b.info, a === A_SIP, a === A_ARR || a === A_HOP, onRimBody(this.g, b, b.info.radius), paceWave(this.wave, this.mode));
+      const r = reaction(b.info, a === A_SIP, a === A_ARR || a === A_HOP, onRimBody(this.g, b, b.info.radius), paceWave(this.wave, this.mode), this.reactionScale);
       if (now - b.startledAt >= r) { this.fled += 1; this.takeOff(b, M.escape); }
     }
   }
@@ -1068,7 +1084,7 @@ class Session {
       if (!isProtected(b.species)) this.closeBugs.add(b.id);
       let expo = modelExposure(b.info.nerve, d);
       if (b.startledAt != null) expo = Math.max(expo, now - b.startledAt);
-      const r = reaction(b.info, a === A_SIP, flying, onRimBody(this.g, b, b.info.radius), paceWave(this.wave, this.mode));
+      const r = reaction(b.info, a === A_SIP, flying, onRimBody(this.g, b, b.info.radius), paceWave(this.wave, this.mode), this.reactionScale);
       if (expo <= r) {
         if (isProtected(b.species)) { stingers.push(b.species); this.takeOff(b, M.release); }
         else { caught.push(b.species); this.freeDrop(b); b.timer = b.height; b.mode = M.caught; b.el = 0; b.fx = b.x; b.fy = b.y; }
@@ -1142,7 +1158,7 @@ class Session {
       const inT = this.inTrap(b);
       return { id: b.id, species: b.species, x: b.x, y: b.y, activity: a, height: b.height, inTrap: inT, onRim: inT && onRimBody(this.g, b, b.info.radius), restless: b.restless };
     });
-    return { phase: this.phase, mode: this.mode, time: this.time, bugs, snapsLeft: this.snapsLeft, wave: this.wave, score: this.score, hunger: this.hunger, dayPhase: this.dayPhase, shut: this.shut };
+    return { phase: this.phase, mode: this.mode, time: this.time, bugs, snapsLeft: this.snapsLeft, wave: this.wave, score: this.score, hunger: this.hunger, dayPhase: this.dayPhase, shut: this.shut, reactionScale: this.reactionScale };
   }
 }
 
@@ -1175,6 +1191,10 @@ class Pilot {
   static fullClosure() { return T.pilotIdleAngle - T.pilotShutAngle; }
   static armClosure() { return T.pilotIdleAngle - T.armAngle; }
   planDuration() { return pick2(this.rng, this.p.closeMin, this.p.closeMax); }
+  // R9 (TrapPilot.drawFirstClose): the first close is drawn like every other, not the profile's fastest (the default
+  // keeps closeMin, which the CI demo runs depend on). The level table uses it: a level's 3 stars often hang on its
+  // first bite.
+  drawFirstClose() { this.plannedD = this.planDuration(); }
   // A protected bug sitting in the trap (landed): what a shoo can clear.
   beeSitting(snap) {
     for (const b of snap.bugs) {
@@ -1211,7 +1231,7 @@ class Pilot {
       if (a === A_ARR && b.height >= T.catchableHeight) { arriving += 1; continue; }
       if (!(a === A_ARR || a === A_WALK || a === A_SIP || a === A_HOP)) continue;
       if (a === A_ARR) arriving += 1;
-      const r = reaction(inf, a === A_SIP, a === A_ARR || a === A_HOP, b.onRim, paceWave(snap.wave, snap.mode));
+      const r = reaction(inf, a === A_SIP, a === A_ARR || a === A_HOP, b.onRim, paceWave(snap.wave, snap.mode), snap.reactionScale);
       if (modelExposure(inf.nerve, d) <= r) { n += 1; sum += inf.points; }
     }
     return { landed, maxPts, n, value: sum * n, arriving, restless, target: this.targetView(snap, d) };
@@ -1227,7 +1247,7 @@ class Pilot {
       if (a === A_ARR && b.height >= T.catchableHeight) continue;
       if (!(a === A_ARR || a === A_WALK || a === A_SIP || a === A_HOP)) continue;
       const inf = info(b.species);
-      const r = reaction(inf, a === A_SIP, a === A_ARR || a === A_HOP, b.onRim, paceWave(snap.wave, snap.mode));
+      const r = reaction(inf, a === A_SIP, a === A_ARR || a === A_HOP, b.onRim, paceWave(snap.wave, snap.mode), snap.reactionScale);
       if (modelExposure(inf.nerve, d) <= r) k += 1;
     }
     return k;
@@ -1323,7 +1343,10 @@ class Pilot {
 // shut once and opened again.
 const D = { armAngle: T.armAngle, shutAngle: T.shutAngle, closeStart: T.closeStart, closeCancel: T.closeCancel,
   statusShutAngle: 25, refWindow: 0.6, refFallRate: 25, slowCloseAfter: T.slowCloseAfter,
-  reopenCancel: T.reopenCancel, untimedCloseDuration: T.untimedCloseDuration };
+  reopenCancel: T.reopenCancel, untimedCloseDuration: T.untimedCloseDuration,
+  // R9 (real hardware, Tuning.rearmRise / startShutAngle): after a shut the re-arm also needs theta >= the lowest theta
+  // since that shut + rearmRise; a round's start counts theta <= startShutAngle (any status) as closed
+  rearmRise: T.rearmRise, startShutAngle: T.startShutAngle };
 class RollingMax {
   constructor(window, fall) { this.window = window; this.fall = fall; this.samples = []; this.value = 0; this.last = 0; }
   reset(t, a) { this.samples = [{ t, a }]; this.value = a; this.last = t; }
@@ -1336,19 +1359,33 @@ class RollingMax {
   }
 }
 class SnapDetector {
-  constructor(requireShut) {
+  constructor(requireShut, rearmLow) {
     this.ref = new RollingMax(D.refWindow, D.refFallRate);
     this.has = false; this.angle = 0; this.lastC = 0; this.prevTime = 0; this.armed = false; this.closing = false;
     this.closeStartAt = 0; this.lowest = 0; this.snapRef = 0; this.pending = null;
     this.waiting = !!requireShut; // a round's start: not armed until shut once
+    // R9: the lowest theta since the last shut while unarmed (null: armed, or no shut yet); carried across a restart
+    this.rearmLow = (!requireShut && rearmLow != null && isFinite(rearmLow)) ? rearmLow : null;
   }
+  rearmAngle() { return this.rearmLow === null ? D.armAngle : Math.max(D.armAngle, this.rearmLow + D.rearmRise); }
   isShutAt(angle, status) { return angle <= D.shutAngle || (status === 'closed' && angle <= D.statusShutAngle); }
+  isStartShut(angle, status) { return angle <= D.startShutAngle || this.isShutAt(angle, status); }
+  // R9 (SnapDetector.noteFolded): the app is on the outer display: a waiting round counts as closed; else the latest
+  // angle again as .closed
+  noteFolded(time) {
+    if (!this.has || !isFinite(time)) return null;
+    if (this.waiting) { this.waiting = false; this.armed = false; this.closing = false; this.rearmLow = this.angle; return null; }
+    return this.ingest(this.angle, Math.max(time, this.prevTime), 'closed');
+  }
   ingest(angle, time, status) {
     if (!isFinite(angle) || !isFinite(time)) return null;
     if (!this.has) {
       this.has = true; this.ref.reset(time, angle); this.angle = angle; this.lastC = 0; this.prevTime = time;
-      if (this.waiting && this.isShutAt(angle, status)) this.waiting = false;
-      this.armed = !this.waiting && angle >= D.armAngle && !this.isShutAt(angle, status);
+      const shutNow = this.isShutAt(angle, status);
+      if (this.waiting && this.isStartShut(angle, status)) { this.waiting = false; this.rearmLow = angle; }
+      else if (!this.waiting && (shutNow || this.rearmLow !== null)) this.rearmLow = Math.min(this.rearmLow === null ? angle : this.rearmLow, angle);
+      this.armed = !this.waiting && angle >= this.rearmAngle() && !shutNow;
+      if (this.armed) this.rearmLow = null;
       return null;
     }
     const prevAngle = this.angle;
@@ -1356,8 +1393,9 @@ class SnapDetector {
     let c = Math.max(0, this.ref.value - angle);
     let fired = null;
     if (!this.armed) {
-      if (this.waiting && this.isShutAt(angle, status)) this.waiting = false;
-      if (!this.waiting && angle >= D.armAngle) { this.armed = true; this.closing = false; this.ref.reset(time, angle); c = 0; }
+      if (this.waiting && this.isStartShut(angle, status)) { this.waiting = false; this.rearmLow = angle; }
+      if (this.rearmLow !== null) this.rearmLow = Math.min(this.rearmLow, angle);
+      if (!this.waiting && angle >= this.rearmAngle()) { this.armed = true; this.rearmLow = null; this.closing = false; this.ref.reset(time, angle); c = 0; }
     } else {
       if (!this.closing) {
         if (c >= D.closeStart) { this.closing = true; this.lowest = angle; this.closeStartAt = crossing(this.prevTime, this.lastC, time, c, D.closeStart); }
@@ -1373,7 +1411,7 @@ class SnapDetector {
         const tShut = byAngle && prevAngle > D.shutAngle ? crossing(this.prevTime, -prevAngle, time, -angle, -D.shutAngle) : time;
         const duration = this.closing ? Math.max(0, tShut - this.closeStartAt) : D.untimedCloseDuration;
         fired = { duration, time };
-        this.pending = fired; this.armed = false; this.closing = false; this.snapRef = this.ref.value;
+        this.pending = fired; this.armed = false; this.closing = false; this.snapRef = this.ref.value; this.rearmLow = angle;
       }
     }
     this.lastC = c; this.prevTime = time; this.angle = angle;
@@ -1459,20 +1497,111 @@ function detectorChecks() {
     const c = detPath(d, 90, 5, 0.2, t);
     out.push([`a round starts closed (armed open: ${before}, shut-bite: ${a.fires}, armed at 90: ${open90}, then bites: ${c.fires})`, !before && a.fires === 0 && open90 && c.fires === 1]);
   }
+  for (const r of noisyDetectorChecks(Number(args.noisySeeds || 200))) out.push(r);
+  return out;
+}
+
+// R9 (real hardware): noisy hinge traces, as SnapTests/CoreTests.swift's R9 detector tests. Reports every 25-45 ms with
+// a 150 ms gap 5 % of the time (the Duo: 25-30 Hz while moving, occasional 100-200 ms gaps), uniform report noise of
+// +-amp degrees, an optional bias (the +-5 deg accuracy), and the hardware's status (.closed from 85 deg down).
+// `legs`: [[from, to, seconds], ...] of the hand's true angle. Returns the bites and what the trap did.
+function noisyTrace(d, rng, legs, opt) {
+  const o = Object.assign({ amp: 3, bias: 0, t0: 0, status: true }, opt || {});
+  let t = o.t0; const fires = []; let armedEver = false; let maxC = 0; let armedAfterFirst = false;
+  for (const [from, to, secs] of legs) {
+    const end = t + secs; let lt = t;
+    while (lt < end) {
+      lt += rng.chance(0.05) ? 0.15 : rng.range(0.025, 0.045);
+      const u = Math.min(1, (lt - t) / Math.max(secs, 1e-9));
+      const truth = from + (to - from) * u;
+      const a = clamp(truth + o.bias + rng.range(-o.amp, o.amp), 0, 180);
+      const status = !o.status ? 'unknown' : (truth <= 85 ? 'closed' : (truth >= 175 ? 'fullyOpen' : 'partiallyOpen'));
+      const f = d.ingest(a, lt, status);
+      if (f) fires.push(f);
+      const inp = d.input(lt + 0.001); maxC = Math.max(maxC, inp.closure);
+      if (d.armed) { armedEver = true; if (fires.length > 0) armedAfterFirst = true; }
+    }
+    t = end;
+  }
+  return { fires, t, armedEver, maxC, armedAfterFirst };
+}
+function noisyDetectorChecks(n) {
+  const out = []; const bad = {};
+  const fail = (k) => { bad[k] = (bad[k] || 0) + 1; };
+  for (let k = 0; k < n; k++) {
+    const rng = new SeededRandom(9000 + k);
+    { // a noisy slam bites once, timed like a slam
+      const d = new SnapDetector(); const r = noisyTrace(d, rng, [[150, 150, 1], [150, 3, 0.3], [3, 3, 1]]);
+      if (r.fires.length !== 1 || r.fires[0].duration > 0.4) fail('slam');
+    }
+    { // a slow close (40 deg/s) with stick-slip stops still bites once at the shut, slowly
+      const d = new SnapDetector();
+      const r = noisyTrace(d, rng, [[150, 150, 1], [150, 110, 1], [110, 110, 0.4], [110, 60, 1.25], [60, 60, 0.3], [60, 3, 1.4], [3, 3, 1]]);
+      if (r.fires.length !== 1 || r.fires[0].duration < 1.0) fail('slow');
+    }
+    { // a creep at 8 deg/s still bites once at the shut
+      const d = new SnapDetector(); const r = noisyTrace(d, rng, [[150, 150, 1], [150, 3, 18], [3, 3, 1]]);
+      if (r.fires.length !== 1) fail('creep');
+    }
+    { // partial closes to 40 and to 60 never bite (the status says .closed below 85)
+      const d = new SnapDetector();
+      const r = noisyTrace(d, rng, [[150, 150, 1], [150, 40, 0.4], [40, 40, 1], [40, 150, 0.5], [150, 60, 0.3], [60, 60, 2], [60, 150, 0.4]]);
+      if (r.fires.length !== 0 || !d.armed) fail('partial');
+    }
+    { // a phone hovering at 25-35 with .closed and +-5 noise: at most the one bite, never flapping
+      const d = new SnapDetector(); const r = noisyTrace(d, rng, [[150, 150, 1], [150, 30, 0.4], [30, 30, 6]], { amp: 6 });
+      if (r.fires.length > 1) fail('hover');
+    }
+    { // jitter round the shut line after a slow close: one bite
+      const d = new SnapDetector(); const r = noisyTrace(d, rng, [[150, 150, 1], [150, 20, 2], [20, 16, 3], [16, 22, 2], [22, 3, 1]], { amp: 4 });
+      if (r.fires.length !== 1) fail('jitter-shut');
+    }
+    { // opened only to 45: open, and the close bites
+      const d = new SnapDetector(true); const r = noisyTrace(d, rng, [[3, 3, 0.5], [3, 45, 0.5], [45, 45, 1.5], [45, 3, 0.3], [3, 3, 0.5]], { amp: 2 });
+      if (!r.armedEver || r.fires.length !== 1) fail('open45');
+    }
+    { // a round's starting close never bites; then open, then the first real close bites once
+      const d = new SnapDetector(true); const r = noisyTrace(d, rng, [[150, 150, 1], [150, 3, 0.3], [3, 3, 0.5], [3, 150, 0.6], [150, 150, 1], [150, 3, 0.3], [3, 3, 0.5]]);
+      if (r.fires.length !== 1 || d.waiting) fail('start-close');
+    }
+    { // a round starting at 10 deg (status not .closed), and one at 22 deg: never stuck waiting
+      const a = new SnapDetector(true); noisyTrace(a, rng, [[10, 10, 0.5], [10, 150, 0.6], [150, 150, 0.5]], { amp: 1, status: false });
+      const b = new SnapDetector(true); noisyTrace(b, rng, [[22, 22, 0.5], [22, 150, 0.6], [150, 150, 0.5]], { amp: 1, status: false });
+      if (a.waiting || !a.armed || b.waiting || !b.armed) fail('start-low');
+    }
+    { // biased +8 (a shut phone reads 8-14): still one bite a close, two closes two bites
+      const d = new SnapDetector(); const r = noisyTrace(d, rng, [[150, 150, 1], [150, 0, 0.3], [0, 0, 0.6], [0, 150, 0.6], [150, 150, 1], [150, 0, 0.3], [0, 0, 0.6]], { bias: 8 });
+      if (r.fires.length !== 2) fail('bias');
+    }
+  }
+  const names = { slam: 'a noisy slam bites once', slow: 'a noisy slow close with stops bites once, slowly', creep: 'a noisy 8 deg/s creep bites once',
+    partial: 'noisy partial closes (to 40 and 60, .closed) never bite', hover: 'a .closed phone hovering at 30 +-6 never flaps',
+    'jitter-shut': 'jitter round the shut line bites once', open45: 'opened only to 45 plays (armed, then bites)',
+    'start-close': "a round's starting close never bites; the next close does", 'start-low': 'a round starting at 10 or 22 deg is never stuck',
+    bias: 'biased +8: one bite per close' };
+  for (const [k, name] of Object.entries(names)) out.push([`noisy ${name} (${n - (bad[k] || 0)}/${n} traces)`, !bad[k]]);
+  { // noteFolded: a waiting round counts as closed; an armed trap at 22 bites, at 40 does not
+    const w = new SnapDetector(true); detRest(w, 150, 0.5, 0); w.noteFolded(1); const waitOk = !w.waiting && !w.armed;
+    const hi = new SnapDetector(); detRest(hi, 150, 1, 0); detPath(hi, 150, 40, 0.3, 1); const fHi = hi.noteFolded(2);
+    const lo = new SnapDetector(); detRest(lo, 150, 1, 0); detPath(lo, 150, 22, 0.3, 1); const fLo = lo.noteFolded(2);
+    out.push([`noteFolded: a waiting round is closed (${waitOk}), bites at 22 (${!!fLo}) not at 40 (${!!fHi})`, waitOk && !!fLo && !fHi]);
+  }
   return out;
 }
 
 // MARK: Runs
 // R8 (ROUND-8 §4): one level played by a pilot (LevelBook.session in Swift): the result LevelBook.evaluate reads.
 function levelOptions(L) { return { snapsRunOut: L.bites != null, waves: false, stingCosts: false, hunger: false, refunds: false, level: L }; }
-function runLevel(L, skill, pilotSeed) {
+function runLevel(L, skill, pilotSeed, drawFirst) {
   const s = new Session(levelSeed(L.id), levelOptions(L), 'level');
   if (args.debug) s.debug = true;
   const pilot = new Pilot(skill, pilotSeed);
   pilot.minBite = goalOf(L).biteOf; pilot.targets = goalOf(L).species;
+  if (drawFirst) pilot.drawFirstClose();
   const dt = 1 / 60; let t = 0; let frames = 0;
   while (s.phase !== 'finished' && frames < 60 * 180) { s.step(dt, pilot.step(dt, t, s.snapshot())); t += dt; frames += 1; }
   const r = { snaps: s.stats.snaps, caught: s.stats.caught, bySpecies: s.bySpecies, biggest: s.stats.biggest, spared: s.stats.spared, stings: s.stats.stings, escapes: s.stats.escapes || 0, seconds: s.phase === 'finished' ? s.tiredAt : s.time };
+  if (args.debug) console.log(`  level ${L.id} ${skill}: caught=${r.caught} spared=${r.spared} stings=${r.stings} escapes=${r.escapes} snaps=${r.snaps} end=${s.levelEnd}`);
   return Object.assign(levelEvaluate(L, r), { r, end: s.levelEnd || (s.phase === 'finished' ? 'bites' : 'cap') });
 }
 // Pilot seeds for the level table (the same in BalanceTests.swift): 1 + 7 * k
@@ -1482,25 +1611,63 @@ function levelTable(n, ids) {
     if (ids && !ids.includes(L.id)) continue;
     const row = { id: L.id, title: L.title };
     for (const sk of ['novice', 'casual', 'expert', 'perfect']) {
-      let wins = 0, three = 0, ends = {}; const bites = [], esc = [];
-      for (let k = 0; k < n; k++) { const o = runLevel(L, sk, u64(BigInt(1 + 7 * k))); if (o.passed) { wins += 1; bites.push(o.r.snaps); esc.push(o.r.escapes); } if (o.stars === 3) three += 1; ends[o.end] = (ends[o.end] || 0) + 1; }
-      row[sk] = { wins, three, ends, bites: bites.length ? Math.min(...bites) + '-' + Math.max(...bites) : '-', esc: esc.length ? Math.min(...esc) + '-' + Math.max(...esc) : '-' };
+      let wins = 0, three = 0, ends = {}; const bites = [], esc = []; const st = [0, 0, 0, 0]; const all = [];
+      for (let k = 0; k < n; k++) {
+        const o = runLevel(L, sk, u64(BigInt(1 + 7 * k)), true);
+        if (o.passed) { wins += 1; bites.push(o.r.snaps); esc.push(o.r.escapes); }
+        if (o.stars === 3) three += 1; st[o.stars] += 1; all.push(o.stars); ends[o.end] = (ends[o.end] || 0) + 1;
+      }
+      // R9: a player retries: the best of each 3 tries in a row, averaged (what the world unlock sees)
+      let best3 = 0, groups = 0; for (let g = 0; g + 3 <= n; g += 3) { best3 += Math.max(all[g], all[g + 1], all[g + 2]); groups += 1; }
+      row[sk] = { wins, three, ends, st, mean: all.reduce((a, b) => a + b, 0) / n, best3: groups ? best3 / groups : 0,
+        bites: bites.length ? Math.min(...bites) + '-' + Math.max(...bites) : '-', esc: esc.length ? Math.min(...esc) + '-' + Math.max(...esc) : '-' };
     }
     rows.push(row);
   }
   return rows;
 }
-// R8 (ROUND-8 §4): every level is winnable by the expert, levels 1-5 by the novice, 3 stars reachable by perfect
+// R9: the CI demo runs of the levels (GameController: the pilot seed is the level seed + 101): what the frames show
+function levelDemo(id, skill) { const L = LEVELS[id - 1]; return runLevel(L, skill, u64(levelSeed(id) + 101n)); }
+// R8 (ROUND-8 §4) + R9 (design/notes/core-R9.md): the level targets. Novice passes 1-8 easily and struggles from Dusk;
+// casual passes most of Morning and Dusk with 1-2 stars, Night is hard; expert can 3-star most; perfect 3-stars all;
+// every world opens for a casual player who retries (best of 3 tries) without the levels it can't pass.
 function levelChecks(rows, n) {
   const out = [];
+  const by = (id) => rows.find((r) => r.id === id);
   for (const r of rows) {
     out.push([`level ${r.id} expert wins >= half (${r.expert.wins}/${n})`, r.expert.wins * 2 >= n]);
-    if (r.id <= 5) out.push([`level ${r.id} novice wins >= half (${r.novice.wins}/${n})`, r.novice.wins * 2 >= n]);
     out.push([`level ${r.id} perfect 3 stars at least once (${r.perfect.three}/${n})`, r.perfect.three >= 1]);
+    // (level 4 is the bee lesson: the novice pilot ignores 60 % of bees by design, so it fails it often; CI frame 62 needs that)
+    if (r.id <= 8 && r.id !== 4) out.push([`level ${r.id} novice wins >= 3/4 (${r.novice.wins}/${n})`, r.novice.wins * 4 >= 3 * n]);
+    if (r.id === 4) out.push([`level 4 (the bee) novice wins >= 1/3 (${r.novice.wins}/${n})`, r.novice.wins * 3 >= n]);
   }
-  // 3 stars is hard: in Dusk and Night the expert misses them on at least 3 levels (in 30 %+ of its tries)
-  let missed = 0; for (const r of rows) if (r.id > 10 && r.expert.three < 0.7 * n) missed += 1;
-  if (rows.length === 30) out.push([`3 stars is hard: the expert misses them on >= 3 Dusk/Night levels (${missed})`, missed >= 3]);
+  if (rows.length !== 30) return out;
+  const world = (w) => rows.filter((r) => Math.ceil(r.id / 10) === w);
+  const sum = (rs, f) => rs.reduce((a, r) => a + f(r), 0);
+  // 3 stars takes skill from level 3: the casual pilot 3-stars at most 2 of levels 3-10 in half its tries or more
+  const easy3 = rows.filter((r) => r.id >= 3 && r.id <= 10 && r.casual.three * 2 >= n).length;
+  out.push([`3 stars takes skill from level 3: casual 3-stars >= half its tries on <= 2 of levels 3-10 (${easy3})`, easy3 <= 2]);
+  for (const w of [1, 2]) {
+    const ws = world(w); const passes = ws.filter((r) => r.casual.wins * 10 >= 7 * n).length;
+    out.push([`world ${w}: casual passes >= 70% of tries on >= 7 of 10 levels (${passes})`, passes >= 7]);
+  }
+  const duskNovice = sum(world(2), (r) => r.novice.wins) / (10 * n);
+  out.push([`Dusk: the novice struggles (passes ${(duskNovice * 100).toFixed(0)}% <= 50%)`, duskNovice <= 0.5]);
+  const nightCasual = sum(world(3), (r) => r.casual.wins) / (10 * n);
+  out.push([`Night is hard: casual passes ${(nightCasual * 100).toFixed(0)}% <= 60%`, nightCasual <= 0.6]);
+  const expert3 = rows.filter((r) => r.expert.three * 2 >= n).length;
+  out.push([`expert 3-stars >= half its tries on >= 20 of 30 levels (${expert3})`, expert3 >= 20]);
+  const notAll = rows.filter((r) => r.id > 10 && r.expert.three < n).length;
+  out.push([`3 stars is never automatic late: the expert misses them sometimes on >= 5 Dusk/Night levels (${notAll})`, notAll >= 5]);
+  // World unlocks (LevelBook.worldUnlockStars 20): a casual player's best of 3 tries
+  const w1 = sum(world(1), (r) => r.casual.best3), w2 = sum(world(2), (r) => r.casual.best3);
+  out.push([`casual opens Dusk: world 1 best-of-3 stars ${w1.toFixed(1)} >= 20`, w1 >= 20]);
+  out.push([`casual opens Night: worlds 1-2 best-of-3 stars ${(w1 + w2).toFixed(1)} >= 40`, w1 + w2 >= 40]);
+  // CI frames (ci/scenarios.txt): level 1 by perfect is 3 stars (08, 30); level 4 by the novice is a failed level (62)
+  const l1 = levelDemo(1, 'perfect'), l4 = levelDemo(4, 'novice');
+  out.push([`CI: level 1 by the perfect demo pilot is 3 stars (${l1.stars})`, l1.stars === 3]);
+  out.push([`CI: level 4 by the novice demo pilot fails (passed=${l4.passed}, end ${l4.end})`, !l4.passed]);
+  void by;
   return out;
 }
 
@@ -1510,22 +1677,30 @@ const SPROUT1 = { startSnaps: 12, firstRun: true };
 // R5 (REVIEW-4 #8): SessionOptions.sprout(feedRun: 2 / 3) plus the Sprout rank's startSnaps 12 (the taper overrides it).
 const SPROUT2 = { startSnaps: 12, sproutRun: 2 };
 const SPROUT3 = { startSnaps: 12, sproutRun: 3 };
-function runOne(skill, seed, extra, mode, giveUp) {
+function runOne(skill, seed, extra, mode, giveUp, pilotSeed) {
   const s = new Session(seed, Object.assign({ snapsRunOut: true, waves: true, stingCosts: true }, extra || {}), mode || 'feed');
-  const pilot = new Pilot(skill, u64(BigInt(seed) * 7n + 1n), giveUp);
+  const pilot = new Pilot(skill, pilotSeed != null ? pilotSeed : u64(BigInt(seed) * 7n + 1n), giveUp);
+  if (args.trace) s.debug = true;
   const dt = 1 / 60; let t = 0; let frames = 0;
+  // R9: the first 20 s of session time (a novice must catch something and feel good early)
+  let caught20 = null, firstCatch = null;
   while (s.phase !== 'finished' && frames < 60 * 600) {
     const input = pilot.step(dt, t, s.snapshot());
     s.step(dt, input);
+    if (firstCatch === null && s.stats.caught > 0) firstCatch = s.time;
+    if (caught20 === null && s.time >= 20) caught20 = s.stats.caught;
     t += dt; frames += 1;
   }
+  if (caught20 === null) caught20 = s.stats.caught;
+  if (firstCatch === null) firstCatch = 999;
   return { score: s.score, seconds: s.phase === 'finished' ? s.tiredAt : s.time, snaps: s.stats.snaps, caught: s.stats.caught,
     stings: s.stats.stings, feasts: s.stats.feasts, dry: s.stats.dry, waves: s.wave, chain: s.stats.longestChain,
     biggest: s.stats.biggest, spared: s.stats.spared, wilts: s.stats.wilts, capped: s.phase !== 'finished',
     // R8: wall seconds (the session clock plus the frozen shut time) and the mean catch ratio of the bites
     wall: (s.phase === 'finished' ? s.tiredAt : s.time) + s.stats.shutTime,
     ratio: s.stats.ratioN > 0 ? s.stats.ratioSum / s.stats.ratioN : 0,
-    dayRatio: s.stats.dayRatioN > 0 ? s.stats.dayRatioSum / s.stats.dayRatioN : 0 };
+    dayRatio: s.stats.dayRatioN > 0 ? s.stats.dayRatioSum / s.stats.dayRatioN : 0,
+    caught20, firstCatch };
 }
 // R6: a Zen Bog run (SessionOptions.for(.zen)) for `seconds`: it must never tire, never change its snaps, and keep
 // catching (the day loops, so the night never outruns the hand).
@@ -1575,13 +1750,15 @@ function nightShare(seeds, base, stride) {
 }
 function zenLine(sk, m) { return `SNAP-BAL zen ${sk} 600 s: caught=${m.caught} minLate120s=${m.minLate} stings=${m.stings} chain=${m.chain} waves=${m.waves} tired=${m.tired} snapsChanged=${m.snapsChanged} maxWilts=${m.wilts}`; }
 function pct(a, p) { if (a.length === 0) return 0; const s = a.slice().sort((x, y) => x - y); const pos = (s.length - 1) * p; const lo = Math.floor(pos); const hi = Math.min(s.length - 1, lo + 1); return s[lo] + (s[hi] - s[lo]) * (pos - lo); }
-const KEYS = ['score', 'seconds', 'snaps', 'caught', 'stings', 'feasts', 'dry', 'waves', 'chain', 'biggest', 'spared', 'wilts', 'wall', 'ratio', 'dayRatio'];
+const KEYS = ['score', 'seconds', 'snaps', 'caught', 'stings', 'feasts', 'dry', 'waves', 'chain', 'biggest', 'spared', 'wilts', 'wall', 'ratio', 'dayRatio', 'caught20', 'firstCatch'];
 function medians(runs) {
   const m = {};
   for (const k of KEYS) m[k] = pct(runs.map((r) => r[k]), 0.5);
   m.maxStings = Math.max(...runs.map((r) => r.stings));
   m.maxWilts = Math.max(...runs.map((r) => r.wilts));
   m.p90seconds = pct(runs.map((r) => r.seconds), 0.9);
+  // R9: the slowest tenth of first catches (a novice must catch something early)
+  m.p90firstCatch = pct(runs.map((r) => r.firstCatch), 0.9);
   m.capped = runs.filter((r) => r.capped).length;
   return m;
 }
@@ -1594,6 +1771,9 @@ function checks(med) {
   // R8 (ROUND-8 §2): run lengths (session seconds, the frozen shut time excluded): novice 60-100 s, casual 2-3 min,
   // expert 4-6 min; the best players' daytime catch ratio is 90 %+.
   if (n) out.push([`novice seconds 60-100 (${n.seconds.toFixed(1)})`, n.seconds >= 60 && n.seconds <= 100]);
+  // R9 (hard is not unfair): a novice catches in its first 20 s (median >= 2 bugs; 9 runs in 10 catch by 20 s)
+  if (n) out.push([`novice catches >= 2 in the first 20 s (median ${n.caught20})`, n.caught20 >= 2]);
+  if (n) out.push([`novice first catch by 20 s in 9 runs of 10 (p90 ${n.p90firstCatch.toFixed(1)} s)`, n.p90firstCatch <= 20]);
   if (c) {
     out.push([`casual seconds 120-180 (${c.seconds.toFixed(1)})`, c.seconds >= 120 && c.seconds <= 180]);
     out.push([`casual snaps 15-45 (${c.snaps})`, c.snaps >= 15 && c.snaps <= 45]);
@@ -1649,7 +1829,13 @@ function main() {
     const n = Number(args.levelSeeds || 8);
     const ids = args.ids ? args.ids.split(',').map(Number) : null;
     const rows = levelTable(n, ids);
-    for (const r of rows) console.log(`SNAP-LVL ${String(r.id).padStart(2)} ${r.title.padEnd(18)} ` + ['novice', 'casual', 'expert', 'perfect'].map((sk) => `${sk[0]} ${r[sk].wins}/${n} 3*${r[sk].three} b${r[sk].bites} x${r[sk].esc}`).join(' | '));
+    // R9: per skill, passes / tries and the star spread [0*,1*,2*,3*]
+    for (const r of rows) console.log(`SNAP-LVL ${String(r.id).padStart(2)} ${r.title.padEnd(18)} ` + ['novice', 'casual', 'expert', 'perfect'].map((sk) => `${sk[0]} ${String(r[sk].wins).padStart(2)}/${n} [${r[sk].st.join(',')}] b${r[sk].bites}`).join(' | '));
+    if (args.ends) for (const r of rows) console.log(`SNAP-LVL ends ${r.id} ` + ["novice", "casual", "expert", "perfect"].map((sk) => `${sk[0]} ${JSON.stringify(r[sk].ends)}`).join(" "));
+    if (!ids) for (const w of [1, 2, 3]) {
+      const ws = rows.filter((r) => Math.ceil(r.id / 10) === w);
+      console.log(`SNAP-LVL world ${w} ` + ['novice', 'casual', 'expert', 'perfect'].map((sk) => `${sk} pass ${(100 * ws.reduce((a, r) => a + r[sk].wins, 0) / (10 * n)).toFixed(0)}% stars ${ws.reduce((a, r) => a + r[sk].mean, 0).toFixed(1)} (best of 3: ${ws.reduce((a, r) => a + r[sk].best3, 0).toFixed(1)})`).join(' | '));
+    }
     for (const [name, ok] of levelChecks(rows, n)) if (!ok || args.all) console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`);
     return;
   }
@@ -1759,6 +1945,15 @@ function main() {
       console.log(`window ${w}: ` + skills.map((sk) => `${sk} ${med[sk].score}/${med[sk].seconds.toFixed(0)}s/${med[sk].snaps}sn/${med[sk].stings}st`).join(' | '));
     }
     console.log(`windows failing a check: ${fails}/${nw}`, JSON.stringify(failNames));
+    return;
+  }
+  if (args.trace) {
+    // R9: one Feed run with every bite printed. trace=1 seed=7 skill=expert pilotSeed=108 is the App's CI demo run
+    // (DemoRunner / GameController: the pilot seed is the run seed + 101)
+    const sd = Number(args.seed || 7), sk = args.skill || 'expert';
+    const ps = args.pilotSeed != null ? u64(BigInt(args.pilotSeed)) : u64(BigInt(sd) + 101n);
+    const r = runOne(sk, sd, null, 'feed', true, ps);
+    console.log(`TRACE seed=${sd} skill=${sk} score=${r.score} s=${r.seconds.toFixed(1)} snaps=${r.snaps} caught=${r.caught} biggest=${r.biggest}`);
     return;
   }
   const med = {};

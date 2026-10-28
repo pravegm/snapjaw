@@ -61,7 +61,7 @@ on:
         type: string
         default: ""
       banner_args:
-        description: "Extra ci/store-banner.swift options: header=--yaw -8; search=--layout side; <name>=--kind search --from D03-bee (review)"
+        description: "Extra ci/store-banner.swift options: header=--yaw -8; search=--layout side; <name>=--kind search --from D04-bee (review)"
         type: string
         default: ""
 

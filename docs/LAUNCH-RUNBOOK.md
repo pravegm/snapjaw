@@ -4,6 +4,8 @@
 
 **Launch: Tuesday 8 December 2026, about 08:00 UK time, released by you (manual release).** Brim launches Tue 17 Nov and Hush Tue 1 Dec, so Snapjaw takes the next free week and no two games share one.
 
+> **R9 (Wed 28 Oct): the listing is rewritten for the R8 game** (the phone is the trap; 30 Levels; no lesson) and is ready to fill now. The exact robot runs and the few clicks only you can do are at the top of `design/notes/store-R9.md`. With **manual release**, submitting early is safe: an approved 1.0 waits as "Pending Developer Release" until you press Release on 8 Dec. Run the §5 Duo test on the build you submit.
+
 A few words used below:
 - **Repo** (repository): Snapjaw's project page on GitHub, `github.com/pravegm/snapjaw`. It holds the code and these documents.
 - **Actions**: GitHub's build robot. It turns the code into an app on Apple's newest Xcode, because your Mac can't.
@@ -173,64 +175,63 @@ This one run fills in: the name, subtitle, description, keywords, promotional te
 
 ---
 
-## §5. The Duo test: 18 steps, about 20 minutes
+## §5. The Duo test (R8: the phone is the trap): 18 steps, about 20 minutes
 
-**Why:** the snap is the whole product, and only your Duo can tell us whether it fires when your hands expect it to, whether the CHOMP feels good, and whether anything ever fires by itself. Do this on the first TestFlight build and again on each new one.
+**Why:** the bite is the whole product, and only your Duo can tell us whether it fires the moment the phone closes, whether the CHOMP feels good, and whether anything ever fires by itself. Do this on each new TestFlight build. Since R8 the rule is simple: **open phone = open trap, closed phone = the bite.** A part close never bites.
 
-**Before you start:** ringer **on**, volume about half, sitting comfortably. Open the Duo and turn it sideways so the fold runs **top to bottom**, like a book, one hand on each half. If an older Snapjaw is on the Duo, delete it first so the lesson runs. **Screen recording** for steps 4, 8 and 11: swipe down from the top-right corner to open Control Centre and tap the round record button, **with the microphone on** (press and hold the button to turn it on). Tap the red time at the top to stop; the video goes to Photos. If something goes wrong, carry on with the next step and write it down.
+**Before you start:** ringer **on**, volume about half, sitting comfortably. Hold the Duo any way you like. If an older Snapjaw is on the Duo, delete it first so you start at Level 1. **Screen recording** for steps 4, 9 and 10: swipe down from the top-right corner to open Control Centre and tap the round record button, **with the microphone on** (press and hold it to turn the mic on). Tap the red time at the top to stop; the video goes to Photos. If something goes wrong, carry on with the next step and write it down.
 
 | Step | Do this | What should happen (note anything different) |
 |---|---|---|
-| 1 | Open Snapjaw held like a book. On the title screen, close the halves a little and open them again, slowly, then once briskly | The title trap's teeth lean in **with your hands**, and the brisk one **chomps** |
-| 2 | First Bite starts. Hold it like a book until the lesson moves on | It passes the pose step by itself within a second or two |
-| 3 | A fat fly lands and sips. Snap: close the halves a little, briskly, then open again | **CHOMP.** How far did you close before it bit: **tiny / about right / too far**? Did it bite **when you expected**, or late? |
-| 4 | **Start recording.** Carry on through the lesson: "Open up", "Quick snaps catch more", the bee (wait for it to leave), the triple | Each step makes sense. On the slow-close step, the flies leave and the hint says "Snap it — quick!" |
-| 5 | Feed (from Home). Play one whole run, catching what you can. **Time it** from the first bug to "Your trap is tired" | Note the time, the score, and roughly how many snaps you made. Your first run starts with 14 snaps (the row holds at most 14), the next two with 13 and 12, then 10 |
-| 6 | Second run: this time **wait for crowds** of 3 or more and spare every bee. Try for a bite of **5 or more** | Did a Feast feel great? A 5-bug bite should be a big **FEAST**: a short freeze, a gold burst, a big "FEAST!" banner, the bugs gulped one by one, two snaps refilling and a deeper CHOMP with a burp. Did the chain chip climb with each bite of 2+ bugs (×1.5, ×2 … up to ×5)? Did waiting feel tense in a good way? Did a bee ever sneak into a bite you didn't mean? |
-| 7 | **Ghost check.** Mid-run, hold the Duo still for 10 seconds, then shift your grip and re-settle your hands without meaning to snap | **Nothing should bite by itself.** Count any bites you didn't mean |
-| 8 | **Start recording.** Try snapping from three rests: nearly flat, a normal book, and quite folded (an L shape and a bit more open) | The snap should feel the **same size** from each. Did one of them feel harder, or bite too easily? |
-| 9 | **Blur test.** Open the Duo completely flat, start a run, and make your first snap from flat. Then do it again from a relaxed book | Did one half of the screen blur? Which half (left or right), for about how long? Were the score and snaps on the **sharp** half? Did you see "Bend it a little, like a book"? |
-| 10 | Mid-run, close the Duo much further (well past an L shape) and hold it 2 seconds; open it again. Then close it fully, look at the outer screen, and reopen | The run **pauses** with a card asking you to open it, and carries on when you do. What does the outer screen show? Did closing ever cost you snaps or bite something? |
-| 11 | **Start recording.** Turn the Duo upright (portrait), like a normal phone | A card shows how to hold it like a book |
-| 12 | Play the **Daily Bog** once, then open the **Bug Book** | One counted try, then "practice". The results show your streak (🔥 1 day) and a **Share** button: tap it and check the line ("Snapjaw Daily Bog #… · score · biggest bite … · 🔥 1 day 🪤"), then cancel. New Bug Book pages show the bugs you caught, with their jokes |
-| 13 | Flip the **silent switch on**, play a few seconds, then open **Settings** and try **Sound**, **Haptics**, **Respect silent switch**, **Score on the left** and **Reduce motion** | Sound on silent? Do the switches work? With Score on the left on, do the score and snaps move to the left half? |
-| 14 | During any run, close your eyes for a few seconds and listen | Can you hear **where** a bug is (left or right)? Do you feel a tick when one lands? |
-| 15 | Play **5 runs in a row** | Then note: is the Duo **warm**? Hands or wrists tired? Did you want "one more go"? |
-| 16 | **Goals.** On Home, read the **Goals** card (three goals). Play until one is done | A "Goal done!" toast during the run, then the Results card ticks it, shows "+n growth" and the rank bar grows. Back on Home, a new goal has taken its place. In the pause menu, the goals show this run's progress |
-| 17 | **Garden.** Home → **Garden**. Pick any flytrap you have unlocked (a new install has only Classic; Red Dragon comes at the rank Nibbler, 90 bugs), then play a few seconds | Locked ones are dark silhouettes with their rule ("Reach …" or "Goal: …"). The one you picked is the trap in play, on Home and on Results. Snaps and bites feel exactly the same |
-| 18 | **Zen Bog.** Home → **Zen Bog**. Play 2 minutes, bite a bee once on purpose, then pause → **End** | No snaps row and nothing wilts; the bee costs no snap (only the chain). End shows Results with "bugs caught", no best and no leaderboard. Did it feel calm? |
+| 1 | Open Snapjaw. On Home, close the phone part way and open it again | The title trap reacts to the closing (the teeth lean in, the edges darken), but nothing bites |
+| 2 | Tap **Play** (Level 1). If the phone is open it says **"Close the phone to start"**: close it, then open it | Opening starts the level; the fly comes |
+| 3 | The fly lands and sips. **Close the phone** all the way | **CHOMP** the moment the halves meet (sound and a strong buzz in your hands), and the **outer screen** shows the CHOMP card ("CHOMP! 1 bug · +…", "Open to keep feeding"). Did it bite **when they met**, or early or late? |
+| 4 | **Start recording.** Open it again, then play Levels 2–5 | Opening shows the digest (the stain, the "+n"). Each level teaches one thing (close without dithering; wait for two; wait for the bee to leave; a crowd of three). Was each goal clear in one read? |
+| 5 | In a level, close **slowly** on a fly (two seconds), then close decisively on the next one | The slow close should lose the fly ("Too slow, they flew"); the decisive one catches it |
+| 6 | Close **halfway** (an L shape) and open again, several times | **Nothing ever bites** from a part close; nervous bugs may fly off |
+| 7 | **Ghost check.** Mid-run, hold the Duo still for 10 seconds at any angle, then shift your grip | **Nothing should bite by itself.** Count any bites you didn't mean |
+| 8 | Home → **Endless**. Play one whole run. **Time it** from the first bug to "Your trap is tired" | Note the time, the score, and roughly how many bites. The first run starts with 14 snaps, the next two with 13 and 12, then 12 (the row holds 14) |
+| 9 | **Start recording.** Second Endless run: wait for **crowds** of 3+, spare every bee, try for **5 or more** in one bite | A 5-bug bite is a **FEAST** (double score, two snaps back). Did waiting feel tense in a good way? Did a bee ever sneak into a bite? |
+| 10 | **Start recording.** Play in three poses: like a book (landscape), like a laptop (portrait, on a table) and nearly flat | **All three play**, with no card asking for a pose. Was any one harder or uncomfortable? |
+| 11 | Close the phone mid-run and keep it shut for 15 seconds, then open it | While shut, the run is frozen (no new bugs) and the outer screen shows the last bite. It carries on when you open |
+| 12 | Play the **Daily** once, then open the **Bug Book** | One counted try, then "practice". The results show your streak (🔥 1 day) and a **Share** button: tap it, check the line, cancel. New Bug Book pages show the bugs you caught |
+| 13 | Flip the **silent switch on**, play a few seconds, then open **Settings** and try **Sound**, **Haptics**, **Respect silent switch**, **Score on the left** and **Reduce motion** | Sound on silent? Do the switches work? |
+| 14 | Home → **Levels**. Look at the map | Morning Bog's levels with your stars; Dusk says how many more stars open it (20 in all) |
+| 15 | Play **5 runs or levels in a row** | Is the Duo **warm**? Hands or wrists tired from closing it so often? Did you want "one more go"? |
+| 16 | **Goals.** On Home, read the **Goals** card. Play Endless until one is done | A "Goal done!" toast, then the Results tick it, "+n growth", the rank bar grows; a new goal on Home |
+| 17 | **Garden.** Home → **Garden**. Pick any unlocked flytrap, play a few seconds | The one you picked is the trap in play; bites feel exactly the same |
+| 18 | **Zen.** Home → **Zen**. Play 2 minutes, bite a bee once on purpose, then pause → **End** | No snaps row, nothing wilts; the bee costs only the chain. End shows Results, no best, no leaderboard. Calm? |
 
 **Send Claude this (copy, fill in, paste in chat), plus the recordings and any screenshots:**
 ```
 Snapjaw build [number from TestFlight], iPhone Duo, iOS [version]
-1  Title trap followed my hands: [yes/no]   Brisk close chomped: [yes/no]
-2  Pose step passed by itself: [yes/no]
-3  Closed before it bit: [tiny / about right / too far]   Bit when I expected: [yes / late / early]
-4  Lesson made sense: [yes/no, where not]   Slow close made the flies leave: [yes/no]
-5  Run 1: time [ ] min, score [ ], snaps about [ ]
-6  Feast feels great 1-5 [ ]   Big FEAST (5+) feels like an event 1-5 [ ]   Waiting feels tense (good) 1-5 [ ]   Bee snuck into a bite: [never / once / often]
+1  Title trap reacted to a part close without biting: [yes/no]
+2  "Close the phone to start", then opening started it: [yes/no]
+3  Bit when the halves met: [yes / early / late]   Outer screen CHOMP card: [yes/no]
+4  Levels 2-5 each clear in one read: [yes/no, which not]
+5  Slow close lost the fly, decisive close caught it: [yes/no]
+6  A part close ever bit: [never / once / often]
 7  Bites I didn't mean while holding still or shifting grip: [ ]
-8  Snap felt the same from flat / book / folded: [yes / no: which felt different]
-9  Half that blurred: [left/right/none]  for about [ ] s   HUD on the sharp half: [yes/no]
-10 Deep close paused and resumed: [yes/no]   Outer screen showed: [ ]   Closing cost me: [nothing / snaps / a bite]
-11 Portrait card: [yes/no]
-12 Daily one try then practice: [yes/no]   Streak + Share line right: [yes/no]   Bug Book pages filled: [yes/no]
-13 Sound on silent: [yes/no]   Switches work: [yes/no]   Score on the left moved it: [yes/no]
-14 Could hear where bugs were: [yes/no]   Felt landing ticks: [yes/no]
-15 Warm after 5 runs: [no / a little / hot]   Want one more go 1-5 [ ]
-16 Goal toast + Results tick + growth: [yes/no]   New goal on Home: [yes/no]
-17 Garden pick shows in play / Home / Results: [yes/no]   Felt the same: [yes/no]
-18 Zen: no snaps row, no wilts, free bee: [yes/no]   End to Results: [yes/no]   Calm 1-5 [ ]
-Scores 1-5: CHOMP sound [ ] / CHOMP haptic [ ] (too weak / right / too strong) / snap feels physical [ ] / comfort [ ]
-Comfort (hand or wrist tired? ever had to close further or faster than felt natural?):
+8  Endless run 1: time [ ] min, score [ ], bites about [ ]
+9  FEAST feels like an event 1-5 [ ]   Waiting feels tense (good) 1-5 [ ]   Bee snuck into a bite: [never / once / often]
+10 Book / laptop / nearly flat all played, no pose card: [yes/no: which not]
+11 Frozen while shut, carried on when opened: [yes/no]
+12 Daily one try then practice: [yes/no]   Streak + Share line right: [yes/no]
+13 Sound on silent: [yes/no]   Switches work: [yes/no]
+14 Level map and stars right: [yes/no]
+15 Warm after 5: [no / a little / hot]   Hands tired from closing: [no / a little / yes]   One more go 1-5 [ ]
+16 Goal toast + Results tick + growth: [yes/no]
+17 Garden pick shows in play: [yes/no]
+18 Zen calm, End to Results: [yes/no]   Calm 1-5 [ ]
+Scores 1-5: CHOMP sound [ ] / CHOMP haptic [ ] / the phone feels like the trap [ ] / too easy (1) ... too hard (5) [ ]
 Best moment:
 Worst moment:
 Bugs (what you did, what happened):
 Anything confusing:
 ```
-In TestFlight you can also take a screenshot in Snapjaw and tap **Share Beta Feedback**. A phone video of your hands and the Duo from the side while you play helps a lot too.
+In TestFlight you can also take a screenshot in Snapjaw and tap **Share Beta Feedback**.
 
-The release build is the one where every "should" above happens, step 7 shows **no** bites you didn't mean, step 10 never costs anything, and comfort is fine.
+The release build is the one where every "should" above happens, steps 6 and 7 show **no** bites you didn't mean, and comfort is fine.
 
 ---
 

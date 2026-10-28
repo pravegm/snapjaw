@@ -73,6 +73,12 @@ struct SettingsView: View {
         }
     }
 
+    /// R9: Settings' lesson button (Level 1, the first idea, again).
+    static let replayLesson = "Replay Level 1"
+    /// R9: About says both controls, so it is true on every iPhone.
+    static let aboutLine = AppBrand.tagline + " Made for iPhone Duo: close the phone to bite. On other iPhones, tap to "
+        + "snap. No ads, no purchases, no data collected."
+
     static let hudSideTitle = "Score on the left"
     static let hudSideDetail = "Your score and snaps on the left half"
 
@@ -102,10 +108,11 @@ struct SettingsView: View {
 
     private func about(_ c: Bool) -> some View {
         VStack(alignment: .leading, spacing: c ? 8 : 12) {
-            // R8: the First Bite is retired: Levels 1–5 teach, any time, from the map.
+            // R8: the First Bite is retired: Levels 1–5 teach. R9: Home has the map, so Settings keeps the one thing a
+            // lost player wants here: the first lesson again.
             SnapButton(kind: .secondary, height: SnapTheme.secondaryHeight, compact: c,
-                       action: { controller.show(.levels) }) {
-                Label("Levels", systemImage: "map.fill")
+                       action: { controller.playLevel(1) }) {
+                Label(Self.replayLesson, systemImage: "graduationcap.fill")
             }
             SnapButton(kind: .secondary, height: SnapTheme.secondaryHeight, compact: c,
                        action: { controller.showGameCenter() }) {
@@ -116,8 +123,7 @@ struct SettingsView: View {
                 Text("\(AppBrand.name) \(BuildChannel.versionLine)")
                     .font(SnapType.headline(c))
                     .foregroundStyle(SnapTheme.cream)
-                Text(AppBrand.tagline + " Made for iPhone Duo: the phone is the trap. Close it to bite. "
-                     + "No ads, no purchases, no data collected.")
+                Text(Self.aboutLine)
                     .font(SnapType.caption(c))
                     .foregroundStyle(SnapTheme.mist)
                     .fixedSize(horizontal: false, vertical: true)

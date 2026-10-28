@@ -507,11 +507,19 @@ struct ResultsView: View {
                 Text(summary.rankTitle)
                     .font(SnapType.body(c))
                     .foregroundStyle(SnapTheme.cream)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .layoutPriority(1)
                 if o.rankedUp {
+                    // R9 (frames 26, 50, 63: "Rank / up!" wrapped beside "Gnat / Gobbler"): one line, its own width;
+                    // the next rank's name gives way (the line under the bar says it).
                     SnapPill(text: "Rank up!", color: SnapTheme.lime)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .layoutPriority(2)
                 }
                 Spacer(minLength: 4)
-                if let next = summary.nextRankTitle {
+                if !o.rankedUp, let next = summary.nextRankTitle {
                     Text("Next: " + next)
                         .font(SnapType.caption(c))
                         .foregroundStyle(SnapTheme.mist)

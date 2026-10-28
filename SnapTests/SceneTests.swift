@@ -258,7 +258,7 @@ struct SceneTests {
         // R3 (#8, #15).
         #expect(BogScene.stungLabel(points: 172) == "Stung! · +172")
         #expect(BogScene.heldLabel(1.5) == "×1.5 held")
-        #expect(BogScene.wiltedLabel == "Too slow! −1 snap")
+        #expect(BogScene.wiltedLabel == "Hungry! −1 snap")
     }
 
     // MARK: The scene

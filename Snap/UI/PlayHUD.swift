@@ -56,6 +56,8 @@ struct PlayLayer: View {
                        daily: paused ? nil : controller.dailyMarker, zen: v.zen)
                 .frame(width: l.score.width, height: l.score.height, alignment: l.trailing ? .topTrailing : .topLeading)
                 .position(x: l.score.midX, y: l.score.midY)
+                // R9: a level's intro card is the screen's one subject (a 0 score beside it says nothing).
+                .opacity(intro == nil ? 1 : 0)
                 .allowsHitTesting(false)
             if let level = v.level, intro == nil {
                 // R8: the level's goal, one line, big, in the other page's top outer corner (the score's mirror).

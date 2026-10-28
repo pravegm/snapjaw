@@ -5,6 +5,8 @@ import SwiftUI
 /// the next level (Level 1 on a first launch: Levels 1–5 teach); Endless, the Daily and Zen as three lily pads under
 /// it; the map, the Bug Book, the Garden and Settings as a quiet row. The title, the rank and the goals on the other
 /// page, in few words. Everything off the fold, and it rises into place on entry.
+/// R9: a first launch shows only the name, its one line and Play (which breathes); the rank and the goals come once
+/// there is progress (`showsProgress`). Every quiet button has its word; Play's line speaks the player's control.
 struct HomeView: View {
     @ObservedObject var controller: GameController
     @ObservedObject var store: ProgressStore
@@ -82,12 +84,22 @@ struct HomeView: View {
 
     static func subtitle(foldInput: Bool) -> String { foldInput ? foldSubtitle : touchSubtitle }
 
+    /// R9 ("Unclear what to do", "Menus feel cheap"): a first-time player's Home is the name, one line and Play. The
+    /// rank strip and the goals come once there is something to show: Level 3 passed, or a run of Endless, the Daily or
+    /// Zen played (their goals are written when one starts). Pure; tested.
+    static let progressAfterLevel = 3
+
+    static func showsProgress(_ d: ProgressData) -> Bool {
+        LevelRules.passed(d, progressAfterLevel) || d.goalBook != nil || d.feedRuns > 0
+    }
+
     private func titleBlock(_ c: Bool) -> some View {
         let rank = store.rank
         let progress = ProgressRules.rankProgress(lifetime: store.data.growth, rank: rank)
         let rm = controller.reduceMotion
+        let full = Self.showsProgress(store.data)
         return VStack(spacing: c ? 6 : 12) {
-            DisplayText(text: AppBrand.name, size: c ? 60 : 88, tilt: -3)
+            DisplayText(text: AppBrand.name, size: full ? (c ? 60 : 88) : (c ? 70 : 104), tilt: -3)
                 .entrance(0, reduceMotion: rm)
             Text(Self.subtitle(foldInput: controller.showsFoldInput(info)))
                 .font(SnapType.headline(c))
@@ -96,7 +108,15 @@ struct HomeView: View {
                 .minimumScaleFactor(0.75)
                 .snapLegible()
                 .entrance(1, reduceMotion: rm)
-            // The rank and the stars: one strip.
+            if full { progressBlock(c, rank: rank, progress: progress) }
+        }
+    }
+
+    /// The rank, the stars and the best on one strip, and the three goals (from `showsProgress`).
+    private func progressBlock(_ c: Bool, rank: Int, progress: Double) -> some View {
+        let rm = controller.reduceMotion
+        return VStack(spacing: c ? 6 : 12) {
+            // The rank and the stars: one strip. R9: the best lives under Endless only (frame 03: "Fly Catc…").
             HStack(spacing: c ? 10 : 14) {
                 HStack(spacing: 6) {
                     Image(systemName: "leaf.fill").foregroundStyle(SnapTheme.lime)
@@ -105,19 +125,15 @@ struct HomeView: View {
                         .foregroundStyle(SnapTheme.cream)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
+                        .layoutPriority(1)
                 }
                 SnapProgressBar(value: progress, height: 7)
-                    .frame(width: c ? 60 : 84)
+                    .frame(width: c ? 56 : 80)
                 Text("★ \(LevelRules.totalStars(store.data))")
                     .font(SnapType.body(c).monospacedDigit().weight(.heavy))
                     .foregroundStyle(SnapTheme.gold)
-                if store.data.bestFeed > 0 {
-                    Text("Best " + AppRules.formatted(store.data.bestFeed))
-                        .font(SnapType.body(c).monospacedDigit())
-                        .foregroundStyle(SnapTheme.goldLight)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                }
+                    .lineLimit(1)
+                    .fixedSize()
             }
             .padding(.horizontal, c ? 12 : 16)
             .padding(.vertical, c ? 7 : 10)
@@ -145,27 +161,45 @@ struct HomeView: View {
     }
 
     /// R8: Play's line: the level it goes on to ("Level 3 · Catch 3 flies"), or Endless when every level is done.
-    static func playLine(_ data: ProgressData) -> String {
+    /// R9: in the player's control (a phone: "Level 1 · Tap when the fly lands"; the Duo: "… · Close the phone on the
+    /// fly"). Pure; tested.
+    static func playLine(_ data: ProgressData, touch: Bool) -> String {
         guard let next = LevelRules.next(data) else { return "Endless" }
-        let goal = LevelBridge.spec(next).map { " · " + LevelBridge.goal($0) } ?? ""
+        let goal = LevelBridge.spec(next).map { " · " + LevelWords.goal($0, touch: touch) } ?? ""
         return LevelWords.levelName(next) + goal
     }
+
+    /// R9 (frame 01: "0/16" and "1/8" with no word): the quiet row's count badges, shown once there is something
+    /// counted (a found bug; a variety grown past the first). Pure; tested.
+    static func bookBadge(_ data: ProgressData) -> String? {
+        data.speciesFound > 0 ? "\(data.speciesFound)/\(BugSpecies.allCases.count)" : nil
+    }
+
+    static func gardenBadge(_ data: ProgressData) -> String? {
+        data.unlockedVarieties.count > 1 ? gardenCount(data) : nil
+    }
+
+    /// R9: the quiet row's words (every button says what it is).
+    static let rowWords = ["Levels", "Bug Book", "Garden", "Settings"]
 
     // MARK: Actions
 
     private func actions(_ c: Bool) -> some View {
         let today = controller.today
         let rm = controller.reduceMotion
-        let pad: CGFloat = c ? 62 : 84
+        let pad: CGFloat = c ? 58 : 80
+        let touch = !controller.showsFoldInput(info)
         return VStack(spacing: c ? 10 : 18) {
-            // The one focal action.
-            PlayButton(line: Self.playLine(store.data), compact: c, action: { controller.play() })
+            // The one focal action (R9: it glows, and breathes on a first launch).
+            PlayButton(line: Self.playLine(store.data, touch: touch), compact: c,
+                       beckons: LevelRules.next(store.data) == 1 && !rm, action: { controller.play() })
                 .homeButtonFrame()
                 .entrance(0, reduceMotion: rm)
-            // R8 (founder rule 5): Endless, the Daily and Zen are always one tap away.
+            // R8 (founder rule 5): Endless, the Daily and Zen are always one tap away. R9: fewer words (only a best
+            // and the Daily's state).
             HStack(alignment: .top, spacing: c ? 8 : 14) {
                 PadButton(title: "Endless", detail: store.data.bestFeed > 0
-                          ? "Best " + AppRules.formatted(store.data.bestFeed) : "Until the night",
+                          ? "Best " + AppRules.formatted(store.data.bestFeed) : nil,
                           size: pad, tint: SnapTheme.mossLight, action: { controller.playEndless() }) {
                     Image(systemName: "infinity")
                         .font(.system(size: pad * 0.36, weight: .black))
@@ -179,7 +213,7 @@ struct HomeView: View {
                         .foregroundStyle(SnapTheme.gold)
                         .snapLegible()
                 }
-                PadButton(title: "Zen", detail: Self.zenDetail, size: pad, tint: Color(snapHex: 0x2F6E5C),
+                PadButton(title: "Zen", detail: nil, size: pad, tint: Color(snapHex: 0x2F6E5C),
                           action: { controller.playZen() }) {
                     Image(systemName: "leaf.fill")
                         .font(.system(size: pad * 0.34, weight: .black))
@@ -189,21 +223,29 @@ struct HomeView: View {
             }
             .homeButtonFrame()
             .entrance(1, reduceMotion: rm)
-            // The quiet row.
+            // The quiet row. R9 (frame 01: "0/16", "1/8"): every button says what it is; a count rides on its icon.
             HStack(spacing: c ? 6 : 10) {
-                QuietIcon(systemImage: "map.fill", label: "Levels", compact: c) { controller.show(.levels) }
-                QuietIcon(systemImage: "book.fill", label: "\(store.data.speciesFound)/\(BugSpecies.allCases.count)",
-                          compact: c, accessibility: "Bug Book") { controller.show(.book) }
-                QuietIcon(systemImage: "camera.macro", label: Self.gardenCount(store.data), compact: c,
-                          dot: Self.gardenHasNew(store.data), accessibility: "Garden") { controller.show(.garden) }
-                QuietIcon(systemImage: "gearshape.fill", label: "Settings", compact: c) { controller.show(.settings) }
+                QuietIcon(systemImage: "map.fill", label: Self.rowWords[0], compact: c) { controller.show(.levels) }
+                QuietIcon(systemImage: "book.fill", label: Self.rowWords[1], compact: c,
+                          badge: Self.bookBadge(store.data),
+                          accessibility: "Bug Book, \(store.data.speciesFound) of \(BugSpecies.allCases.count) found") {
+                    controller.show(.book)
+                }
+                QuietIcon(systemImage: "camera.macro", label: Self.rowWords[2], compact: c,
+                          badge: Self.gardenBadge(store.data), dot: Self.gardenHasNew(store.data),
+                          accessibility: "Garden, " + Self.gardenCount(store.data) + " grown") {
+                    controller.show(.garden)
+                }
+                QuietIcon(systemImage: "gearshape.fill", label: Self.rowWords[3], compact: c) {
+                    controller.show(.settings)
+                }
             }
             .homeButtonFrame()
             .entrance(2, reduceMotion: rm)
         }
     }
 
-    /// R6: under "Zen".
+    /// R6: under "Zen" (R9: Home says no more than "Zen"; the Zen Bog's banner says this).
     static let zenDetail = "No rush, no end"
 
     private func dailyStatus(_ today: Int) -> String {
@@ -217,7 +259,10 @@ struct HomeView: View {
 struct PlayButton: View {
     let line: String
     let compact: Bool
+    /// R9: a first launch's Play breathes (a slow swell and glow), so the one thing to do is obvious at a glance.
+    var beckons = false
     let action: () -> Void
+    @State private var swell = false
 
     var body: some View {
         Button(action: action) {
@@ -239,6 +284,13 @@ struct PlayButton: View {
             .frame(maxWidth: .infinity, minHeight: compact ? 78 : 104)
         }
         .buttonStyle(PlayButtonStyle())
+        // R9: the focal action carries a warm glow over the bog (the only gold light on Home).
+        .shadow(color: SnapTheme.gold.opacity(beckons && swell ? 0.6 : 0.32), radius: beckons && swell ? 26 : 16)
+        .scaleEffect(beckons && swell && !AppTrace.enabled ? 1.035 : 1)
+        .onAppear {
+            guard beckons, !AppTrace.enabled else { return }
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true).delay(0.8)) { swell = true }
+        }
         .accessibilityLabel("Play, " + line)
     }
 }
@@ -254,11 +306,13 @@ struct PlayButtonStyle: ButtonStyle {
     }
 }
 
-/// R8: a quiet round icon with a word under it (Home's map, Bug Book, Garden, Settings).
+/// R8: a quiet round icon with a word under it (Home's map, Bug Book, Garden, Settings). R9: the word is always the
+/// button's name; a count ("9/16") rides on the icon as a small gold tab.
 struct QuietIcon: View {
     let systemImage: String
     let label: String
     var compact = false
+    var badge: String?
     var dot = false
     var accessibility: String?
     let action: () -> Void
@@ -276,11 +330,27 @@ struct QuietIcon: View {
                         .foregroundStyle(SnapTheme.cream)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     if dot {
+                        // Something new (a grown variety): the top corner the count tab leaves free.
                         Circle().fill(SnapTheme.gold).frame(width: 12, height: 12)
                             .overlay(Circle().stroke(SnapTheme.night, lineWidth: 2))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity,
+                                   alignment: badge == nil ? .topTrailing : .topLeading)
                     }
                 }
                 .frame(width: compact ? 42 : 52, height: compact ? 42 : 52)
+                .overlay(alignment: .topTrailing) {
+                    if let badge {
+                        Text(badge)
+                            .font(.system(size: compact ? 9 : 10, weight: .black, design: .rounded).monospacedDigit())
+                            .foregroundStyle(SnapTheme.ink)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(SnapTheme.goldLight))
+                            .overlay(Capsule().stroke(SnapTheme.night, lineWidth: 1.5))
+                            .fixedSize()
+                            .offset(x: compact ? 12 : 14, y: -4)
+                    }
+                }
                 Text(label)
                     .font(.system(size: compact ? 10 : 12, weight: .heavy, design: .rounded).monospacedDigit())
                     .foregroundStyle(SnapTheme.mist)

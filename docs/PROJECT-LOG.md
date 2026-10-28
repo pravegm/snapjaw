@@ -62,4 +62,45 @@
   - the CI Duo rig hardened (a fresh Duo per hinge launch, retries), the lesson and R4 Duo frames, open-after-bite
     store shots.
   - **CI 40645123693: 307 tests green.** All four R4 blockers are visibly fixed (frames 31, 14, 19, 20).
-- Ideas after 1.0: a relaxed mode that never runs out (a player asked).
+- Ideas after 1.0: a relaxed mode that never runs out (a player asked). It shipped in R6 as the Zen Bog.
+
+## 28 Oct 2026 (morning)
+- The founder's scorecard rubric (10 panelists × 9 dimensions, `design/SCORECARD.md`). R5 baseline
+  (`design/SCORE-R5.md`): design 8, ease 8, Duo 7.5, fun 7, satisfaction 7, pay 7, replay 7, polish 7, store 6.
+- CI rule: run `duo.yml` alone (every Duo simulator death came with another Mac job beside it).
+- **Round 6** (`9b5e11e`, `design/ROUND-6.md`): goals (three active from 39, growth, a triple bonus), the Garden (8
+  flytrap varieties), the Zen Bog, the Daily streak and Share, FEAST as an event, one message queue, a real dusk and
+  night, the HUD keep-out. Test fixes after CI 40667000285. Store storyboard and copy re-done for R6.
+- R6 scorecard (`design/SCORE-R6.md`): design 8, ease 8, fun 8, replay 8 (target met), satisfaction 7.5, Duo 7.5,
+  pay 7 (4 of 5 players yes), store 7, polish 7. Blockers: four of eight varieties looked like Classic, FEAST didn't pay.
+
+## 28 Oct 2026 (afternoon)
+- **Round 7** (`c96f586`, `design/ROUND-7.md`): 8 distinct varieties, a FEAST that always out-scores a 4-bug bite (×2),
+  Core keep-out zones, one message at a time, Results that fit, the store re-staged; the Duo HUD clears the cilia
+  (`01820d2`); the R7 icon (lip studs removed).
+- The App Store record is live (Apple ID 6828066230). **TestFlight build 1** (the R7 game) went to the founder.
+
+## 28 Oct 2026 (evening): the founder's real-Duo verdict, and Round 8
+- **The founder rejected build 1 on a real Duo:** "absolute shit and garbage. terrible UI and UX", "the flytrap shuts
+  much before the duo lid", "if the phone is open the flytrap is also open, if phone is closed then flytrap is also
+  closed", "super easy". The worst UI problems: "Menus feel cheap", "Unclear what to do". They chose Levels and Endless.
+  R7's 22° partial snap drew the trap shut while the phone was open; the critic panel (design 8) had missed it.
+- The founder's binding hinge rules (from Hush, same day): literal mapping, every round starts closed, no pose
+  demands, "phone" not "lid", a first session of about 3 ideas, the phone fallback first-class.
+- **Round 8** (`e3aca91`, `design/ROUND-8.md`): the phone is the trap. Armed at ≥ 35°, the bite only at the full shut
+  (≤ 18°, or `.closed` with ≤ 25°), never on a partial close; flies flee a slow close; the closing pause is gone; the
+  clock freezes while shut; the outer-display CHOMP card; "Close the phone to start". Harder runs (12 snaps to start,
+  faster wilts, any escape breaks the chain; sim median novice 71 s, casual 145 s, expert 283 s). 30 Levels in 3 worlds
+  replace the First Bite lesson; Feed is now Endless. Premium menus (Craft, leaf-cut panels, a level map). Duo CI
+  checks rewritten: BITE, SLOW-CLOSE, NO-BITE-DEEP, REOPEN, COVER. A test fix followed (`1b828f6`).
+- **Round 8b** (`69f028b`, `design/notes/portrait-R8.md`): portrait (laptop) Duo plays, the scene turned a quarter, a
+  portrait HUD and menus; the pose card is deleted.
+
+## 28 Oct 2026 (night): Round 9 (in progress, not yet compiled or committed)
+- App and UI (`design/notes/app-R9.md`): Home shows less to a new player, Level goal words fit the control (phones
+  never read "close" or "shut"), a new level map, CHOMP card tips, plain bite verdicts, Settings "Replay Level 1", the
+  demo pilot fix (Level results showed 0 stars because a fresh pilot was made every 0.5 s).
+- Core: difficulty and level tuning.
+- Store (`design/notes/store-R9.md`): the listing, review notes, screenshots storyboard (D02 is the CHOMP card) and
+  runbook rewritten for R8; `build-metadata.js` fails on any R7 claim. The website and repo docs (CLAUDE.md, HANDOVER,
+  ci/README) updated for R8.

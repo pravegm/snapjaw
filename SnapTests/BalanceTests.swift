@@ -24,6 +24,11 @@ import Testing
 // casual < expert ≤ perfect, perfect never stung, the novice stung.
 // R8 levels (LevelBook, 8 pilot seeds 1 + 7k each, as `node tools/balance-sim.js levels=1`): every level is won by
 // the expert at least once (the sim: ≥ 4 of 8 everywhere), levels 1–5 by the novice, and 3 stars reached by perfect.
+// R9 (design/notes/core-R9.md): the 30 levels retuned (LevelSpec.reactionScale, quick bugs in the crowds, clean 3
+// stars); the level pilot draws its first close like the rest (TrapPilot.drawFirstClose); the endless numbers are
+// unchanged by R9 (16 seeds: novice 71 s, casual 142 s, expert 286 s p90 315 s, perfect 328 s; a novice catches a
+// median 5.5 bugs in its first 20 s, the slowest tenth its first by 7 s). theLevelCurveRampsAndEveryWorldOpens checks
+// the curve in bands.
 //
 // Every PilotSkill plays real TrapSessions (mode .feed, SNAP_BAL_SEEDS seeds, default 16; CI sets 8) at 60 Hz, the
 // pilot fed the previous frame's snapshot the way GameController feeds it. Each run is capped at 10 min. Every run is
@@ -327,6 +332,8 @@ enum SnapBalanceHarness {
         var pilot = TrapPilot(skill: skill, seed: pilotSeed)
         pilot.minBite = level.goal.biteOf
         pilot.targets = level.goal.species
+        // R9: the first close drawn like the rest (the sim's levelTable does the same).
+        pilot.drawFirstClose()
         var t: Double = 0
         var frames: Int = 0
         while !session.isFinished && frames < 60 * 180 {
@@ -339,19 +346,21 @@ enum SnapBalanceHarness {
         return (LevelBook.evaluate(r, level), r)
     }
 
-    /// R8: (wins, three-star runs) of `skill` on level `id` over `tries` pilot seeds.
-    static func levelRecord(_ id: Int, _ skill: PilotSkill, tries: Int = 8) -> (wins: Int, three: Int) {
+    /// R8: (wins, three-star runs) of `skill` on level `id` over `tries` pilot seeds. R9: and the stars summed.
+    static func levelRecord(_ id: Int, _ skill: PilotSkill, tries: Int = 8) -> (wins: Int, three: Int, stars: Int) {
         var wins: Int = 0
         var three: Int = 0
+        var stars: Int = 0
         var k: Int = 0
         while k < tries {
             if let o = runLevel(id, skill, pilotSeed: UInt64(1 + 7 * k)) {
                 if o.0.passed { wins += 1 }
                 if o.0.stars == 3 { three += 1 }
+                stars += o.0.stars
             }
             k += 1
         }
-        return (wins, three)
+        return (wins, three, stars)
     }
 
     /// R6: what a Zen Bog run did in `seconds` (SessionOptions.for(.zen), 60 Hz).
@@ -665,5 +674,38 @@ struct BalanceTests {
     func teachingLevelsAreWinnableByTheNovice(id: Int) {
         let novice = SnapBalanceHarness.levelRecord(id, .novice)
         #expect(novice.wins >= 1, "level \(id): novice won \(novice.wins) of 8")
+    }
+
+    /// R9 (design/notes/core-R9.md): the level curve, in bands around the sim (`levels=1 levelSeeds=24`): the novice
+    /// passes Morning (sim 75 %) and struggles at Dusk (6 %); a casual hand mostly earns 2 stars in Morning (3 stars
+    /// on 24 % of its tries at levels 3–10) and its stars open Dusk (sim mean 22.9 in world 1) and Night (40.1 over
+    /// worlds 1–2; 46.5 best of 3 tries); Night is hard for it (33 %).
+    @Test func theLevelCurveRampsAndEveryWorldOpens() {
+        var noviceMorning: Int = 0
+        var noviceDusk: Int = 0
+        var casualStars: [Int] = [0, 0, 0]
+        var casualNight: Int = 0
+        var casualThreeMorning: Int = 0
+        var id: Int = 1
+        while id <= 30 {
+            let world: Int = (id - 1) / 10
+            let casual = SnapBalanceHarness.levelRecord(id, .casual)
+            casualStars[world] += casual.stars
+            if world == 2 { casualNight += casual.wins }
+            if id >= 3 && id <= 10 { casualThreeMorning += casual.three }
+            if id <= 8 { noviceMorning += SnapBalanceHarness.levelRecord(id, .novice).wins }
+            if world == 1 { noviceDusk += SnapBalanceHarness.levelRecord(id, .novice).wins }
+            id += 1
+        }
+        let line: String = "novice morning \(noviceMorning)/64 dusk \(noviceDusk)/80; casual stars \(casualStars) "
+            + "(8 tries a level), night wins \(casualNight)/80, 3 stars at 3–10 \(casualThreeMorning)/64"
+        print("SNAP-LVL curve " + line)
+        #expect(noviceMorning * 2 >= 64, "\(line)")
+        #expect(noviceDusk * 3 <= 80, "\(line)")
+        #expect(casualThreeMorning * 2 <= 64, "\(line)")
+        // Mean stars a try × 8 tries: world 1 ≥ 18 a pass through (sim 22.9), worlds 1–2 ≥ 34 (sim 40.1).
+        #expect(casualStars[0] >= 18 * 8, "\(line)")
+        #expect(casualStars[0] + casualStars[1] >= 34 * 8, "\(line)")
+        #expect(casualNight * 10 <= 80 * 6, "\(line)")
     }
 }

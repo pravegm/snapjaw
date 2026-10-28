@@ -1,54 +1,57 @@
-# Snapjaw App Store frames, iPhone sets (docs/appstore/screenshots.md, section A, 27 Oct). This file is the source of
-# truth for the captions once it exists (screenshots.md says so): change a caption here, not only there.
+# Snapjaw App Store frames, iPhone sets (docs/appstore/screenshots.md, section A). This file is the source of truth for
+# the frames and captions (screenshots.md quotes it): change a caption here, not only there.
 # Run by .github/workflows/store.yml: ci/store-capture.sh phone → ci/screenshots.sh (SCENARIOS=this file,
 # SCENARIO_FILTER='^P[0-9]', WAIT_FREEZE=1) on the iPhone 18 Pro Max (6.9", 2868 x 1320) and the iPhone 18 Pro (6.3",
-# 2622 x 1206), then ci/store-set.sh captions them (ci/store-frame.swift) into <set>/store/ with a MANIFEST. The Duo
-# set lives in ci/duo-store-scenarios.txt. Names are zero-padded (P01–P10) so the upload folder sorts in frame order,
-# and they are exactly the file names docs/appstore/asc-metadata.json lists (P01-book-hero … P10-first-bite).
+# 2622 x 1206, Apple's one required iPhone size), then ci/store-set.sh captions them (ci/store-frame.swift) into
+# <set>/store/ with a MANIFEST. The Duo set lives in ci/duo-store-scenarios.txt. Names are zero-padded (P01–P10) so the
+# upload folder sorts in frame order, and they are exactly the names tools/appstore/build-metadata.js lists (PFRAMES).
 #
-# name|demo args (Snap/App/DemoMode.swift; keys in design/ROUND-1.md "Demo mode")|seconds to wait|caption: headline / sub-line|expect (extra log regex)|frame
+# name|demo args (Snap/App/DemoMode.swift)|seconds to wait|caption: headline / sub-line|expect (extra log regex)|frame
 #  - wait: a freezeOn=<tag> scenario waits for the app's "SNAP-T freeze <tag>" line instead (at least this long, at
-#    least 60 s), then 2 s. freezeAfter=<s> next to freezeOn means the moment only counts after s seconds of play (the
-#    light and the bugs have settled; screenshots.md's "freeze delay" ask).
+#    least 60 s), then 2 s. freezeAfter=<s> next to freezeOn means the moment only counts after s seconds of play.
 #  - caption: `*word*` is the ONE gold-swash word; " / " starts the sub-line. Headline ≤ 30 characters (without the
 #    asterisks) and ≤ 7 words. No "|". store-frame.swift REJECTS smash, squish, squash, splat, kill, slam, "Fold to"
-#    and the competitor's name; store-set.sh flags flat, "shut" on its own (not "a little shut"), quick, fast, prices
-#    and "#1".
+#    and the competitor's name; store-set.sh flags flat, "shut" on its own, quick, fast, free, prices and "#1" (in the
+#    sub-line too: "Fast close" on the CHOMP card is the app's own text, inside the capture, never in a caption).
 #  - frame: flat (default) or book:<Duo scenario> = the book-pose composite of that Duo capture (store-frame --book);
 #    P01's own capture here is only the fallback if the Duo capture is missing (then P01 is FLAGGED: never upload a
 #    flat P01 without telling the founder).
 #  - No fold here: every iPhone frame must log an unfolded canvas with the HUD on the right
-#    ("SNAP-T canvas WxH fold=0 hudLeft=0", required by the workflow), and the hints say "Tap to snap". A pilot plays
-#    every play frame (the phone sim has no hinge).
-#  - Seeds, waves and pilots are the ones proven in ci/scenarios.txt and on the Duo (duo run 40603497021: crowd at
-#    wave 6, feast count=5 at wave 8, bee at wave 15, all with the perfect pilot), not screenshots.md's first guesses
-#    (mode=attract, seed 11): feed mode shows the real snaps row, so the economy on screen is the real one.
-# Truthfulness (docs/appstore/screenshots.md checklist): a Feast is ≥ 3 bugs and wins a snap back; bees cost an extra
-# snap; the day runs morning → noon → dusk (wave 15) → night (wave 23); 16 Bug Book species; the Daily Bog is one
-# scored try a day; First Bite runs on the first go. If any of these change, change the caption.
-
-# R7 (SCORE-R6 #6, #9; design/notes/ci-R7.md):
-#  - ONE progress state, `late`, on every frame that shows progress (P02 and P08 HUDs, P04 Garden 6/8, P06 Home,
-#    P07 Book, P09 Results), so the set reads as one player. mid showed Garden 2/8 on P06 against P04's 6 of 8.
-#  - P02 is the gulp, not the after: `freezeOn=snap;freezeAfter=10.5` holds 0.12 s after the first bite past 10.5 s,
-#    which in this seeded expert run is the 5-bug bite (bites at ~5.7 s ×3, ~8.8 s ×4, ~12.4 s ×5 on the 6.9", 6.3"
-#    and the Duo in store3), so the caught bugs are still held over the shut jaws, gulped one after another. The
-#    expect FLAGS the frame if that bite isn't 5+ (the timing moved). Wanted: a `feastGulp` tag (notes).
-#  - P08 is a calm Zen moment: a crowd sipping 25 s in (a state freeze, so no pop or sting is fresh on screen).
-#  - P04's sub-line no longer says "Real cultivars" (Golden Glow is the game's own).
-#  - P09: the expect FLAGS a Results with no goal ticked (the caption says goals and growth).
+#    ("SNAP-T canvas WxH fold=0 hudLeft=0", required by the workflow). These phones have no hinge: a tap is the bite,
+#    and the hints say "Tap to snap". A pilot plays every play frame.
+#
+# R9 (design/notes/store-R9.md), the R8 game: the phone IS the trap (open phone = open trap; the bite fires as the
+# phone closes, at about 18° or the closed status; a partial close never bites; every hinge round starts closed);
+# on other iPhones a tap bites. 30 Levels in 3 worlds (Morning Bog 1–10, Dusk 11–20, Night 21–30, 1–3 stars, the next
+# world at 20 stars) replace the First Bite lesson; Endless (the old Feed), the Daily Bog and the Zen Bog remain.
+#  - The iPhone set never shows the Duo's outer-display CHOMP card (a Duo-only screen; it is D02 in the Duo set).
+#  - ONE progress state, `late`, on every frame that shows progress (P04 map ★ 60 of 90, P06 Garden 6/8, P07 Book
+#    16/16, P09 Home ★ 60 · 6/8 · 16/16, P10 Results), so the set reads as one player. build-metadata.js checks it.
+#  - Every play frame's args are the ones proven in R8 CI (artifacts/r8, ci/scenarios.txt): bigFeast (48: 5 bugs
+#    +360, "FEAST! +2 snaps", the lobes open again), bee wave 15 (12), night wave 24 landed (35: froze; wave 26
+#    crowd did NOT freeze in R8), the levels map late (60), Home late (52), Results expert (50: goals ticked).
+#  - No level-results frame: in R8 CI the perfect pilot did not pass Level 1 (`SNAP-T level result 1 stars=0`; app
+#    ask in store-R9.md). A frame that needs a level won is unsafe until that is fixed.
+# Truthfulness (screenshots.md checklist): a Feast is ≥ 3 bugs (+1 snap); a FEAST is a clean bite of ≥ 5 (score ×2,
+# +2 snaps); a bee costs 1 extra snap, a wasp 2; 12 snaps to start, 14 at most; the day runs morning → noon (wave 7)
+# → dusk (wave 15) → night (wave 23); 16 Bug Book species; 8 Garden flytraps; 3 goals at a time from 39; 30 levels,
+# 3 stars each (90). If any of these change, change the caption.
 # ---- iPhone 6.9" (2868 x 1320) and 6.3" (2622 x 1206): ten frames ---------------------------------------------------
-P01-book-hero|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd|60|Your Duo is a *flytrap* / Best on iPhone Duo. Plays on other iPhones too.|SNAP-T freeze crowd|book:D01-book-hero
-P02-feast|screen=play;mode=feed;pilot=expert;progress=late;freezeOn=snap;freezeAfter=10.5|240|Wait for a crowd. *FEAST!* / One bite catches every bug inside.|SNAP-T event snapped caught=[5-9] escaped
+P01-book-hero|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd|60|Your Duo is a *flytrap* / Close your Duo to bite. Other iPhones: tap.|SNAP-T freeze crowd|book:D01-book-hero
+P02-feast|screen=play;mode=feed;pilot=expert;progress=late;freezeOn=bigFeast|240|Wait for a crowd. *FEAST!* / Five bugs in one bite: double score.|SNAP-T event feast count=[5-9] snapsBack=2
 P03-bee|screen=play;seed=7;wave=15;pilot=perfect;freezeOn=bee|60|Never eat a *bee* / Bees cost snaps. Wait them out.|SNAP-T freeze bee
-P04-garden|screen=garden;progress=late|8|Grow *8 flytraps* / From Red Dragon to B52, and one of gold.|SNAP-T screen garden
-P05-night|screen=play;seed=7;wave=24;pilot=expert;freezeOn=crowd;freezeAfter=3|60|Fireflies light the *night* / New bugs as the day goes on.|SNAP-T start wave 24
-P06-goals|screen=home;progress=late|8|Three *goals* every run / And a Daily Bog with a streak.|SNAP-T canvas
+P04-levels|screen=levels;progress=late|8|30 *levels* to master / Morning Bog, Dusk and Night. Three stars each.|SNAP-T screen levels
+P05-night|screen=play;seed=7;wave=24;pilot=expert;freezeOn=landed|60|Fireflies light the *night* / Endless runs from morning to night.|SNAP-T freeze landed
+P06-garden|screen=garden;progress=late|8|Grow *8 flytraps* / From Red Dragon to B52, and one of gold.|SNAP-T screen garden
 P07-bug-book|screen=book;progress=late|6|Fill the *Bug Book* / 16 species, each with a joke.|SNAP-T screen book
 P08-zen|screen=play;mode=zen;pilot=casual;progress=late;freezeOn=crowd;freezeAfter=25|60|Or just *relax* / Zen Bog: no rush, no end.|SNAP-T freeze crowd
-P09-results|screen=results;pilot=casual;progress=late|240|One more *go*? / Goals, growth and a best to beat.|SNAP-T results goals [1-3] growth=
-P10-first-bite|screen=levelIntro;level=3|8|30 *levels* to master / Then the endless bog.|SNAP-T level intro 3
+P09-goals|screen=home;progress=late|8|Three *goals* at a time / Plus Endless, a Daily Bog and Zen.|SNAP-T canvas
+P10-results|screen=results;seed=7;pilot=expert;progress=late|240|One more *go*? / Goals, growth and a best to beat.|SNAP-T results goals [1-3] growth=
 
 # reserves (phone): not captured by default; run them with a filter like '^(P[0-9]|R[0-9])'.
-# R2: the expect insists on a wasp, because the sub-line names one (a bumblebee sting is cost 1, not 2).
+# R2: the expect insists on a wasp, because the sub-line names one (a bumblebee sting costs 1, not 2).
 R2-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=sting|90|A wasp? *Bzzt!* / Wasps sting: two extra snaps.|SNAP-T event stung .*species=wasp
+# R3: a level in play (Level 5, a crowd of three; proven as ci/scenarios.txt 61). For a P04 swap if the map fails.
+R3-level-5|screen=play;mode=level;level=5;pilot=perfect;freezeOn=crowd|60|Levels that *teach* / Five short lessons, then the real bog.|SNAP-T freeze crowd
+# R4: the Daily Bog in play (a P09 alternative).
+R4-daily|screen=play;mode=daily;seed=7;progress=late;pilot=expert;freezeAfter=10|18|Today's *Daily Bog* / Same bugs for everyone. One try.|SNAP-T input pilot

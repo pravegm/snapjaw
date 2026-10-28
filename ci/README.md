@@ -6,8 +6,11 @@ Duo (the book-pose and tabletop sisters; their folders are listed in `CLAUDE.md`
 kept, with the run numbers in the comments. The store pipeline (`store.yml`, `asc.yml`, `ci/store-*`,
 `tools/appstore/`) is the book-pose sister's, which took that game through App Store Connect on the same Apple account.
 
-**Before anything runs:** the repo `pravegm/snapjaw` must be **public**. This account's billing blocks Actions on
-private repos.
+**Keep the repo public:** `pravegm/snapjaw` is public because this account's billing blocks Actions on private repos.
+
+**The game these checks test (R8, `design/ROUND-8.md`):** the phone is the trap. Armed at θ ≥ 35°; the bite fires only
+at the full shut (θ ≤ 18°, or `.closed` with θ ≤ 25°), never on a partial close; flies flee a slow close; every round
+starts closed; while shut the clock is frozen and the outer display shows the CHOMP card. Closing is not a pause.
 
 Identity used throughout: project `Snap.xcodeproj` (from `project.yml`), scheme and target `Snap`, tests `SnapTests`,
 app `Snap.app`, bundle id `com.pravegm.snapjaw`, display name `Snapjaw`, demo argument `-snapDemo`, log prefix `SNAP-`.
@@ -17,7 +20,7 @@ app `Snap.app`, bundle id `com.pravegm.snapjaw`, display name `Snapjaw`, demo ar
 | Workflow | Runs on | What it does | Artifacts |
 |---|---|---|---|
 | `ci.yml` (CI) | every push to `main` touching `Snap/`, `SnapTests/`, `project.yml`, `ci/` or itself; or by hand | Build, unit tests, phone screenshots, app icon | `logs`, `screenshots` |
-| `duo.yml` (Duo) | by hand only (~45–75 min) | The app on an iPhone Duo simulator with a real hinge: the hinge checks and book-pose frames | `duo-screens` |
+| `duo.yml` (Duo) | by hand only (~45–75 min) | The app on an iPhone Duo simulator with a real hinge: the hinge checks and Duo frames (landscape and portrait) | `duo-screens` |
 | `testflight.yml` (TestFlight) | by hand | A signed Release uploaded to App Store Connect (or `check_only`: an unsigned Release archive) | `testflight-logs` / `release-check-log` |
 | `tf-status.yml` | by hand | Read-only: the latest builds' processing state in App Store Connect | (job summary) |
 | `store.yml` (App Store screenshots) | by hand only (~2–3 h of runners: phones, Duo, then assembly) | The 10-frame App Store sets for 6.9", 6.3" and the iPhone Duo, captioned; plus the header and search art | `store-69`, `store-63`, `store-duo`, `store-placements`, `raw-*` |
@@ -36,6 +39,9 @@ Run one by hand: the repo's **Actions** tab → the workflow → **Run workflow*
 4. **Balance table**: the `SNAP-BAL` lines from BalanceTests in the job summary.
 5. **Demo-guard positive control**: checks that the Debug binary contains the literal `SNAP-T paused closing`. That
    literal is what testflight.yml looks for to prove that no demo code shipped, so it has to be visible here.
+   **R8 removed that log line** (the closing pause is gone), so this step now warns, and testflight.yml's guard rests
+   on `^freezeAfter$` alone until both workflows name another long literal that only DEBUG builds
+   contain (check it is compiled out of Release first).
 6. **Screenshots**: `bash ci/screenshots.sh` (below).
 7. **App icon**: it launches `-snapDemo "screen=icon"` and reads the `SNAP-ICON <path>` line. If there is none, it
    falls back to `Documents/AppIcon-1024.png`, then to any `*icon*.png` in Documents. The file is copied to
@@ -64,13 +70,17 @@ The phone sim has no hinge, so a `pilot=` drives the trap, or `closure=` holds t
 itself. A shot that comes out portrait or under 80 KB (still launching) is re-taken up to 3 times. Every simulator
 call has a timeout, and a failed launch or shot is retried once and then skipped. The script always exits 0.
 
-The 32 scenarios cover:
-- Home: fresh, mid, and the Duo layout (`fold=1`).
-- The First Bite lesson, steps 2–7 (phone texts; step 1, the pose step, is skipped on a phone).
+The 67 scenarios cover:
+- Home: fresh, mid, with goals, and the Duo layout (`fold=1`, fresh and mid).
+- Levels (R8/R9): the level map (fresh, mid, late), level intros (Duo and phone words), Levels 1, 4 and 5 in play,
+  level results (3 stars, a retry, Level 2).
+- The outer display's CHOMP card (a catch, a sting, a dry bite) and the shut state.
 - Play with pilots, frozen on `landed`, `crowd`, `bee`, `snap`, `feast`, `sting`, `dusk`, `night`, `lastSnap`,
-  `tired` and `results`.
-- Layout variants: the wide phone (`fold=0`), the Duo layout (`fold=1`), `hudLeft=1`, and the jaws held half shut.
-- Daily Bog, Results (mid and fresh), the Bug Book (mid and late), Settings, the pose card and the cover card.
+  `tired` and `results`, plus hunger, wilts, the ×5 chain, a big FEAST and a goal done.
+- Layout variants: the wide phone (`fold=0`), the Duo layout (`fold=1`), `hudLeft=1`, and a demo hold of the jaws
+  (`closure=`, a phone-sim pose; with the hinge the inner jaws never draw shut).
+- Endless and Zen Results, the Daily Bog and Share, the Bug Book, the Garden and three varieties, Settings, the badges,
+  the portrait (turned) layout (`31-pose`, no pose card since R8b) and the cover card.
 
 ## duo.yml + ci/duo.sh + ci/duo-scenarios.txt (manual)
 
@@ -82,8 +92,9 @@ The job does this:
 5. Warms up the hinge helper.
 6. Runs `bash ci/duo.sh`.
 
-The Duo sim boots in book pose (landscape, the fold vertical), which is exactly how Snapjaw is played, so the app
-never has to ask for an orientation.
+The Duo sim boots landscape (the fold vertical). Snapjaw plays at any pose and never asks for one. The sim has no
+rotate verb, so portrait (laptop) frames use the demo key `portrait=1` / `screen=pose`: the app lays out the turned
+canvas and draws it a quarter turn onto the landscape panel (turn those PNGs a quarter clockwise to read them).
 
 **Inputs:**
 - `passes`: `hinge frames ui store` (any subset; always run in that order, so the hinge checks get the youngest device).
@@ -92,46 +103,52 @@ never has to ask for an orientation.
 - `retries`: whole re-runs of a hinge check on a new Duo when its launch dies (default 2).
 
 **Rig (R5, `design/notes/ci-R5.md`):**
-- Each hinge-driven launch (`hinge`, `close-pause`, `frames-snap`, `ui-lesson-hinge`) runs on a **fresh Duo**:
+- Each hinge-driven launch (`bite`, `slow-close`, `no-bite-deep`, `frames-snap`, `ui-close-to-start`) runs on a
+  **fresh Duo**:
   created, booted, settled (SpringBoard's PID steady, at least 25 s), the app installed, a warm-up `hinge get`. Only
   one Duo is ever booted.
 - A hinge set times out after 10 s, a sweep after its length + 10 s, and a timed-out call is sent once more.
-  Repositioning sweeps over 1.5 s go as chunks; the measured CREEP sweep stays whole.
+  Repositioning sweeps over 1.5 s go as chunks; the measured SLOW-CLOSE sweep (2.5 s) stays whole.
 - A Duo counts as dead only if neither `simctl list` nor `simctl getenv` sees it, twice.
 - A check whose launch died (or any INCONCLUSIVE verdict) is run again whole on a new Duo, at most twice. The best
   attempt's rows are kept; the others are `HINGE-RETRY INFO` rows, with `logs/<launch>-attempt-<k>.*`.
 - CI-only scenario keys: `ciHinge=<deg>` (under 30°: shut, the cover display shot) and `ciShootOn=<event>` (the
   inner panel shot 0.5 s after `SNAP-T event <event>` on a live run: D02's open-after-bite frame).
 
-**Hinge checks** (design/ROUND-1.md). Each one prints `<CHECK> PASS|FAIL|INCONCLUSIVE (detail)` to `logs/run.txt`,
-adds a row to `checks.tsv` and appears in the job-summary table.
+**Hinge checks** (R8: `design/ROUND-8.md` "Owners", `design/notes/core-R8.md`). Each one prints
+`<CHECK> PASS|FAIL|INCONCLUSIVE (detail)` to `logs/run.txt`, adds a row to `checks.tsv` and appears in the job-summary
+table. Every hinge launch starts with `round_open` (every round starts closed: shut the Duo, no bite, open it again).
 
 | Check | How | PASS |
 |---|---|---|
-| SNAP | `screen=play;mode=attract;seed=7` at 160°. Wait for `event bugSipping`, then sweep 160→128 in 0.15 s | `event snapped` within 1 s. If the app never saw the angle drop, it retries once, then reports INCONCLUSIVE |
-| REARM | After the snap, sweep back to 160 | `event rearmed` after the snapped line |
-| CREEP | From 160, sweep 160→128 over 3 s | A `SNAP-T trap … creep 1` line, and no `snapped` before the closure reached 22° |
-| CLOSE-PAUSE | Fresh launch at 150. Sweep to 40, then back to 150 (on to 165 if the cover is still lit) | `paused closing`, then `resumed` |
+| BITE | `screen=play;mode=attract;seed=7` at 150°, round_open, wait for `event bugSipping`, then sweep 150→5 in 0.3 s | `event snapped caught=<n>` with n ≥ 1 after the sweep began |
+| COVER | On that shut, shoot the cover panel (`duo-h1-cover-shut`) | the cover panel is lit |
+| REOPEN | Then back to 150 | `event rearmed` after the bite, and no `waveStarted` / `bugArrived` between the bite and the re-arm (the clock is frozen while shut) |
+| SLOW-CLOSE | Fresh launch, same seed, 150→5 over 2.5 s | fewer caught than BITE, or escaped ≥ 1 |
+| NO-BITE-DEEP | Fresh launch, 150→60→150 | no `snapped` in the window (INCONCLUSIVE if the app never logged an angle under 100°) |
+
+The R1–R7 SNAP, CREEP, REARM and CLOSE-PAUSE checks and the NO-PAUSE-95 / CREEP-FAST rows are gone (no partial snap,
+no creep, no closing pause).
 
 INFO rows give evidence without a verdict:
+- ROUND / ROUND-OPEN: whether `SNAP-T round open` came and the starting shut bit nothing.
 - CANVAS: the canvas size, `fold=` and `hudLeft=`, and the input source.
-- CREEP-FAST: the same close over 1.5 s.
-- NO-PAUSE-95: holding 95° must never pause.
-- FRAME-SNAP, COVER, POSE-CARD.
+- CLOSE-TO-START, SHUT-FRAMES, FRAME-SNAP, PORTRAIT.
+- Rig rows: SIMULATOR FAIL, HINGE-TOOL FAIL, RIG INFO, HINGE-RETRY INFO.
 
 **Frames:**
 - `duo-01-open-165`.
-- `duo-02-half-150`: the jaws held at 11° with `closure=11`, because the drawn closure follows the player's own rest
-  angle and relaxes within a second of a still hold.
-- `duo-03-snapped-130`: frozen on the bite with `freezeOn=snap`.
-- `duo-04-cover-shut`, `duo-05-reopened-165`, `duo-06-pose-card`.
-- `duo-h*`: the frames from the hinge checks.
-- `duo-ui-*`: Home, lesson steps 1 and 2, Results, the Bug Book, Settings, too flat (178°) and the cover.
-- `duo-ui-lesson-{2,3,4}-hinge-*`: the lesson walked with real hinge snaps from step 1 (`fold=1`), plus a
-  `LESSON-HINGE INFO` row.
-- `store-*`: one frame per line of `ci/duo-scenarios.txt`, at 150° with a pilot. Lines 17–25 are the R4 frames REVIEW-4
-  asked for at Duo aspect (pose, cover card and display, 13, 21, lesson 2–3 with `fold=1`, the ×5 chain, the feast
-  open after the bite); the older lines are tagged with their R4 phone numbers.
+- `duo-02-half-150`: a demo hold of the jaws (`closure=11`), kept from R7 as a CI pose; in R8 a real partial close
+  never draws the jaws shut on the inner screen.
+- `duo-03-bite-shut`: the bite's shut, shot on the cover panel.
+- `duo-04-cover-shut`, `duo-05-reopened-165`, `duo-06-portrait` (the portrait Home, `screen=pose`).
+- `duo-h*`: the frames from the hinge checks (the cover while shut, reopened at 150).
+- `duo-ui-*`: Home, "Close the phone to start" and the round's opening, flat (178°, which plays: no pose prompt), the
+  level map, a level intro and results, the CHOMP card (`screen=chomp`, the Duo shut), Results, the Bug Book,
+  Settings and the cover.
+- `store-*`: one frame per line of `ci/duo-scenarios.txt` (31 lines), at 150° with a pilot. Lines 26–31 are R8's
+  (close to start, the CHOMP card, the level map, intro and results, the sting CHOMP card), 32–36 the portrait frames
+  (R8b); the older lines are tagged with their R4 phone numbers. The lesson frames are gone.
 
 **Artifact `duo-screens`:** the PNGs (the lit panel), `raw/` (both panels), `logs/run.txt`, `logs/<launch>.txt`,
 `checks.tsv` and `build.log`.
@@ -148,7 +165,7 @@ These lessons are kept from the sister projects:
 
 - **`check_only: true`** needs no secrets. It makes an unsigned Release archive and checks the Info.plist values, the
   asset catalog, `PrivacyInfo.xcprivacy`, and that the Release binary has no demo code (`^freezeAfter$` or
-  `SNAP-T paused closing`). Run this first.
+  `SNAP-T paused closing`; that log line is gone since R8, see ci.yml step 5). Run this first.
 - **Normal run:** it checks that the 4 secrets exist and flattens the app icon (an alpha channel is refused,
   ITMS-90717), then archives in Release **without creating a development certificate**. It tries an ad-hoc
   signature first. If that fails, it archives unsigned and stamps the Game Center entitlement on with a local ad-hoc
@@ -218,11 +235,12 @@ Inputs: `phones`, `duo`, `duo_from_run`, `device_69`, `device_63`, `phone_filter
 `placements_from`, `banner_args` (e.g. `bee=--kind search --from D03-bee` for a review variant).
 
 **Scenario files** (`ci/store-scenarios.txt`, `ci/duo-store-scenarios.txt`): `name|demo args|wait|caption|expect|frame`.
-- The play frames reuse the seeds, waves and pilots proven in duo run 40603497021 and `ci/scenarios.txt` (crowd at wave
-  6, a 5-bug feast at wave 8, a bee at wave 15, all with the perfect pilot; feed mode, so the snaps row is real).
+- The play frames (R9) use only args that froze in the R8 CI run (`artifacts/r8`): `bigFeast`, a bee at wave 15,
+  night wave 24 `landed`, levels and Home at `progress=late`, the CHOMP card; Endless is demo `mode=feed`, so the snaps
+  row is real. A Duo inner frame never shows shut lobes (`design/notes/store-R9.md`).
 - `caption` is `headline / sub-line` with one `*gold*` word. `frame` is `flat`, `book` (Duo) or `book:D01-book-hero`
   (the iPhone sets' frame 1).
-- `ci/duo-scenarios.txt` stays `duo.yml`'s 25-frame review set; `ci/duo-store-scenarios.txt` is the upload set.
+- `ci/duo-scenarios.txt` stays `duo.yml`'s review set (31 lines); `ci/duo-store-scenarios.txt` is the upload set.
 
 **What makes a frame FLAGGED** (it still gets framed, into `_flagged/`): the app log lacks
 `SNAP-T demo '…' starts`, the `SNAP-T freeze <tag>` of its `freezeOn=`, the `SNAP-T start wave <n>` of its `wave=`, the

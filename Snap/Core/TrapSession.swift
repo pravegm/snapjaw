@@ -190,6 +190,8 @@ final class TrapSession {
     let levelSpec: LevelSpec?
     /// R8: why the level ended (nil until it has, and outside levels).
     private(set) var levelEnd: LevelEnd? = nil
+    /// R9: the level's calm (TrapRules.reactionScale: × every catchable bug's reaction; 1 outside levels).
+    let reactionScale: Double
 
     fileprivate enum Mode: Equatable {
         case approach, hover, sip, pause, dash, hop, cross, leave, escape, release, caught
@@ -366,6 +368,7 @@ final class TrapSession {
         var spec: LevelSpec? = nil
         if case .level(let id) = mode { spec = LevelBook.level(id) }
         self.levelSpec = spec
+        self.reactionScale = TrapRules.reactionScale(mode: mode)
         installNectar(block: nectarBlock)
         bugs.reserveCapacity(Tuning.maxBugsOnScreen)
         if let l = spec {
@@ -1271,9 +1274,11 @@ final class TrapSession {
     private func reactionNow(_ b: Bug, _ a: BugActivity) -> Double {
         var sipping: Bool = false
         if case .sipping = a { sipping = true }
-        return TrapRules.reaction(b.info, sipping: sipping, flying: TrapRules.isFlying(a),
-                                  onRim: TrapRules.onRim(geometry, b.point, radius: b.info.radius),
-                                  wave: TrapRules.paceWave(wave, mode: mode))
+        let r: Double = TrapRules.reaction(b.info, sipping: sipping, flying: TrapRules.isFlying(a),
+                                           onRim: TrapRules.onRim(geometry, b.point, radius: b.info.radius),
+                                           wave: TrapRules.paceWave(wave, mode: mode))
+        // R9: a level's calm (LevelSpec.reactionScale; 1 outside levels). Protected bugs never change.
+        return b.species.isProtected ? r : r * reactionScale
     }
 
     /// R8 (ROUND-8 §1): bug fear from continuous closure. A close starts when the closure passes Tuning.closeStart
@@ -1285,7 +1290,10 @@ final class TrapSession {
         let c: Double = inp.closure
         let open: Bool = inp.armed && !shut && !waitingForClose
         if !closing {
-            let starts: Bool = open && c >= Tuning.closeStart
+            // R9: only a RISING closure starts a close. The pilot (CI, attract, the balance runs) reports its reopen
+            // as a closure falling from ~115° after the re-arm, which startled bugs landing then; the hinge's closure
+            // is ~0 there (its reference restarts at the re-arm). Mirrored in tools/balance-sim.js.
+            let starts: Bool = open && c >= Tuning.closeStart && c > prevClosure
             if starts || inp.snap != nil {
                 closing = true
                 fled = 0

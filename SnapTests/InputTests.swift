@@ -354,3 +354,106 @@ struct InputTests {
         #expect(close + FeelTouchJaw.reopen <= Tuning.touchRearmDelay + 1e-9)
     }
 }
+
+// MARK: - R9 (design/notes/core-R9.md): the hinge source on real hardware
+
+@MainActor
+struct InputR9Tests {
+
+    @Test func aResetDuringTheStartingCloseNeverBites() {
+        // Closing the phone to start moves the app to the outer display, which re-activates the scene: the App resets
+        // the hinge mid-close. Before R9 the fresh detector was armed at once and the starting close bit.
+        let hinge = InputFakeHinge(source: HingeTrapSource())
+        hinge.run(0.5) { _ in 150 }
+        hinge.source.startRound(at: hinge.time)
+        hinge.run(0.2) { t in 150 - 90 * min(t / 0.2, 1) }
+        hinge.source.reset(at: hinge.time)
+        #expect(hinge.source.waitingForShut, "a reset keeps the round's closed start")
+        hinge.run(0.4) { t in 60 - 55 * min(t / 0.15, 1) }
+        #expect(hinge.source.snapsFired == 0, "the starting close is not a bite")
+        hinge.run(0.6) { t in 5 + 145 * min(t / 0.4, 1) }
+        #expect(hinge.inputs.last?.armed == true)
+        hinge.run(0.6) { t in 150 - 145 * min(t / 0.3, 1) }
+        #expect(hinge.source.snapsFired == 1)
+        // Going Home: no round, so the trap never waits.
+        let home = InputFakeHinge(source: HingeTrapSource())
+        home.run(0.5) { _ in 150 }
+        home.source.startRound(at: home.time)
+        home.source.reset(at: home.time, keepsRoundStart: false)
+        home.run(0.3) { _ in 150 }
+        #expect(!home.source.waitingForShut && home.inputs.last?.armed == true)
+    }
+
+    @Test func aResetWhileShutNeverReArmsEarly() {
+        let hinge = InputFakeHinge(source: HingeTrapSource())
+        hinge.run(1.0) { _ in 150 }
+        // A `.closed` bite at 24°, the phone hovering there; a reset (the outer display) at 36° on report noise.
+        hinge.run(0.5, status: .closed) { t in 150 - 126 * min(t / 0.3, 1) }
+        #expect(hinge.source.snapsFired == 1)
+        hinge.run(0.2, status: .closed) { _ in 36 }
+        hinge.source.reset(at: hinge.time)
+        hinge.run(0.3, status: .closed) { _ in 36 }
+        #expect(hinge.inputs.last?.armed == false, "36° is not past the re-arm after a 24° shut")
+        hinge.run(0.5, status: .closed) { t in 36 - 12 * min(t / 0.2, 1) }
+        #expect(hinge.source.snapsFired == 1, "no second bite from the hover")
+        hinge.run(0.6) { t in 24 + 126 * min(t / 0.4, 1) }
+        #expect(hinge.inputs.last?.armed == true)
+    }
+
+    @Test func theOuterDisplayCountsAsFolded() {
+        // The round's start: the outer display took over with no shut report (reports stopped at 60°).
+        let start = InputFakeHinge(source: HingeTrapSource())
+        start.run(0.5) { _ in 150 }
+        start.source.startRound(at: start.time)
+        start.run(0.3) { t in 150 - 90 * min(t / 0.2, 1) }
+        start.source.noteFolded(at: start.time)
+        #expect(!start.source.waitingForShut)
+        #expect(start.source.snapsFired == 0)
+        start.run(0.6) { t in 60 + 90 * min(t / 0.4, 1) }
+        #expect(start.inputs.last?.armed == true, "opened: the round opens")
+        // In play, folded at 22° (no `.closed` report): the bite, as the status would give it; at 50°: nothing.
+        let low = InputFakeHinge(source: HingeTrapSource())
+        low.run(1.0) { _ in 150 }
+        low.run(0.4) { t in 150 - 128 * min(t / 0.3, 1) }
+        #expect(low.source.snapsFired == 0)
+        low.source.noteFolded(at: low.time)
+        low.run(0.1) { _ in 22 }
+        #expect(low.source.snapsFired == 1 && low.snapFrames.count == 1)
+        let high = InputFakeHinge(source: HingeTrapSource())
+        high.run(1.0) { _ in 150 }
+        high.run(0.4) { t in 150 - 100 * min(t / 0.3, 1) }
+        high.source.noteFolded(at: high.time)
+        #expect(high.source.snapsFired == 0)
+        // No hinge: nothing.
+        let none = HingeTrapSource()
+        none.noteFolded(at: 1)
+        #expect(none.snapsFired == 0 && !none.hasHinge)
+    }
+
+    @Test func launchedShutOnTheOuterDisplayTheRoundStartsWhenItOpens() {
+        let hinge = InputFakeHinge(source: HingeTrapSource())
+        hinge.run(0.5, status: .closed) { _ in 0 }
+        hinge.source.startRound(at: hinge.time)
+        #expect(!hinge.source.waitingForShut, "already closed: the round only waits for the opening")
+        hinge.run(0.6) { t in 145 * min(t / 0.4, 1) }
+        #expect(hinge.inputs.last?.armed == true)
+        #expect(hinge.source.snapsFired == 0)
+        hinge.run(0.6) { t in 145 - 140 * min(t / 0.3, 1) }
+        #expect(hinge.source.snapsFired == 1)
+    }
+
+    @Test func noisyReportsThroughTheFilterBiteOncePerClose() {
+        // ±3° of report noise passes the 2° escape unfiltered: still one bite a slam, none for a deep partial close.
+        var dice = FeelDice(seed: 9)
+        let hinge = InputFakeHinge(source: HingeTrapSource())
+        hinge.run(1.0) { _ in 150 + dice.range(-3, 3) }
+        hinge.run(1.0) { t in 150 - 145 * min(t / 0.3, 1) + dice.range(-3, 3) }
+        #expect(hinge.source.snapsFired == 1)
+        hinge.run(1.0) { t in max(0, 5 + 145 * min(t / 0.4, 1) + dice.range(-3, 3)) }
+        hinge.run(1.5) { t in 150 - 100 * min(t / 0.4, 1) + dice.range(-3, 3) }
+        hinge.run(1.0) { t in 50 + 100 * min(t / 0.4, 1) + dice.range(-3, 3) }
+        #expect(hinge.source.snapsFired == 1, "a partial close to 50° never bites")
+        hinge.run(1.0) { t in 150 - 145 * min(t / 0.3, 1) + dice.range(-3, 3) }
+        #expect(hinge.source.snapsFired == 2)
+    }
+}

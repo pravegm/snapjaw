@@ -85,11 +85,15 @@ for (const r of rbRows) {
 }
 if (rbRows.length !== achievements.length) problems.push(`runbook has ${rbRows.length} achievements, achievements.md ${achievements.length}`);
 
-// R6 storyboard (ci/store-scenarios.txt, ci/duo-store-scenarios.txt: the source of truth for names and captions).
-const FRAMES = ['01-book-hero', '02-feast', '03-bee', '04-garden', '05-night', '06-goals', '07-bug-book', '08-zen', '09-results', '10-first-bite'];
-for (const [file, prefix] of [['ci/store-scenarios.txt', 'P'], ['ci/duo-store-scenarios.txt', 'D']]) {
+// R9 storyboard (ci/store-scenarios.txt, ci/duo-store-scenarios.txt: the source of truth for names and captions;
+// design/notes/store-R9.md). The two sets differ: only the Duo set shows the outer display's CHOMP card (D02); the
+// iPhone set ends on the Results instead.
+const PFRAMES = ['01-book-hero', '02-feast', '03-bee', '04-levels', '05-night', '06-garden', '07-bug-book', '08-zen', '09-goals', '10-results'];
+const DFRAMES = ['01-book-hero', '02-chomp', '03-feast', '04-bee', '05-levels', '06-night', '07-garden', '08-bug-book', '09-zen', '10-goals'];
+const PROGRESS_FRAMES = ['levels', 'garden', 'bug-book', 'goals', 'results'];   // frames that show progress
+for (const [file, prefix, frames] of [['ci/store-scenarios.txt', 'P', PFRAMES], ['ci/duo-store-scenarios.txt', 'D', DFRAMES]]) {
   let names = []; try { names = rd(file).split('\n').filter(l => new RegExp('^' + prefix + '\\d\\d-').test(l)).map(l => l.split('|')[0]); } catch (e) { problems.push(file + ' missing'); }
-  const want = FRAMES.map(n => prefix + n);
+  const want = frames.map(n => prefix + n);
   if (names.join() !== want.join()) problems.push(`${file} frames ${JSON.stringify(names)} != ${JSON.stringify(want)}`);
 }
 // R7 (SCORE-R6 #9): store truth and consistency, checked on the scenario files against screenshots.md.
@@ -99,11 +103,15 @@ for (const [file, prefix] of [['ci/store-scenarios.txt', 'P'], ['ci/duo-store-sc
     let lines = []; try { lines = rd(file).split(/\r?\n/).filter(l => new RegExp('^' + prefix + '\\d\\d-').test(l)); } catch (e) { continue; }
     const states = new Set();
     for (const l of lines) {
-      const f = l.split('|'), name = f[0], args = f[1] || '', caption = f[3] || '', num = name.slice(1, 3);
+      const f = l.split('|'), name = f[0], args = f[1] || '', caption = f[3] || '', beat = name.slice(4);
       // One progress state on every frame that shows progress (SCORE-R6: P04's 6 of 8 against P06's Garden 2/8).
       const m = args.match(/(?:^|;)progress=([a-z]+)/);
       if (m) states.add(m[1]);
-      else if (['04', '06', '07', '09'].includes(num)) problems.push(`${file} ${name}: no progress= (the set shows one progress state)`);
+      else if (PROGRESS_FRAMES.includes(beat)) problems.push(`${file} ${name}: no progress= (the set shows one progress state)`);
+      // R9: the R8 game. No caption may promise the retired lesson, the partial snap or a pose.
+      if (/a little shut|like a book|first bite|\blid\b|22 ?°|lesson/i.test(caption)) problems.push(`${file} ${name}: caption repeats an R7 claim: ${caption}`);
+      // R9: the CHOMP card is the Duo's outer display: never in the iPhone sets.
+      if (prefix === 'P' && /(?:^|;)screen=(chomp|shut|cover)/.test(args)) problems.push(`${file} ${name}: a Duo-only outer-display card in the iPhone set`);
       // Golden Glow is the game's own variety: no frame says "real cultivars".
       if (/real cultivars?/i.test(caption)) problems.push(`${file} ${name}: "real cultivars" (Golden Glow is fantasy)`);
       // screenshots.md quotes every iPhone sub-line and names every Duo frame (the scenario files win).
@@ -115,10 +123,10 @@ for (const [file, prefix] of [['ci/store-scenarios.txt', 'P'], ['ci/duo-store-sc
   }
 }
 const screenshots = {
-  _comment: 'store.yml (to be ported from Swoop) artifacts store-69 (6.9", 2868x1320), store-63 (6.3", 2622x1206: the required "Dynamic Island, medium" slot, the APP_IPHONE_61 class) and store-duo (inner 2853x2007), all landscape. Frames P01-P10 / D01-D10 in screenshots.md order. Until a store run exists (DEFAULT_STORE_RUN in asc.yml), validate reports them as gaps and push skips them.',
-  APP_IPHONE_67: FRAMES.map(n => `store-69/P${n}.png`),
-  APP_IPHONE_61: FRAMES.map(n => `store-63/P${n}.png`),
-  duoInner: FRAMES.map(n => `store-duo/D${n}.png`)
+  _comment: 'store.yml artifacts store-69 (6.9", 2868x1320), store-63 (6.3", 2622x1206: the required "Dynamic Island, medium" slot, the APP_IPHONE_61 class) and store-duo (inner 2853x2007), all landscape. Frames P01-P10 / D01-D10 in screenshots.md order (R9: the Duo set has the CHOMP card at D02, the iPhone sets the Results at P10). Until a store run is given (store_run, or DEFAULT_STORE_RUN in asc.yml), validate reports them as gaps and push skips them.',
+  APP_IPHONE_67: PFRAMES.map(n => `store-69/P${n}.png`),
+  APP_IPHONE_61: PFRAMES.map(n => `store-63/P${n}.png`),
+  duoInner: DFRAMES.map(n => `store-duo/D${n}.png`)
 };
 
 const meta = {
@@ -175,7 +183,10 @@ for (const [k, v] of [['name', name], ['subtitle', subtitle], ['promo', promo], 
 for (const a of achievements) for (const x of Object.values(a.localizations['en-GB'])) if (banned.test(x)) problems.push('banned word in ' + a.vendorIdentifier);
 // R6: the untrue R5 claims (SCORE-R5 §4 #3) must never come back.
 // R7 (SCORE-R6 #8): "Best Feast" was the leaderboard's old name (a Feast is a 3+ bite; the board holds the best score).
-const stale = /protein|HUD on the left|to (×|x)4\b|12 at most|max(imum)? 12|up to 12 snaps|seven clean bites in a row|best feast/i;
+// R9 (the R8 game, design/ROUND-8.md): the partial snap at 22 degrees, the closing pause, the book-pose demand, the
+// First Bite lesson (Levels 1-5 teach now; "Replay First Bite" is gone from Settings), 10 snaps to start (12 now),
+// "Feed" as the mode's name (Home says Endless) and "lid" (founder rule: say "phone") are all untrue now.
+const stale = /protein|HUD on the left|to (×|x)4\b|12 at most|max(imum)? 12|up to 12 snaps|seven clean bites in a row|best feast|a little shut|half shut|about 22|22 ?(°|degrees)|replay first bite|first bite lesson|short lesson|starts? with 10|10 snaps|like a book|bend it a little|closing pause|\blid\b|\bFeed\b(?! the)/i;
 for (const [k, v] of [['promo', promo], ['descGB', descGB], ['descUS', descUS], ['notes', notes], ['nomDesc', nomDesc], ['nomNotes', nomNotes], ['whatsNew', whatsNew]]) if (stale.test(v)) problems.push(`${k} repeats an untrue claim: ${v.match(stale)[0]}`);
 for (const a of achievements) for (const x of Object.values(a.localizations['en-GB'])) if (stale.test(x)) problems.push('untrue claim in ' + a.vendorIdentifier + ': ' + x);
 for (const lb of leaderboards) for (const l of Object.values(lb.localizations)) if (stale.test(l.formatterSuffix + l.formatterSuffixSingular)) problems.push('leaderboard suffix says protein: ' + lb.vendorIdentifier);

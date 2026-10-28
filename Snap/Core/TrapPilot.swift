@@ -172,6 +172,8 @@ struct TrapPilot {
     private func view(_ snap: TrapSnapshot, _ d: Double) -> View {
         var v = View()
         var sum: Int = 0
+        // R9: a level's calm (LevelSpec.reactionScale), as the session plays it.
+        let calm: Double = TrapRules.reactionScale(mode: snap.mode)
         for b in snap.bugs {
             if b.species.isProtected || !b.inTrap { continue }
             let a: BugActivity = b.activity
@@ -190,8 +192,8 @@ struct TrapPilot {
             var sipping: Bool = false
             if case .sipping = a { sipping = true }
             // R6: the session's pace wave (the Zen Bog never speeds up).
-            let r: Double = TrapRules.reaction(info, sipping: sipping, flying: TrapRules.isFlying(a), onRim: b.onRim,
-                                               wave: TrapRules.paceWave(snap.wave, mode: snap.mode))
+            let r: Double = calm * TrapRules.reaction(info, sipping: sipping, flying: TrapRules.isFlying(a),
+                                                      onRim: b.onRim, wave: TrapRules.paceWave(snap.wave, mode: snap.mode))
             if TrapRules.modelExposure(nerve: info.nerve, duration: d) <= r {
                 v.catchable += 1
                 sum += info.points
@@ -205,6 +207,7 @@ struct TrapPilot {
     private func targetCount(_ snap: TrapSnapshot, _ d: Double) -> Int {
         if targets.isEmpty { return 0 }
         var k: Int = 0
+        let calm: Double = TrapRules.reactionScale(mode: snap.mode)
         for b in snap.bugs where b.inTrap && targets.contains(b.species) {
             let a: BugActivity = b.activity
             if skill == .novice || skill == .casual {
@@ -216,8 +219,9 @@ struct TrapPilot {
             let info: BugInfo = BugCatalog.info(b.species)
             var sipping: Bool = false
             if case .sipping = a { sipping = true }
-            let r: Double = TrapRules.reaction(info, sipping: sipping, flying: TrapRules.isFlying(a), onRim: b.onRim,
+            var r: Double = TrapRules.reaction(info, sipping: sipping, flying: TrapRules.isFlying(a), onRim: b.onRim,
                                                wave: TrapRules.paceWave(snap.wave, mode: snap.mode))
+            if !b.species.isProtected { r *= calm }
             if TrapRules.modelExposure(nerve: info.nerve, duration: d) <= r { k += 1 }
         }
         return k

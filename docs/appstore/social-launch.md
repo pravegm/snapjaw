@@ -29,19 +29,19 @@ Counted with Node, with the link as 23 characters on X and Mastodon and as 40 on
 ### X (attach the 15 s clip)
 > Snapjaw is out.
 >
-> Hold your iPhone Duo open like a book: it's a Venus flytrap. Bugs land on the nectar; snap it a little shut to catch them.
+> Your iPhone Duo is a Venus flytrap. Bugs land on the nectar; close the phone to catch them.
 >
 > Wait for a crowd. Never eat a bee.
 >
 > £1.99 / $1.99 · no ads · no IAP · tap to snap on other iPhones
 > https://apps.apple.com/app/id6828066230
 
-*Alt text:* Two hands hold an iPhone Duo open like a book. Across its two screens is a glossy crimson Venus flytrap with pale teeth along both outer edges, in a mossy green bog. Three round cartoon flies sip gold nectar drops on the lobes while a striped bee with a white halo hovers nearby. The bee flies off, the hands close the phone a little, the teeth on screen clack together, and "TRIPLE ×3" pops up as the trap opens again.
+*Alt text:* Two hands hold an iPhone Duo open like a book. Across its two screens is a glossy crimson Venus flytrap with pale teeth along both outer edges, in a mossy green bog. Three round cartoon flies sip gold nectar drops on the lobes while a striped bee with a white halo hovers nearby. The bee flies off, the hands close the phone, the outer screen shows "CHOMP! 3 bugs", and the trap is empty and gold-stained as it opens again.
 
 ### Bluesky (attach the clip)
 > Snapjaw is out: your iPhone Duo is a Venus flytrap.
 >
-> The two halves are the lobes, the hinge is the midrib. Bugs land on the nectar to sip. Snap it a little shut to catch a crowd in one bite, but never eat a bee.
+> The two halves are the lobes, the hinge is the midrib. Bugs land on the nectar to sip. Close the phone to catch a crowd in one bite, but never eat a bee.
 >
 > No ads, no IAP.
 >
@@ -50,7 +50,7 @@ Counted with Node, with the link as 23 characters on X and Mastodon and as 40 on
 ### Mastodon (attach the clip)
 > Snapjaw is out. 🪴
 >
-> On iPhone Duo the hinge is the trap: hold it open like a book and the halves are a Venus flytrap's lobes. Bugs land on the nectar; a short snap of about 22° catches everything inside. Wait for a crowd, since the score multiplies by the number of bugs. But a bee in the bite costs you a snap.
+> On iPhone Duo the phone is the trap: open it and the halves are a Venus flytrap's lobes. Bugs land on the nectar; close the phone and everything still inside is caught. Wait for a crowd, since the score multiplies by the number of bugs. But a bee in the bite costs you a snap.
 >
 > Plus goals, 8 flytraps to grow and a Zen Bog.
 >
@@ -60,11 +60,11 @@ Counted with Node, with the link as 23 characters on X and Mastodon and as 40 on
 > #iPhoneDuo #iOSDev #IndieDev
 
 ### Threads (attach the clip)
-> Made a game where your iPhone Duo is a Venus flytrap. Snap it a little shut on a crowd of bugs, and never eat a bee. Then grow 8 flytraps, chase goals, keep a Daily streak or just relax in the Zen Bog. Snapjaw is out today: https://apps.apple.com/app/id6828066230
+> Made a game where your iPhone Duo is a Venus flytrap. Close it on a crowd of bugs, and never eat a bee. 30 levels, then grow 8 flytraps, chase goals, keep a Daily streak or just relax in the Zen Bog. Snapjaw is out today: https://apps.apple.com/app/id6828066230
 
 ### r/iPhoneDuo (only if the rules allow a launch post; otherwise the megathread)
 **Title:** [Dev] I turned the Duo into a Venus flytrap: Snapjaw is out
-> Developer here, so this is self-promo. Snapjaw is a book-pose game: the two halves are a flytrap's lobes and the hinge is the midrib. Bugs land inside to sip nectar, and you close the phone about 22° to bite. That's measured from however you naturally hold it (no target angle), the bite fires at 22° so there's no point going further, and it never asks you to close it or lay it flat.
+> Developer here, so this is self-promo. In Snapjaw the phone is the trap: the two halves are a flytrap's lobes and the hinge is the midrib. Bugs land inside to sip nectar, and closing the phone is the bite (it fires as the halves meet, so no force is needed; a part close never bites). Any pose plays, and the outer screen shows what you caught.
 >
 > It's really a patience game: crowds multiply the score, snaps are limited, and a bee in the bite costs you. The score and snaps sit on the half that stays sharp when the Duo blurs one side as a fold starts from flat (Settings → Score on the left if yours is the other one).
 >

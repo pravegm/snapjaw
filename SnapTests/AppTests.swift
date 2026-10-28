@@ -1882,6 +1882,13 @@ struct RoundEightTests {
         // A tap has no speed: never "Fast close" on a phone.
         #expect(AppRules.biteVerdict(bite(caught: [.gnat], duration: 0.12), touch: true).text == "Got it! Clean bite")
         #expect(AppRules.biteVerdict(bite(caught: [.gnat], duration: Double.nan)).text == "Got it! Clean bite")
+        // R9 (frame 46: "FEAST!" under "Too slow, 1 flew"): a crowd caught is good news, whatever flew.
+        let feast = AppRules.biteVerdict(bite(caught: [.gnat, .gnat, .gnat], escaped: 3, duration: 1.2, ratio: 0.5))
+        #expect(feast.good)
+        #expect(feast.text == "3 bugs! 3 got away")
+        // R9: a phone is never told it was slow (a tap has no speed).
+        #expect(AppRules.biteVerdict(bite(caught: [], escaped: 2), touch: true).text == "Missed, they flew")
+        #expect(!AppRules.biteVerdict(bite(caught: [], escaped: 2), touch: true).text.contains("slow"))
         for s in AppRules.verdictSamples { #expect(s.split(separator: " ").count <= 5) }
         #expect(AppRules.hudHintIsToast(.verdict("x", good: true)))
         #expect(AppRules.hudHintIsWarning(.verdict("x", good: false)))
@@ -1921,10 +1928,17 @@ struct RoundEightTests {
         #expect(sting.kind == .sting)
         #expect(ChompWords.headline(.sting) == "Bzzt!")
         #expect(ChompWords.callout(sting) == "A bee · \u{2212}1 snap")
-        #expect(ChompWords.note(sting) == "Bee! \u{2212}1 snap")
+        // R9 (frames 57, 58): the note says what to do next, never the callout again.
+        #expect(ChompWords.note(sting) == ChompWords.stingTip)
+        #expect(ChompWords.note(ChompInfo(bite(caught: [], stingers: [.wasp]), score: 0)) == ChompWords.stingTipWasp)
         let dry = ChompInfo(bite(caught: [], escaped: 2), score: 0)
         #expect(dry.kind == .dry)
         #expect(ChompWords.callout(dry) == "They all flew")
+        #expect(ChompWords.note(dry) == ChompWords.slowTip)
+        #expect(ChompWords.note(ChompInfo(bite(caught: []), score: 0)) == ChompWords.emptyTip)
+        for c in [sting, dry, catchBite, one] {
+            #expect(ChompWords.note(c) != ChompWords.callout(c))
+        }
         #expect(ChompWords.carryOn == "Open to keep feeding")
         #expect(ChompArt.bumpSpots.count == ChompArt.maxBumps)
         for kind in [ChompInfo.Kind.catchBite, .sting, .dry] {
@@ -2311,5 +2325,199 @@ struct PortraitTests {
         let ll = HUDLayout.make(left).back
         #expect(near(left.headerPads(left.leftPage, back: ll).leading, 64))
         #expect(near(left.headerPads(left.rightPage, back: ll).trailing, 0))
+    }
+}
+
+// MARK: - R9: premium menus, first-run clarity, the phone path (design/notes/app-R9.md)
+
+@MainActor
+struct RoundNineTests {
+    /// "lid" as a word (never "solid" or "valid").
+    private func saysLid(_ s: String) -> Bool {
+        s.lowercased().split { !$0.isLetter }.contains { $0 == "lid" || $0 == "lids" }
+    }
+
+    /// Every level's goal and the result lines Core gives it, in one control.
+    private func levelLines(touch: Bool) -> [String] {
+        var out: [String] = []
+        for spec in LevelBridge.all {
+            out.append(LevelWords.goal(spec, touch: touch))
+            let runs = [makeRun(mode: .level(spec.id)),
+                        makeRun(mode: .level(spec.id), score: 0, bugs: 0, caught: [:], biggest: 0, chain: 0)]
+            for r in runs { out.append(LevelWords.outcomeLine(LevelBridge.evaluate(r, spec).line, touch: touch)) }
+        }
+        out.append(LevelWords.outcomeLine("Out of time. Shut it faster", touch: touch))
+        return out
+    }
+
+    /// The words a player can read in one control (the HUD plate, the coach, the verdicts, Home, the levels).
+    private func playerCopy(touch: Bool) -> [String] {
+        var out = levelLines(touch: touch)
+        out += AppRules.allHintCopy + AppRules.coachSamples + AppRules.verdictSamples
+        out += [LevelWords.startLine(touch: touch), HomeView.subtitle(foldInput: !touch)]
+        out += HomeView.rowWords + [HomeView.zenDetail, SettingsView.aboutLine, SettingsView.replayLesson,
+                                    SettingsView.hudSideTitle, SettingsView.hudSideDetail, AppRules.freeStingCopy,
+                                    AppRules.chainLesson, CloseToStartCard.detail]
+        out += (1...3).map { LevelWords.worldLine($0) }
+        if let banner = AppRules.startBanner(.feed, touch: touch) { out.append(banner) }
+        for preset in [DemoMode.Preset.fresh, .mid, .late] {
+            out.append(HomeView.playLine(DemoPresets.progress(preset, today: 299), touch: touch))
+        }
+        return out
+    }
+
+    /// Founder rule: say "phone", never "lid", anywhere a player reads.
+    @Test func noPlayerLineSaysLid() {
+        var all = playerCopy(touch: false) + playerCopy(touch: true)
+        all += [ChompWords.carryOn, ChompWords.openToPlay, ChompWords.openForResults, ChompWords.stingTip,
+                ChompWords.stingTipWasp, ChompWords.slowTip, ChompWords.emptyTip, CoverCard.openToStart,
+                CoverCard.startDetail, CoverCard.detail(midRun: true), CoverCard.detail(midRun: false),
+                HomeView.foldCaption, HomeView.foldDetail]
+        for line in all { #expect(!saysLid(line), "says lid: \(line)") }
+        #expect(saysLid("Close the lid"))
+        #expect(!saysLid("A solid, valid bite"))
+    }
+
+    /// R9 (frame 01: "Level 1 · Shut the phone on the fly" on a phone): a phone is never told to close or shut
+    /// anything, and the Duo's control lines say "close the phone" (not "shut").
+    @Test func phoneCopyNeverSpeaksOfTheHinge() {
+        for line in levelLines(touch: true) {
+            #expect(!LevelWords.speaksOfTheHinge(line), "phone line: \(line)")
+        }
+        for preset in [DemoMode.Preset.fresh, .mid, .late] {
+            let line = HomeView.playLine(DemoPresets.progress(preset, today: 299), touch: true)
+            #expect(!LevelWords.speaksOfTheHinge(line), "phone Play: \(line)")
+        }
+        for hint in [TrapHint.bendALittle, .quick, .openUp, .beeInside, .crowd, .lastSnap, .hungry] {
+            if let t = AppRules.hintText(hint, touch: true) { #expect(!LevelWords.speaksOfTheHinge(t)) }
+        }
+        let phoneLines: [String?] = [AppRules.hudHintText(.foldInput, touch: true),
+                                     AppRules.startBanner(.feed, touch: true), LevelWords.startLine(touch: true),
+                                     HomeView.subtitle(foldInput: false)]
+        for t in phoneLines { #expect(!LevelWords.speaksOfTheHinge(t ?? "")) }
+        for level in 1...5 {
+            for sipping in 0...3 {
+                for armed in [true, false] {
+                    let t = AppRules.coachLine(level: level, sipping: sipping, beeInTrap: false, armed: armed,
+                                               touch: true)
+                    #expect(!LevelWords.speaksOfTheHinge(t ?? ""))
+                }
+            }
+        }
+        // The Duo's own words: "close", never "shut".
+        for line in levelLines(touch: false) { #expect(!line.lowercased().contains("shut"), "Duo line: \(line)") }
+        // Level 1, both ways.
+        if let one = LevelBridge.spec(1) {
+            let phone = LevelWords.goal(one, touch: true)
+            let duo = LevelWords.goal(one, touch: false)
+            #expect(phone == "Tap when the fly lands")
+            #expect(duo == "Close the phone on the fly")
+        } else {
+            Issue.record("no Level 1")
+        }
+        #expect(LevelWords.inputAware("Catch 2 flies. Shut it fast", touch: true) == "Catch 2 flies")
+        #expect(LevelWords.inputAware("Catch 2 flies. Shut it fast", touch: false) == "Catch 2 flies. Close it fast")
+        #expect(LevelWords.outcomeLine("Out of time. Shut it faster", touch: true) == "Out of time. Snap sooner")
+        #expect(LevelWords.inputAware("One bite, 2 bugs", touch: true) == "One bite, 2 bugs")
+        #expect(HomeView.playLine(ProgressData(), touch: true) == "Level 1 · Tap when the fly lands")
+    }
+
+    /// R9: a first-time Home is the name, its line and Play; the rank and goals come with progress. Every quiet button
+    /// has a word, and its count rides on the icon only once there is one.
+    @Test func homeShowsLessToANewPlayer() {
+        let fresh = DemoPresets.progress(.fresh, today: 299)
+        #expect(!HomeView.showsProgress(fresh))
+        #expect(HomeView.showsProgress(DemoPresets.progress(.mid, today: 299)))
+        #expect(HomeView.showsProgress(DemoPresets.progress(.late, today: 299)))
+        var d = ProgressData()
+        _ = LevelRules.record(&d, id: 1, stars: 3)
+        _ = LevelRules.record(&d, id: 2, stars: 3)
+        #expect(!HomeView.showsProgress(d))
+        _ = LevelRules.record(&d, id: 3, stars: 1)
+        #expect(HomeView.showsProgress(d))
+        var e = ProgressData()
+        e.feedRuns = 1
+        #expect(HomeView.showsProgress(e))
+        #expect(HomeView.rowWords == ["Levels", "Bug Book", "Garden", "Settings"])
+        for w in HomeView.rowWords { #expect(w.rangeOfCharacter(from: .decimalDigits) == nil) }
+        #expect(HomeView.bookBadge(ProgressData()) == nil)
+        #expect(HomeView.gardenBadge(ProgressData()) == nil)
+        let mid = DemoPresets.progress(.mid, today: 299)
+        #expect(HomeView.bookBadge(mid) == "\(mid.speciesFound)/\(BugSpecies.allCases.count)")
+    }
+
+    /// R9 (frame 04: 7 sat on 6 and its stars): no two pads (nor a pad and the next one's glow) meet, on the Duo's
+    /// page, a 6.3" phone and an iPhone SE-size phone, and every pad lies in its box.
+    @Test func theMapsPadsNeverOverlap() {
+        let boxes: [(CGSize, Bool)] = [(CGSize(width: 420, height: 560), false), (CGSize(width: 380, height: 300), true),
+                                       (CGSize(width: 290, height: 280), true), (CGSize(width: 620, height: 360), false)]
+        for (box, compact) in boxes {
+            let pad = LevelMapView.padSize(in: box, compact: compact)
+            #expect(pad >= 30)
+            // A pad's footprint: its tap frame (at least 44 pt) and its star row under it.
+            let w = max(pad, SnapTheme.minTap)
+            let h = max(pad * 1.24 + 4, SnapTheme.minTap)
+            var rects: [CGRect] = []
+            for i in 0..<10 {
+                let p = LevelMapView.padCenter(i, in: box)
+                let r = CGRect(x: p.x - w / 2, y: p.y - pad / 2, width: w, height: h)
+                #expect(r.minX >= -0.5 && r.maxX <= box.width + 0.5, "pad \(i) leaves its box across")
+                #expect(r.minY >= -0.5 && r.maxY <= box.height + 0.5, "pad \(i) leaves its box down")
+                rects.append(r)
+            }
+            for i in 0..<10 {
+                for j in (i + 1)..<10 {
+                    #expect(!rects[i].insetBy(dx: 2, dy: 2).intersects(rects[j]), "pad \(i) meets pad \(j)")
+                }
+            }
+            // The glow round the next pad stays off its neighbours' pads.
+            for i in 0..<9 {
+                let a = LevelMapView.padCenter(i, in: box)
+                let b = LevelMapView.padCenter(i + 1, in: box)
+                let gap = ((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)).squareRoot()
+                #expect(gap >= pad * 0.72 + pad / 2)
+            }
+        }
+        // The path reads in order: the top row left to right, the bottom row right to left.
+        let box = CGSize(width: 400, height: 300)
+        for i in 0..<4 { #expect(LevelMapView.padCenter(i, in: box).x < LevelMapView.padCenter(i + 1, in: box).x) }
+        for i in 5..<9 { #expect(LevelMapView.padCenter(i, in: box).x > LevelMapView.padCenter(i + 1, in: box).x) }
+        #expect(near(LevelMapView.padCenter(4, in: box).x, LevelMapView.padCenter(5, in: box).x))
+        #expect(LevelMapView.padCenter(5, in: box).y > LevelMapView.padCenter(4, in: box).y)
+        var d = ProgressData()
+        #expect(LevelMapView.pathReach(d, world: 1) == 0)
+        for id in 1...6 { _ = LevelRules.record(&d, id: id, stars: 2) }
+        #expect(LevelMapView.pathReach(d, world: 1) == 6)
+        #expect(!LevelMapView.path(in: box).isEmpty)
+    }
+
+    /// R9 (frames 08, 62: a perfect pilot scored 0 on Level 1): a level's demo pilot reads the level's goal.
+    @Test func aLevelsDemoPilotReadsItsGoal() throws {
+        let spec = try #require(LevelBridge.spec(5))
+        let p = DemoRunner.pilot(skill: .perfect, seed: 7, mode: .level(5))
+        #expect(p.minBite == spec.goal.biteOf)
+        #expect(p.targets == spec.goal.species)
+        let feed = DemoRunner.pilot(skill: .perfect, seed: 7, mode: .feed)
+        #expect(feed.minBite == 0)
+        #expect(feed.targets.isEmpty)
+        // Played the way the levelResults demo plays it (in half-second slices with one pilot), Level 1 passes.
+        let size = CGSize(width: ScreenLayout.canvasWidth, height: ScreenLayout.canvasHeight)
+        let session = try #require(LevelBook.session(id: 1, geometry: TrapGeometry(sceneSize: size)))
+        var pilot = DemoRunner.pilot(skill: .perfect, seed: session.seed &+ 101, mode: session.mode)
+        var played = 0.0
+        while played < 120 && !session.isFinished {
+            played += DemoRunner.play(session, pilot: &pilot, seconds: 0.5)
+        }
+        let one = try #require(LevelBridge.spec(1))
+        let result = session.partialResult()
+        #expect(result.bugsCaught >= 1)
+        #expect(LevelBridge.evaluate(result, one).passed)
+    }
+
+    /// R9: Settings' About is true on every iPhone; Settings' lesson button is Level 1.
+    @Test func settingsSpeakBothControls() {
+        #expect(SettingsView.aboutLine.contains("close the phone to bite"))
+        #expect(SettingsView.aboutLine.contains("tap to snap"))
+        #expect(SettingsView.replayLesson == "Replay Level 1")
     }
 }

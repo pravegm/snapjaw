@@ -18,7 +18,7 @@ If the launch moves (the fallback is Tue 12 Jan 2027), tell Claude: the Publish 
 |---|---|---|
 | Nomination Name | `Snapjaw - App Launch - iPhone Duo Venus flytrap game` | 52 / 60 |
 | Nomination Type | **App Launch** | — |
-| Description | the block below | **971 / 1,000** |
+| Description | the block below | **937 / 1,000** |
 | Publish Date | **Specific day: 2026-12-08** | — |
 | Related Apps | Snapjaw only (auto-filled). Don't add Squish, Brim, Swoop or Hush: they have their own nominations | up to 10 |
 | Platforms | iOS | — |
@@ -26,29 +26,29 @@ If the launch moves (the fallback is Tue 12 Jan 2027), tell Claude: the Publish 
 | Localizations | leave the auto-selection (English (U.K.), English (U.S.)) | — |
 | In-App Events | none | — |
 | Supplemental Materials | 1. `https://pravegm.github.io/snapjaw/` 2. the teaser clip (`social-launch.md` §3A) once it exists, added by editing the nomination 3. the TestFlight public link (only if you open external testing) | up to 5 URLs |
-| Helpful Details | the block below | **470 / 500** |
+| Helpful Details | the block below | **453 / 500** |
 
 ### Description
 ```
-Snapjaw turns iPhone Duo into a Venus flytrap. Hold the Duo open like a book: the two halves are the trap's lobes and the hinge is its midrib. Bugs land on the glistening nectar to sip; snap the phone a little shut and the trap bites with you, teeth clacking together, then open it again.
+Snapjaw turns iPhone Duo into a Venus flytrap. The phone is the trap: open it and the lobes open, the hinge is the midrib, and bugs land on the glistening nectar to sip. Close the phone and the trap closes with it: CHOMP. While it is shut, the outer display shows the catch; open it again to keep feeding.
 
-It's a game of choosing, not hitting. Wait for a crowd and catch them all in one bite, for a score multiplied by the number of bugs, but bees love nectar too and must never be eaten. Snaps are the resource, and big bites earn them back. Every run passes from morning to night with new bugs, from houseflies to dragonflies and fireflies, and a Bug Book of 16 species to fill.
+It's a game of choosing, not hitting. Wait for a crowd and catch them all in one bite, close decisively or the flies escape, and never eat a bee. 30 hand-made levels across Morning Bog, Dusk and Night teach it, then test it, with up to three stars each. Endless runs pass from morning to night with new bugs, and a Bug Book of 16 species waits to be filled.
 
-Three goals at a time grow your plant through 12 ranks, and a Garden of 8 flytraps rewards them. A Daily Bog with a streak, a Zen Bog that never ends, a First Bite lesson and Game Center. Other iPhones play by tapping. Every sound is synthesized in the app. No ads, no in-app purchases, no data collected.
+Three goals at a time grow your plant through 12 ranks and a Garden of 8 flytraps. A Daily Bog with a streak, a Zen Bog that never ends, and Game Center. Other iPhones play by tapping. Every sound is synthesized in the app. No ads, no in-app purchases, no data collected.
 ```
 
 ### Helpful Details
 ```
-Optimized for iPhone Duo: built for book pose on the inner display. Public iOS 27.1 hinge API: a snap is a short close of about 22 degrees from the player's own resting angle, never flat and never shut, and the bite fires at 22 degrees, so closing further gains nothing. The score stays on the half that doesn't blur when a fold starts from flat. Snaps are a limited resource, so patience beats folding often. Taught by doing. Also from us: Squish, Brim, Swoop and Hush.
+Optimized for iPhone Duo. Public iOS 27.1 hinge API, read literally: open phone, open trap. The bite fires as the halves meet; a partial close never bites and force is never measured, so a gentle close works. Every round starts closed, any pose plays (landscape or portrait) and the outer display shows a CHOMP card while shut. Bites are limited, so patience beats closing often. Levels 1 to 5 teach by doing. Also from us: Squish, Brim, Swoop and Hush.
 ```
 
-**Why this copy:**
+**Why this copy (R9, the R8 game: 937 / 1,000 and 453 / 500, counted with Node):**
 - **New hardware first:** the opening line, and "Optimized for iPhone Duo" in Helpful Details (Apple's Duo guidance asks for exactly that phrase).
-- **The fantasy in one image:** the phone's halves are the trap's lobes and the hinge its midrib. It's literally what a flytrap is.
-- **The difference from the free toys, without naming them:** "a game of choosing, not hitting", crowds, bees to spare, a snap economy. Never "smash".
-- **Built for the real device:** a relative snap that follows the player's own pose, the HUD on the sharp half, the bite decided at 22° so nobody is tempted to close it further. Editors look for apps that handle the Duo's quirks, not just its hinge.
-- **Craft:** synthesized sound, a lesson that teaches by doing.
-- **Replayability (R6):** goals that grow the plant, the Garden of 8 flytraps, the Daily streak, the Zen Bog, endless runs through a day cycle, the Bug Book, plant ranks, Game Center.
+- **The fantasy in one image, now literal:** the phone is the trap. Open = open, closed = the bite; the outer display carries the CHOMP. Editors look for apps that use both screens and the hinge honestly.
+- **The difference from the free toys, without naming them:** "a game of choosing, not hitting", crowds, bees to spare, a bite economy, 30 levels. Never "smash".
+- **Built for the real device:** the bite at the shut (so no force, no "slam"), every round starting closed, no pose demands, the cover display used for the result.
+- **Craft:** synthesized sound, levels that teach by doing.
+- **Replayability:** 30 levels with stars, goals that grow the plant, the Garden of 8 flytraps, the Daily streak, the Zen Bog, Endless through a day cycle, the Bug Book, Game Center.
 - **Reach:** tap to snap on other iPhones (iOS 18 or later). No VoiceOver claim, because that label isn't earned (`accessibility.md`).
 - **No ads:** the last line.
 

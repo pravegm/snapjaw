@@ -68,7 +68,8 @@ struct LevelSpec: Equatable, Sendable, Identifiable {
     /// 1 Morning Bog, 2 Dusk, 3 Night.
     var world: Int
     var title: String
-    /// The intro card's one line ("Catch 2 flies. Shut it fast").
+    /// The intro card's one line ("Catch 2 flies"). R9: short (≤ ~24 characters, the in-play badge) and input-neutral
+    /// (no "shut", "close", "tap", "lid" or pose: App's LevelWords makes the words right for a phone or a Duo).
     var goalText: String
     var goal: LevelGoal
     /// Biting a bee, bumblebee or wasp fails the level at once.
@@ -85,6 +86,9 @@ struct LevelSpec: Equatable, Sendable, Identifiable {
     /// The wave the bugs' reactions use (TrapRules.lateFactor: before noon the sleepy morning, then faster from 30).
     var paceWave: Int
     var bugs: [LevelBug]
+    /// R9: the level's calm: every catchable bug's reaction (flee time) × this (TrapRules.reactionScale; protected bugs
+    /// never change). 1 = as the pace wave says; Level 1's sleepy fly is 2.5, so no close, however slow, loses it.
+    var reactionScale: Double = 1
 
     /// "Morning Bog", "Dusk", "Night".
     var worldName: String { return LevelBook.worldName(world) }
@@ -209,7 +213,7 @@ enum LevelBook {
                 line = "You bit a bee. Wait for it to go"
             } else if !inTime || (level.timeLimit != nil && !goalMet
                                   && result.seconds >= (level.timeLimit ?? 0) - 1e-6) {
-                line = "Out of time. Shut it faster"
+                line = "Out of time. Bite sooner"
             } else if let b = level.biteLimit, result.snaps >= b {
                 line = "Out of bites. Wait for a crowd"
             }

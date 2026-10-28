@@ -1,57 +1,56 @@
 # Snapjaw: App Review notes (v1.0)
 
-*Written Tue 27 Oct 2026 by the launch lead from the design (`design/GAME-DESIGN.md` §3–§9, `design/ROUND-1.md`); the build doesn't exist yet. The block between the markers is what App Review reads. Apple limits the field to 4,000 bytes; the block is plain ASCII (no smart quotes, no degree sign, no multiplication sign), so bytes = characters: **3,993 bytes** (R6 rewrite, 28 Oct: ×5 chain, 14 snaps at most, 12–14 to start in the first three runs, "Score on the left", and the goals, the Garden, the Zen Bog, the streak and Share) (counted with Node; the ported `tools/appstore/build-metadata.js` fails over 4,000). Before submission, tick the "Check against the build" table at the end; if a line is false, change the block, never the build to match the words.*
+*First written Tue 27 Oct 2026 by the launch lead. **R9 rewrite (Wed 28 Oct 2026, store lead):** the notes now describe the R8 game (`design/ROUND-8.md`): the phone is the trap, the bite fires as the phone closes, every round starts closed, no pose demands, 30 Levels (Levels 1–5 teach; the First Bite lesson is gone), Endless, Daily, Zen. The block between the markers is what App Review reads. Apple limits the field to 4,000 bytes; the block is plain ASCII (no smart quotes, no degree sign, no multiplication sign), so bytes = characters; `tools/appstore/build-metadata.js` prints the count and fails over 4,000 or on any non-ASCII character. Before submission, tick the "Check against the build" table at the end; if a line is false, change the block, never the build to match the words.*
 
 ## Where this goes
 
 App Store Connect → the app → the **1.0** version page → **App Review Information**. **The App Store Connect tool sets all of it** (`asc.yml`, step `review`, from `docs/appstore/asc-metadata.json`): nobody pastes anything.
 - **Sign-in required:** unticked (there are no accounts).
-- **Contact:** the founder's first name, last name, phone and email, read at run time from Squish's App Store Connect record and masked in every log (Swoop's `tools/appstore/README.md`, "Personal data"). Never in the repo.
+- **Contact:** the founder's first name, last name, phone and email, read at run time from Squish's App Store Connect record (`inherit_from: com.pravegm.squish`) and masked in every log. Never in the repo.
 - **Notes:** the block below.
-- **Attachment (optional):** a 20–30 s phone video of the Duo held like a book: bugs landing, one snap of about 22 degrees catching a crowd, the trap opening again, a bee being waited out. The notes don't depend on it; the tool doesn't upload one.
+- **Attachment (optional, recommended for a hinge game):** a 20–30 s phone video of a real Duo: open it, bugs land, close it (the CHOMP card on the outer display), open again, a bee waited out. The founder can add it in App Store Connect; the tool doesn't upload one.
 
 <!-- REVIEW-NOTES:BEGIN -->
 ```
-Thanks for reviewing Snapjaw: a paid game with no ads, no in-app purchases, no accounts, no data collection and no network requests of its own.
+Thanks for reviewing Snapjaw: a paid game with no ads, no in-app purchases, no accounts, no data collection and no network requests of its own. Nothing needs a login or a demo account.
 
 1. TESTING WITHOUT AN iPHONE DUO (start here)
-You don't need a Duo. It all works on any iPhone, iPad (as an iPhone app) and the Simulator, in landscape.
+You don't need a Duo. The whole game works on any iPhone and in the Simulator, by touch.
 - Control: tap anywhere to snap the trap. It opens again by itself.
-- The first launch starts First Bite, a short lesson: tap while the fly is sipping. Skip appears after the second step; Settings > Replay First Bite plays it again.
-- Quickest look (about a minute): two lesson steps, Skip, then Feed on Home.
-- In Feed, bugs land on the gold nectar drops. A tap catches every bug inside the trap at once. Score = the bugs' points x the number of bugs x the chain (up to x5, grown by bites of 2+ bugs), so waiting for a crowd pays.
+- Home: Play starts the next level (Level 1 first). Also Endless, Daily, Zen, Levels (the map), Bug Book, Garden, Settings.
+- Quickest look (3 minutes): Play (Level 1: one fly, tap while it sips), Level 2, then Home > Endless.
+- Bugs land on the gold nectar drops. A tap catches every bug inside the trap. Score = points x bugs x chain (up to x5), so waiting for a crowd pays.
 - Bees, bumblebees and wasps wear a white halo. Never eat them: a bee in a bite is let go unharmed and costs an extra snap.
-- A run starts with 10 snaps (12 to 14 in a new player's first three runs), holds at most 14, and each snap costs 1. 3+ bugs in one bite (a Feast) earns snaps back. At 0, "Your trap is tired" and the results show the score.
+- Endless: 12 snaps to start (up to 14 in a new player's first runs), 14 at most, 1 per bite; 3+ bugs in one bite (a Feast) earn snaps back. At 0, "Your trap is tired" and the results show.
+- Levels: 30 in 3 worlds (Morning Bog, Dusk, Night), each with one goal, a bite limit and 1 to 3 stars. They open in order; 20 stars open Dusk, 40 the Night. Levels 1 to 5 teach one idea each; no forced tutorial. Later levels are meant to be hard.
 
 2. HOW THE HINGE IS USED (iPhone Duo)
-Snapjaw reads the hinge angle only through the public iOS 27.1 API (SwiftUI onHingeChange), behind an availability check. No private API. The angle is used only while playing and is never sent anywhere.
-a) Hold the Duo open like a book (landscape, fold top to bottom), relaxed, anywhere from about 135 to 175 degrees. The game follows the player's own resting angle.
-b) To snap, close the halves about 22 degrees from that rest, then open again. The bite is decided at 22 degrees, so going further gains nothing and nothing is held. A very slow close never bites and lets twitchy bugs leave.
-c) The score, snaps and hints sit on the right half, which stays sharp when iOS briefly softens one half as a fold starts from flat. Settings > Score on the left moves them.
-d) Below about 50 degrees for half a second, the run pauses with a card. Closed, the outer display shows a card. Portrait shows a pose card.
-e) Nearly flat only shows a hint: "Bend it a little, like a book". No penalty.
+Snapjaw reads the hinge angle and status only through the public iOS 27.1 API (SwiftUI onHingeChange), behind an availability check. No private API. They are used only while playing and are never stored or sent anywhere.
+a) The phone is the trap: open phone, open trap. Every round starts closed: if the Duo is open, the screen says "Close the phone to start"; open it again and the bugs come.
+b) To bite, close the phone. The bite fires once, as the halves meet (about 18 degrees, or when iOS reports it closed). A partial close never bites. Opening re-arms the trap.
+c) While shut, the run is frozen and the outer display shows a CHOMP card with the catch and "Open to keep feeding".
+d) Any pose plays (landscape, portrait, any angle). No pose card, no penalty.
+e) The score sits on the right half; Settings > Score on the left moves it.
 
 3. KIND TO THE DEVICE (Guidelines 2.4.2 and 1.4.5)
-- Every snap is a short stroke of about 22 to 40 degrees from a relaxed book pose. Snapjaw never asks the user to close the phone, lay it flat or slam it.
-- Snaps are limited (10 to start, 14 at most), so the game rewards waiting, not snapping often: a run is about 25 to 40 snaps over 2 to 3 minutes. The Zen Bog has no limit and no timer.
-- No achievement, goal or leaderboard rewards snap speed or snap count.
+- A bite is closing the phone, the ordinary way a foldable is closed every day. Force is never measured: the bite fires as the halves meet, so a gentle close catches as much as a hard one. Nothing asks the player to slam, shake or press the phone.
+- Bites are limited (12 snaps to start, 14 at most; each level has a bite limit), so the game rewards waiting, not closing often. The Zen Bog has no limit and no timer.
+- Flies flee a slow, hesitant close, but no score, achievement or leaderboard rewards closing speed or the number of closes.
 
 4. MODES AND PROGRESS (nothing hidden, nothing to buy)
-- Feed: endless waves from morning to night, until the snaps run out.
-- Daily Bog: the same bugs for everyone; one scored try a day, then practice. A streak counts the days in a row; Share opens the iOS share sheet with one line (score, biggest bite, streak).
+- Endless: waves from morning to night, until the snaps run out.
+- Daily Bog: the same bugs for everyone; one scored try a day, then practice; a streak; Share opens the iOS share sheet with one line of text.
 - Zen Bog: relaxed and endless; snaps never run out, nothing wilts, no leaderboard. Pause > End shows the results.
-- Goals: three at a time on Home, from 39. A completed goal grows the plant rank and is replaced.
-- Garden: 8 cosmetic flytraps, unlocked by rank or by a goal. Same rules.
-- Bug Book: 16 species. Plant rank: 12 cosmetic ranks.
+- Goals: three at a time on Home (shown once you have played a little), from 39. Garden: 8 cosmetic flytraps. Bug Book: 16 species. 12 cosmetic plant ranks.
 
 5. CONTENT
-A cartoon Venus flytrap catching cartoon bugs, the way a frog catches flies. No blood or injury: caught bugs are gulped into the trap, and bees and wasps are always let go unharmed.
+A cartoon flytrap catching cartoon bugs, the way a frog catches flies. No blood or injury; bees and wasps are always let go unharmed.
 
 6. PRIVACY
-No third-party SDKs, analytics, ads, accounts or tracking. Progress and settings stay on the device; Share sends nothing itself. App Privacy: Data Not Collected.
+No SDKs, analytics, ads or tracking. Progress stays on the device; Share sends nothing itself. App Privacy: Data Not Collected.
 
 7. GAME CENTER
-Optional. 2 leaderboards (Best Score, Daily Bog; Zen submits none), 12 achievements (575 points), none hidden.
+Optional. 2 leaderboards (Best Score from Endless, and the Daily Bog; Zen and Levels submit none), 12 achievements (575 points), none hidden.
 
 8. OTHER
 - No notifications. Debug and demo modes are disabled in Release builds.
@@ -61,51 +60,42 @@ Optional. 2 leaderboards (Best Score, Daily Bog; Zen submits none), 12 achieveme
 
 ## Check against the build (before submission)
 
-**Code: not written yet** (27 Oct). Tick "Code" when Round 1 compiles, and **RC** on the build that is submitted.
+**R9 (28 Oct):** "Code" ticked where the R8 source says so (read on this host; not compiled here). Tick **RC** on the build that is submitted (the founder's real-Duo pass and one regular-iPhone pass).
 
-| Claim in the block | Source in the code (expected) | Code | RC |
+| Claim in the block | Source in the code | Code | RC |
 |---|---|---|---|
-| Tap anywhere snaps on a phone without a hinge; the trap reopens by itself (0.35 s) and re-arms after 0.45 s | `Input/TouchTrapSource.swift`, `Tuning.touchRearmDelay`; `BogScene.touchesBegan` → `GameController.sceneTapped` | [ ] | [ ] |
-| First Bite runs on the first launch; **Skip** only after step 2; Settings **"Replay First Bite"**; on phones the pose step is skipped and steps say "Tap to snap" | `App/` lesson script, `UI/SettingsView.swift` | [ ] exact labels | [ ] |
-| Home has **Feed**, **Daily Bog**, **Zen Bog**, **Garden**, **Bug Book**, Settings, and the **Goals** card | `UI/HomeView.swift` (R6) | [x] src labels | [ ] |
-| Score = points × count × chain; the chain to ×5, grown only by clean bites of 2+ bugs; 10 snaps (14 / 13 / 12 in the first three Feed runs), max 14; Feast refunds; bee +1, wasp +2; **"Your trap is tired"** | `Core/TrapSession.swift`, `Core/Tuning.swift` (`chainMaxMultiplier` 5, `chainMinBite` 2, `maxSnaps` 14, `firstRunSnaps` 14, `sproutRun2Snaps` 13, `sproutRun3Snaps` 12) | [x] src | [ ] |
-| Bees, bumblebees and wasps wear a white "protected" halo ring | `Scene/` (ROUND-1 Scene brief) | [ ] | [ ] |
-| Public `onHingeChange` only, behind `#available(iOS 27.1, *)`; the angle is never sent; nothing about the angle is saved (if a rest angle is ever persisted, add "only the usual resting angle is saved, on the device", as Swoop's notes do) | `Input/HingeReader.swift`, `Persistence/SettingsStore.swift` | [ ] grep | [ ] |
-| Rest reference follows the player; snap at 22° (`Tuning.snapDepth`); no hold; creep makes twitchy bugs leave | `Core/SnapDetector.swift`, `Core/Tuning.swift` | [ ] update if tuning moves them | [ ] |
-| HUD on the right half by default; Settings **"Score on the left"** | `ScreenLayout.hudOnLeft`, `SettingsView.hudSideTitle` | [x] src label | [ ] |
-| Closing pause below 50° for 0.6 s with a card asking to open it like a book; cover-display card when shut; portrait pose card | `Tuning.closingAngle` / `closingDwell`, `UI/PoseCards.swift` | [ ] exact wording | [ ] |
-| Too flat (≥ 174°): hint **"Bend it a little, like a book"**, no penalty | `TrapHint.bendALittle`, `Tuning.tooFlatAngle` | [ ] exact wording | [ ] |
-| Never uses `status == .closed` in play (CLAUDE.md: it turns on at about 85° on hardware) | every `.closed` in `Snap/` is a pose enum; `HingeReader` reads only the angle | [ ] | [ ] |
-| A run is about 25–40 snaps over 2–3 minutes (casual) | `BalanceTests` `SNAP-BAL` table (casual 90–240 s, 18–45 snaps: ROUND-1) | [ ] update the numbers from the table | [ ] |
-| No achievement or leaderboard rewards snap speed or count; `fastestSnap` is not shown or reported | `Core/Achievements` (`achievements.md`), `App/GameCenterManager.swift` | [ ] | [ ] |
-| Daily: one scored try that counts, then practice; the streak; **Share** opens the iOS share sheet with one line, scored Daily only | `RunMode.daily(day:scored:)`, `UI/DailyView.swift`, `ProgressRules.dailyStreak`, `ResultsView.shareText` (`ShareLink`) | [x] src | [ ] |
-| Zen Bog: snaps never run out, no wilts, no leaderboard; pause **End** → Results | `SessionOptions.for(.zen)`, `GameCenterManager.report` (`.zen`: no score), `PlayHUD.zenEnd` | [x] src | [ ] |
-| Goals: three at a time, pool of 39; a completed goal grows the rank and is replaced | `Tuning.goalsActive`, `GoalBook.pool`, `GoalBook.complete` | [x] src | [ ] |
-| Garden: 8 cosmetic varieties, unlocked by rank or goal; rules identical | `Varieties.all`, `GardenView` | [x] src | [ ] |
-| "Zen has no timer": no hunger, no countdown in Zen | `SessionOptions.for(.zen)` (`hunger` false) | [x] src | [ ] |
-| Bug Book 16 species (drawing, joke, count); 12 plant ranks, cosmetic | `BugCatalog.all`, `PlantRanks`, `UI` Bug Book | [ ] | [ ] |
-| Caught bugs are gulped, no blood or injury; bees released unharmed | `Scene/` juice FX (`metadata.md` §11 ask 1) | [ ] | [ ] |
-| 2 leaderboards (Zen submits none), 12 achievements, 575 points, none hidden | `achievements.md`, `App/GameCenterManager.swift` | [x] src | [ ] |
-| Setting **"Respect silent switch"**, default off; `.playback` category | `Feedback/`, `UI/SettingsView.swift` | [ ] exact label | [ ] |
-| No notifications, no rating prompt | no `UNUserNotificationCenter` / `requestReview` / `SKStoreReview` in `Snap/` | [ ] (if a rating prompt is added, add: "A one-time rating prompt may appear on a results card, never mid-run.") | [ ] |
-| Debug and demo modes disabled in Release (`-snapDemo` and `SNAP-` logs are DEBUG only) | `App/DemoMode.swift` (`#if DEBUG`), the TestFlight workflow's archive check | [ ] | [ ] |
+| Tap anywhere snaps on a phone without a hinge; the trap reopens by itself | `Input/TouchTrapSource.swift` (instant bite, `Tuning.touchRearmDelay` 0.45) | [x] src | [ ] |
+| Home: Play = the next level (Level 1 first); Endless, Daily, Zen; Levels, Bug Book, Garden, Settings | `UI/HomeView.swift` labels; `GameController.play()` = `LevelRules.next`; every launch opens on Home (`design/notes/app-R8.md`) | [x] src | [ ] |
+| Level 1 is one fly and passable by a tap | `LevelData.swift` L1 (catch 1, 3 bites) | [x] src | [ ] **R8 CI's perfect pilot logged `level result 1 stars=0`: play it by hand on the RC** |
+| Score = points × count × chain (to ×5); 12 snaps (14 / 13 / 12 in the first three Endless runs), max 14; Feast refunds; bee +1, wasp +2; "Your trap is tired" | `Core/Tuning.swift` | [x] src | [ ] |
+| 30 levels, 3 worlds, goal + bite limit + 1–3 stars; 20 / 40 stars open Dusk / Night | `LevelData.swift`, `LevelBook.worldUnlockStars` | [x] src | [ ] |
+| Public `onHingeChange` only, behind `#available(iOS 27.1, *)`; angle + status never stored or sent | `Input/HingeReader.swift` | [x] src | [ ] |
+| Every round starts closed: "Close the phone to start" | `TrapSnapshot.waitingForClose`, `LevelViews.CloseToStartCard` | [x] src | [ ] exact wording on the Duo |
+| The bite fires at the shut (θ ≤ 18°, or `.closed` with θ ≤ 25°); a partial close never bites; re-arm at 35° | `SnapDetector`, `Tuning.shutAngle` / `statusShutAngle` / `armAngle` | [x] src | [ ] |
+| While shut: clock frozen; the outer display's CHOMP card, "Open to keep feeding" | `TrapSnapshot.shut`, `UI/ChompCard.swift` | [x] src | [ ] |
+| Any pose plays; no pose card | `AppRules.pose` (`AppPose` is `play` / `cover`), `PoseCard` deleted (`design/notes/portrait-R8.md`) | [x] src | [ ] |
+| Settings **"Score on the left"**, **"Respect silent switch"** | `UI/SettingsView.swift` | [x] src | [ ] |
+| No achievement or leaderboard rewards close speed or count | `achievements.md` = `Achievements.all` | [x] src | [ ] |
+| Daily: one scored try, practice; streak; **Share** (scored Daily only) | `RunMode.daily(day:scored:)`, `ResultsView` `ShareLink` | [x] src | [ ] |
+| Zen: snaps never run out, no wilts, no leaderboard; pause **End** | `SessionOptions.for(.zen)`, `GameCenterManager.report` | [x] src | [ ] |
+| Levels submit no score | `GameCenterManager.report` (`.level`: none, `design/notes/app-R8.md`) | [x] src | [ ] |
+| 2 leaderboards, 12 achievements, 575 points, none hidden | `achievements.md` | [x] src | [ ] |
+| No notifications, no rating prompt | no `UNUserNotificationCenter` / `requestReview` in `Snap/` (grep, 28 Oct) | [x] src | [ ] |
+| Debug and demo modes disabled in Release | `App/DemoMode.swift` (`#if DEBUG`) | [x] src | [ ] |
 
 ## If rejected under 2.4.2 (hardware) or 1.4.5 (physical harm)
 
 Reply in the Resolution Center, calmly and specifically:
-> "Snapjaw never asks users to close the phone, lay it flat or slam it. A snap is a short stroke of about 22 degrees from whatever relaxed book pose the player holds, in the middle of the hinge's range; the bite is decided at 22 degrees, so there is nothing to gain by closing further or harder, and nothing has to be held. Snaps are a limited resource in the game (10 to start, 14 at most), so the design rewards waiting for the right moment rather than folding often: a typical run is 25 to 40 snaps, fewer than turning the pages of a short book. No score, achievement or leaderboard rewards snap speed or snap count. Nothing is ever placed on the device. Any iPhone without a hinge plays the full game by tapping the screen."
-
-(If the founder chose to build "Play with touch" on the Duo, `metadata.md` §11 ask 6, add: "and on iPhone Duo, Settings > Play with touch plays the whole game by tapping.")
+> "Snapjaw's bite is simply closing the phone, the way a foldable is closed many times a day. The game never measures force: the bite fires as the halves meet, so a gentle close catches exactly as much as a hard one, and nothing asks the player to slam, shake or press the device. Bites are a limited resource (12 to start, 14 at most in Endless; each level has a small bite limit), so the design rewards waiting for the right moment rather than closing often. No score, achievement or leaderboard rewards closing speed or the number of closes. Any iPhone without a hinge plays the full game by tapping the screen."
 
 ## If rejected under 2.1 (couldn't use the hinge)
 
-Point to §1: the full game is playable without a Duo, by tapping. Offer the phone video attachment.
+Point to §1: the full game is playable without a Duo, by tapping. Offer the Duo video attachment.
 
 ## If rejected under 4.2 or 2.3 (minimum functionality / accurate metadata)
 
-Point to §4 and the 12 achievements: an endless mode with a day cycle and 16 species, a daily mode with a streak, a relaxed Zen Bog, 39 goals, a Garden of 8 flytraps, a Bug Book and 12 plant ranks, and a tutorial; the store copy and screenshots show only what the build does (`screenshots.md` truthfulness rules). The difference from free "snap shut on bugs" toys is the point: choosing when to bite, crowds, bees to spare and a snap economy.
+Point to §4: 30 hand-made levels in three worlds with stars, an endless mode with a day cycle and 16 species, a daily mode with a streak, a relaxed Zen Bog, 39 goals, a Garden of 8 flytraps, a Bug Book and 12 plant ranks; the store copy and screenshots show only what the build does (`screenshots.md` truthfulness rules).
 
 ## Sources
 - App Review Guidelines (2.1, 2.3, 2.4.2, 1.4.5, 4.2): https://developer.apple.com/app-store/review/guidelines/
 - App Store Connect Help, *Platform version information* (App Review notes up to 4,000 bytes): https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information
-- Swoop's submitted notes (structure mirrored): `C:\Users\59527\Wing\docs\appstore\review-notes.md`
