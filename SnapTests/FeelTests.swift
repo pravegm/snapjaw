@@ -1090,12 +1090,16 @@ struct FeelTests {
         hinge.run(0.5) { t in 160 - 25 * min(t / 0.12, 1) }
         #expect(hinge.source.snapsFired == 1)
         // Open fast past the rest (to 172°), settle back to 165° and hold: nobody is closing the trap.
+        // Only the frames after the snap count (the snap itself legitimately reaches 25° of closure; CI 40611262935).
+        // The rise itself still starts at the snap's 25° closure, so the window starts once the trap is back open.
         hinge.run(0.3) { t in 135 + 37 * min(t / 0.25, 1) }
+        let reopenStart = hinge.inputs.count
         hinge.run(0.4) { t in 172 - 7 * min(t / 0.35, 1) }
         hinge.run(3.0) { _ in 165 }
-        let calm = hinge.inputs.allSatisfy { !$0.creeping }
+        let reopen = Array(hinge.inputs[reopenStart...])
+        let calm = reopen.allSatisfy { !$0.creeping }
         #expect(calm)
-        let deepest = hinge.inputs.map { $0.closure }.max() ?? 99
+        let deepest = reopen.map { $0.closure }.max() ?? 99
         #expect(deepest < Tuning.creepDepth)
         #expect(hinge.inputs.last?.armed == true)
         #expect(hinge.source.snapsFired == 1)
