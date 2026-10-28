@@ -62,3 +62,8 @@ and Hush (`C:\Users\59527\Lid`). Never modify them. Reuse their lessons and code
 - `#expect(x.mutatingMethod())` doesn't compile, because the macro captures `x` immutably. Call it first:
   `let r = x.mutatingMethod(); #expect(r)`.
 - Compare `CGFloat` with a typed constant and a tolerance, never with literal arithmetic.
+
+## CI rule learned the hard way (28 Oct)
+- **Run `duo.yml` alone.** The `xcode-27` runner is shared, and every Duo simulator death (R2–R5 runs) came with
+  another Mac job (CI or store) running beside it: host load ~800, the simulator starved and shut down. Start a Duo
+  run only when no other macOS workflow is in progress, and push nothing under `Snap/` while it runs.
