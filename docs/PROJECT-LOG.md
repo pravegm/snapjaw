@@ -47,3 +47,4 @@
   - Sim: novice run 1 105 s, casual 147 s with 0 wilts, expert 3 wilts.
   - CI fixes: an ambiguous `.nan`, a stale floor test, the cap rule, the face colour tolerance.
   - **CI 40634463943: 283 tests green**, and all 43 frames froze on their moments.
+- Duo R4 run 40634483657: **SNAP PASS from the real hinge** (d 0.264 s: caught 2, escaped 4, one bee), REARM, CREEP and CLOSE-PAUSE PASS (paused at 42.8°, resumed at 120.1°). The simulator still died twice later (the rig).

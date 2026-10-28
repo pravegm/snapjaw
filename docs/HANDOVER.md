@@ -45,8 +45,8 @@ collected, rated 4+.
   | Icon | — | 8 |
 
   Fresh players rated "feels finished" 6–7.
-- **Duo simulator:** the hinge-driven snap has caught bugs (R1: 10 caught). The 951×669 Duo frames look right. Later
-  simulator runs kept crashing mid-sweep; that's the CI rig, and it's being hardened.
+- **Duo simulator:** on the R4 build (run 40634483657) every hinge check passed: the snap fired from the real hinge (a 0.26 s sweep caught 2, 4 escaped, and a bee was bitten), re-arm, creep, and the pause under 50° that resumes at 120°. The 951×669 Duo frames look right. The
+  simulator still crashes later in a run; that is the CI rig, and it is being hardened.
 - **Your real Duo is the last proof:** nobody has snapped a real hinge yet.
 - **Store kit ready:** the listing, keywords, review notes, privacy answers, achievements, press kit and site pages
   (`docs/appstore/`, `docs/site/`). The App Store Connect upload tool and the screenshot pipeline are ported from
