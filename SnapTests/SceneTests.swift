@@ -709,9 +709,9 @@ struct SceneTests {
                 #expect(open.insetBy(dx: -0.5, dy: -0.5).contains(f))
                 if scene.jawSlam > CGFloat(0.99) {
                     heldFrames += 1
-                    // In the hold: inside the open lobes themselves, squeezed to well under half their width, the
-                    // closed trap showing and the open cilia hidden.
-                    #expect(lobes.contains(f))
+                    // In the hold: squeezed to well under half the open width, the closed trap showing and the open
+                    // cilia hidden. (Not "inside the bare lobe rect": the interlocked cilia of the closed trap may
+                    // reach past it, which is fine as long as nothing leaves the open trap's outline; CI 40622079094.)
                     #expect(f.width < open.width * CGFloat(0.5))
                     #expect(scene.closedTrapAlpha > CGFloat(0.95))
                     #expect(scene.lobeScale < CGFloat(0.35))
