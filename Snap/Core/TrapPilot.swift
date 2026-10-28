@@ -138,6 +138,12 @@ struct TrapPilot {
         return pick(profile.closeMin, profile.closeMax)
     }
 
+    /// R9 (core-R9): the first close drawn like every other, not the profile's fastest (the sim's levelTable does the
+    /// same). Level balance runs only: the CI demo pilots keep the default, so their seeded runs don't move.
+    mutating func drawFirstClose() {
+        plannedDuration = planDuration()
+    }
+
     /// A protected bug sitting in the trap (landed): what a shoo can clear.
     private func beeSitting(_ snap: TrapSnapshot) -> Bool {
         for b in snap.bugs where b.species.isProtected && b.inTrap {

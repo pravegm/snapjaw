@@ -694,6 +694,77 @@ struct LayoutTests {
         }
     }
 
+    /// R9 (Duo frame duo-h2-reopened-150: "SNAPS" sat on a 24 pt "12" that ran into the rows): the snaps numeral,
+    /// its "SNAPS" label and the glyph rows never overlap one another, and each clears the cilia and the fold, on the
+    /// Duo in book pose (with and without insets), the portrait Duo, a 6.3" and a 6.9" iPhone and an iPhone SE.
+    @Test func snapsNumeralLabelAndRowsNeverOverlap() {
+        let book = CGSize(width: 951, height: 669)
+        let upright = CGSize(width: 669, height: 951)
+        let phone63 = CGSize(width: 874, height: 402)
+        let phone69 = CGSize(width: 956, height: 440)
+        let phoneSE = CGSize(width: 667, height: 375)
+        let notch = EdgeInsets(top: 0, leading: 62, bottom: 21, trailing: 62)
+        let cases: [(CGSize, EdgeInsets, Bool)] = [
+            (book, EdgeInsets(), true),
+            (book, EdgeInsets(top: 24, leading: 0, bottom: 20, trailing: 0), true),
+            (book, EdgeInsets(top: 0, leading: 0, bottom: 34, trailing: 0), true),
+            (upright, EdgeInsets(), true),
+            (upright, EdgeInsets(top: 24, leading: 0, bottom: 20, trailing: 0), true),
+            (phone63, notch, false),
+            (phone69, notch, false),
+            (phoneSE, EdgeInsets(), false),
+        ]
+        for (size, insets, fold) in cases {
+            for left in [false, true] {
+                let c = AppCanvas(size: size, insets: insets,
+                                  layout: ScreenLayout.make(viewSize: size, hasFold: fold, hudOnLeft: left))
+                let outline = c.trapOutline()
+                let l = HUDLayout.make(c)
+                let glyphs = l.glyphRects
+                #expect(glyphs.count == l.snapRows)
+                // Every glyph sits in its glyph-row rect.
+                for i in 0..<HUDLayout.slotCount {
+                    let p = l.glyphCenter(i)
+                    var inRow = false
+                    for g in glyphs where g.insetBy(dx: -0.5, dy: -0.5).contains(p) { inRow = true }
+                    #expect(inRow)
+                }
+                // The numeral's box is as tall as its digits draw (the labelled block holds its caption too).
+                if l.numeralLabeled {
+                    #expect(l.numeral.height >= HUDLayout.numeralBlockHeight(compact: c.isCompact) - tolerance)
+                } else {
+                    #expect(l.numeral.height >= HUDLayout.numeralInkHeight(size: l.numeralSize) - tolerance)
+                }
+                let numeralBox = l.numeral.insetBy(dx: 0.5, dy: 0.5)
+                for (k, g) in glyphs.enumerated() {
+                    let rowBox = g.insetBy(dx: 0.5, dy: 0.5)
+                    #expect(!numeralBox.intersects(rowBox))
+                    for other in glyphs.dropFirst(k + 1) {
+                        #expect(!rowBox.intersects(other))
+                    }
+                }
+                var drawn = [l.numeral] + glyphs
+                if let r = l.snapsLabel {
+                    #expect(!l.numeralLabeled)
+                    let labelBox = r.insetBy(dx: 0.5, dy: 0.5)
+                    #expect(!labelBox.intersects(l.numeral))
+                    #expect(!labelBox.intersects(l.chain))
+                    for g in glyphs {
+                        #expect(!labelBox.intersects(g))
+                    }
+                    drawn.append(r)
+                }
+                for rect in drawn {
+                    let clear = AppCanvas.clearance(rect, from: outline)
+                    #expect(clear >= AppCanvas.ciliaClear - 0.01)
+                    if fold { #expect(c.isFoldClear(rect)) }
+                    #expect(rect.minX >= -tolerance && rect.maxX <= size.width + tolerance)
+                    #expect(rect.minY >= -tolerance && rect.maxY <= size.height + tolerance)
+                }
+            }
+        }
+    }
+
     @Test func outlineHelpers() {
         let pts = [CGPoint(x: 10, y: 10), CGPoint(x: 40, y: 12), CGPoint(x: 90, y: 50)]
         #expect(AppCanvas.outlineReach(pts, y0: 0, y1: 20, right: true) == 40)
