@@ -17,9 +17,10 @@ struct ResultsView: View {
         ZStack {
             BogBackdrop(controller: controller,
                         glow: summary.outcome.showsNewBest ? SnapTheme.gold : SnapTheme.goldLight)
-            hero(c)
+            // R8 portrait: the other page is the top half (about 430 pt), so the hero drops its trap picture there.
+            hero(c, picture: !info.rotated)
                 .frame(width: min(other.width, 440))
-                .position(x: other.midX, y: info.size.height / 2)
+                .position(x: other.midX, y: other.midY)
             // R7 (#7, SCORE-R6: the rank card cut by the scroll in 20, 26, 27, 47, 50, P09; the Daily's goals cut
             // mid-row in 51): no scroll. The column takes the fullest layout that fits (`ViewThatFits`): every card,
             // then the stats in a grid and the "next" lines on one card, then the stats on one strip, then fewer
@@ -45,8 +46,8 @@ struct ResultsView: View {
                     .frame(width: colW)
             }
             .padding(.bottom, max(info.size.height - info.bottom, 12))
-            .frame(width: page.width, height: info.size.height)
-            .position(x: page.midX, y: info.size.height / 2)
+            .frame(width: page.width, height: page.height)
+            .position(x: page.midX, y: page.midY)
         }
         .frame(width: info.size.width, height: info.size.height)
     }
@@ -88,21 +89,23 @@ struct ResultsView: View {
 
     // MARK: The other page
 
-    private func hero(_ c: Bool) -> some View {
+    private func hero(_ c: Bool, picture: Bool) -> some View {
         let r = summary.result
         let o = summary.outcome
         return VStack(spacing: c ? 6 : 12) {
             // The trap that ate it all, as the scene paints it (REVIEW-1 #12). R4 (REVIEW-3 #16): open and 3/4 with a
             // fly sipping on it (never a centred slit), 1.4× on a patch of bog.
-            ZStack {
-                Ellipse()
-                    .fill(RadialGradient(colors: [SnapTheme.mossLight.opacity(0.75), SnapTheme.moss.opacity(0.45),
-                                                  SnapTheme.moss.opacity(0)],
-                                         center: .center, startRadius: 4, endRadius: c ? 96 : 150))
-                    .frame(width: c ? 200 : 310, height: c ? 120 : 180)
-                TrapHeroImage(variety: controller.trapVariety)
-                    .frame(width: c ? 162 : 252, height: c ? 118 : 182)
-                    .shadow(color: Color.black.opacity(0.5), radius: 12, y: 4)
+            if picture {
+                ZStack {
+                    Ellipse()
+                        .fill(RadialGradient(colors: [SnapTheme.mossLight.opacity(0.75), SnapTheme.moss.opacity(0.45),
+                                                      SnapTheme.moss.opacity(0)],
+                                             center: .center, startRadius: 4, endRadius: c ? 96 : 150))
+                        .frame(width: c ? 200 : 310, height: c ? 120 : 180)
+                    TrapHeroImage(variety: controller.trapVariety)
+                        .frame(width: c ? 162 : 252, height: c ? 118 : 182)
+                        .shadow(color: Color.black.opacity(0.5), radius: 12, y: 4)
+                }
             }
             // R8: the title in the display type, tilted like a sticker.
             DisplayText(text: summary.title, size: c ? 30 : 42, tilt: -2, minScale: 0.4)

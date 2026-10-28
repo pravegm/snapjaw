@@ -50,7 +50,7 @@ struct DailyView: View {
                 history(today: today, c)
             }
             .frame(width: min(info.otherPage.width, 420))
-            .position(x: info.otherPage.midX, y: info.size.height / 2)
+            .position(x: info.otherPage.midX, y: info.otherPage.midY)
             VStack(spacing: c ? 8 : 12) {
                 Text(Self.status(canPlay: canPlay, record: record))
                     .font(SnapType.headline(c))
@@ -79,7 +79,7 @@ struct DailyView: View {
             }
             .frame(width: min(info.hudPage.width, 360))
             .snapCard(padding: c ? 12 : 18, radius: 24)
-            .position(x: info.hudPage.midX, y: info.size.height / 2 + (c ? 12 : 16))
+            .position(x: info.hudPage.midX, y: info.hudPage.midY + (c ? 12 : 16))
             SnapRoundButton(systemImage: "chevron.backward", label: "Back") { controller.show(.home) }
                 .position(x: pause.midX, y: pause.midY)
         }

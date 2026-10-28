@@ -49,7 +49,9 @@ DR2-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=sting|90|A wasp? *Bzz
 # and FLAGGED by design: DR10 (hudLeft=1) and DR12 (the cover display is 1398 x 2034, not a Duo slot size; under a
 # '^(D[0-9]|DR)' filter store-capture.sh will also retry it as wrong-size).
 DR3-home|screen=home;progress=mid|6|Feed the *flytrap* / Spare the bees.|SNAP-T canvas|flat
-DR4-pose|screen=pose|5|The phone is the *trap* / Both halves are its jaws.|SNAP-T canvas|flat
+# DR4 (R8 portrait): `screen=pose` is now the portrait Duo laid out turned onto the book-pose capture (its log says
+# `SNAP-T canvas 669x951 … turned=1`, so REQUIRE_LOG flags it by design: review only, never a D slot as is).
+DR4-pose|screen=pose|5|Any *angle* plays / Open it like a laptop too.|turned=1|flat
 DR5-lesson-2|screen=play;mode=level;level=1;pilot=casual;fold=1;freezeOn=landed|40|Your first *bite* / Wait for it to sip, then close.|SNAP-T freeze landed|flat
 DR6-lesson-3|screen=chomp;fold=1|60|Shut is a *CHOMP* / The outer screen shows the catch.|SNAP-T chomp card|flat
 DR7-landed|screen=play;seed=7;pilot=expert;freezeOn=landed|30|A fly stops to *sip* / Let it settle in the lobes.|SNAP-T freeze landed|flat

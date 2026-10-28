@@ -66,6 +66,13 @@ enum SceneHooks {
         if scene.usesHinge != on { scene.usesHinge = on }
     }
 
+    /// R8 portrait (design/notes/portrait-R8.md): the App shows the scene turned a quarter clockwise on a portrait
+    /// canvas, so the Scene draws its word pops turned back, upright (`BogScene.textTurned`).
+    static func setTextTurned(_ scene: BogScene?, _ on: Bool) {
+        guard let scene else { return }
+        if scene.textTurned != on { scene.textTurned = on }
+    }
+
     /// R6 Garden: the play trap, Home's trap and the snap glyphs in the chosen variety (`BogScene.variety`).
     static func setVariety(_ scene: BogScene?, _ v: TrapVariety) {
         guard let scene else { return }

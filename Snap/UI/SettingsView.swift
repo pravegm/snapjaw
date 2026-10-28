@@ -14,22 +14,23 @@ struct SettingsView: View {
         ZStack {
             BogBackdrop(controller: controller)
             ScrollView(showsIndicators: false) {
+                // R8 portrait: under the back button (it sits on this, the top, page there).
                 toggles(c)
-                    .padding(.top, info.top)
+                    .padding(.top, info.columnTop(info.otherPage, back: pause))
                     .padding(.bottom, 28)
             }
             .scrollColumn()
-            .frame(width: info.otherPage.width, height: info.size.height)
-            .position(x: info.otherPage.midX, y: info.size.height / 2)
+            .frame(width: info.otherPage.width, height: info.otherPage.height)
+            .position(x: info.otherPage.midX, y: info.otherPage.midY)
             ScrollView(showsIndicators: false) {
                 // Starts under the back button (REVIEW-1 juror 11), all cards one width.
                 about(c)
-                    .padding(.top, pause.maxY + 10)
+                    .padding(.top, info.columnTop(info.hudPage, back: pause))
                     .padding(.bottom, 28)
             }
             .scrollColumn(initially: true)
-            .frame(width: info.hudPage.width, height: info.size.height)
-            .position(x: info.hudPage.midX, y: info.size.height / 2)
+            .frame(width: info.hudPage.width, height: info.hudPage.height)
+            .position(x: info.hudPage.midX, y: info.hudPage.midY)
             SnapRoundButton(systemImage: "chevron.backward", label: "Back") { controller.show(.home) }
                 .position(x: pause.midX, y: pause.midY)
         }

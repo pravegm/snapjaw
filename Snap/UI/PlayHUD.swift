@@ -34,10 +34,15 @@ struct PlayLayer: View {
         let plateHeld = toast && slot == nil && !paused
         let hintRect = slot?.rect ?? l.hint
         let inner: HorizontalAlignment = l.trailing ? .leading : .trailing
-        let hintAlign = Alignment(horizontal: inner, vertical: (slot?.low ?? false) ? .bottom : .top)
+        // R8 portrait: both slots hang just under the fold, each against its own outer side.
+        let low = slot?.low ?? false
+        let hintAlign = info.rotated
+            ? Alignment(horizontal: low == l.trailing ? .leading : .trailing, vertical: .top)
+            : Alignment(horizontal: inner, vertical: low ? .bottom : .top)
         // R6 Zen: the snaps never run out, so there's no row.
         let showsSnaps = !v.zen
-        let tagY = min(l.chain.minY, l.snaps.minY) - (c ? 14 : 18)
+        // R8 portrait: the chain chip is in a top corner, so the tag sits over the snaps alone.
+        let tagY = (info.rotated ? l.snaps.minY : min(l.chain.minY, l.snaps.minY)) - (c ? 14 : 18)
         let goal = LevelGoalLayout.rect(info, score: l.score)
         ZStack {
             if !paused, intro == nil, !v.lessonTargets.isEmpty {
@@ -62,8 +67,9 @@ struct PlayLayer: View {
             if v.chainMultiplier > 1.01 {
                 // R6 (#6, frame 42): the bite's own pop says "×2 held"; the chip only glows.
                 ChainChip(multiplier: v.chainMultiplier, compact: c, short: l.chainCompact, glow: v.chainHeld)
-                    .scaleEffect(chainBump ? 1.22 : 1, anchor: l.trailing ? .trailing : .leading)
-                    .frame(width: l.chain.width, height: l.chain.height, alignment: l.trailing ? .trailing : .leading)
+                    .scaleEffect(chainBump ? 1.22 : 1, anchor: l.chainTrailing ? .trailing : .leading)
+                    .frame(width: l.chain.width, height: l.chain.height,
+                           alignment: l.chainTrailing ? .trailing : .leading)
                     .position(x: l.chain.midX, y: l.chain.midY)
                     .allowsHitTesting(false)
                     .transition(.scale(scale: 0.7).combined(with: .opacity))
@@ -91,9 +97,9 @@ struct PlayLayer: View {
                 // refund ("+1 snap"). R6 (#6): one tag at a time from the message queue.
                 if let tag = v.tag {
                     SnapGainTag(tag: tag, compact: c)
-                        .frame(width: max(l.snaps.width, 140), alignment: l.trailing ? .trailing : .leading)
-                        .position(x: l.trailing ? l.snaps.maxX - max(l.snaps.width, 140) / 2
-                                                : l.snaps.minX + max(l.snaps.width, 140) / 2,
+                        .frame(width: max(l.snaps.width, 140), alignment: l.snapsTrailing ? .trailing : .leading)
+                        .position(x: l.snapsTrailing ? l.snaps.maxX - max(l.snaps.width, 140) / 2
+                                                     : l.snaps.minX + max(l.snaps.width, 140) / 2,
                                   y: tagY)
                         .allowsHitTesting(false)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
@@ -172,7 +178,9 @@ struct PlayLayer: View {
         // R6 (Scene #7): the HUD's two corners, so no bug parks under the score, the pause button or the snaps. R8: and
         // the goal line.
         let goal = LevelGoalLayout.rect(info, score: l.score)
-        var rects = [l.score.union(l.pause), l.snaps.union(l.chain)]
+        // R8 portrait: the chain chip has a corner of its own (a union with the snaps would span the screen).
+        var rects = info.rotated ? [l.score.union(l.pause), l.snaps, l.chain]
+                                 : [l.score.union(l.pause), l.snaps.union(l.chain)]
         if hud.values.level != nil { rects.append(goal) }
         controller.setHUDKeepOut(rects.map { sceneRect($0) })
     }
@@ -464,7 +472,7 @@ struct SnapsRow: View {
                 // labelled like the score, "SNAPS" under it, where the layout found room.
                 SnapsNumeral(shown: shown, layout: layout, hot: shown <= 1 || hungry, bump: bump)
                     .frame(width: layout.numeral.width, height: layout.numeral.height,
-                           alignment: layout.trailing ? .trailing : .leading)
+                           alignment: layout.snapsTrailing ? .trailing : .leading)
                     .position(x: layout.numeral.midX, y: layout.numeral.midY)
                 // R7 (#13: no SNAPS label on the 6.3" or the Duo): where the numeral had to sit on the row, its
                 // caption still shows, in the layout's own spot (`HUDLayout.snapsLabel`).
@@ -477,7 +485,7 @@ struct SnapsRow: View {
                         .minimumScaleFactor(0.7)
                         .snapLegible()
                         .frame(width: r.width, height: r.height,
-                               alignment: layout.trailing ? .bottomTrailing : .bottomLeading)
+                               alignment: layout.snapsTrailing ? .bottomTrailing : .bottomLeading)
                         .position(x: r.midX, y: r.midY)
                 }
             }
@@ -499,13 +507,13 @@ struct SnapsNumeral: View {
     var body: some View {
         let labelSize = layout.numeralSize >= HUDLayout.numeralDuo - 0.5 ? HUDLayout.numeralLabelDuo
                                                                           : HUDLayout.numeralLabelPhone
-        VStack(alignment: layout.trailing ? .trailing : .leading, spacing: -2) {
+        VStack(alignment: layout.snapsTrailing ? .trailing : .leading, spacing: -2) {
             Text("\(shown)")
                 .font(.system(size: layout.numeralSize, weight: .heavy, design: .rounded).monospacedDigit())
                 .foregroundStyle(hot ? SnapTheme.danger : SnapTheme.cream)
                 .lineLimit(1)
                 .fixedSize()
-                .scaleEffect(bump, anchor: layout.trailing ? .trailing : .leading)
+                .scaleEffect(bump, anchor: layout.snapsTrailing ? .trailing : .leading)
                 .snapLegible()
             if layout.numeralLabeled {
                 Text(HUDLayout.numeralLabel)
@@ -753,7 +761,7 @@ struct PauseMenu: View {
                 }
             }
             .frame(width: min(other.width, 360))
-            .position(x: other.midX, y: info.size.height / 2)
+            .position(x: other.midX, y: other.midY)
             VStack(spacing: c ? 8 : 12) {
                 SnapOverline(text: "Paused", compact: c, color: SnapTheme.gold)
                 SnapButton(kind: .primary, height: c ? 56 : SnapTheme.primaryHeight, compact: c,
@@ -785,7 +793,7 @@ struct PauseMenu: View {
             }
             .frame(width: min(layout.card.width - 36, 340))
             .snapCard(padding: c ? 14 : 18, radius: 26)
-            .position(x: layout.card.midX, y: info.size.height / 2)
+            .position(x: layout.card.midX, y: info.hudPage.midY)
         }
     }
 }

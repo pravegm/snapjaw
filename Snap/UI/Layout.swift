@@ -6,6 +6,11 @@ import SwiftUI
 /// The play canvas in SwiftUI points (origin top-left), with the scene (952 × 670 design canvas, wider on long
 /// phones) mapped onto it aspect-filled, like the SpriteView. Every screen lays its controls out on the two pages either
 /// side of the fold; the HUD and the main buttons live on the HUD page (the right, sharp half by default).
+///
+/// R8 portrait (founder rule: no pose demands; design/notes/portrait-R8.md): a portrait canvas (the Duo held like a
+/// laptop, its fold running across) shows the same landscape scene turned a quarter clockwise (`rotated`), so the
+/// midrib lies along the fold and the lobes are the top and bottom halves. The pages are then the top page (the
+/// scene's left lobe, the other page) and the bottom page (its right lobe, the HUD page); every rect stays upright.
 struct AppCanvas: Equatable {
     var size: CGSize
     var insets: EdgeInsets
@@ -26,60 +31,136 @@ struct AppCanvas: Equatable {
     var foldClear: CGFloat { hasFold ? 24 : 14 }
     var hasFold: Bool { layout.hasFold }
     var hudOnLeft: Bool { layout.hudOnLeft }
-    /// iPhone-sized type: the Duo's 669 pt height gets the larger scale.
-    var isCompact: Bool { size.height < 520 }
+    /// iPhone-sized type: the Duo's 669 pt short side gets the larger scale (R8: the short side, so a portrait phone
+    /// stays compact).
+    var isCompact: Bool { min(size.width, size.height) < 520 }
+
+    /// R8 portrait: the scene is shown turned a quarter clockwise (`AppRules.turnsScene`, `RootView.gameLayer`).
+    var rotated: Bool { AppRules.turnsScene(size) }
+    /// The scene view's own size before the turn: the canvas, or the canvas turned (portrait).
+    var sceneViewSize: CGSize { rotated ? CGSize(width: size.height, height: size.width) : size }
 
     /// The scene → screen scale (aspect fill).
     var scale: CGFloat {
         guard layout.size.width > 0, layout.size.height > 0 else { return 1 }
-        return max(size.width / layout.size.width, size.height / layout.size.height)
+        let v = sceneViewSize
+        return max(v.width / layout.size.width, v.height / layout.size.height)
     }
 
-    /// Screen x of a scene x.
+    /// Screen x of a scene x (R8 portrait: the screen y, since the scene's x runs down the turned screen).
     func screenX(_ sceneX: CGFloat) -> CGFloat {
-        (size.width - layout.size.width * scale) / 2 + sceneX * scale
+        (sceneViewSize.width - layout.size.width * scale) / 2 + sceneX * scale
     }
 
-    /// Screen point (SwiftUI, y down) of a scene point (SpriteKit, y up). Pure; tested.
+    /// Screen point (SwiftUI, y down) of a scene point (SpriteKit, y up). Pure; tested. R8 portrait: the scene view
+    /// (landscape, `sceneViewSize`) is turned a quarter clockwise about its centre, so its point (x, y) lands on the
+    /// canvas at (view height − y, x).
     func screenPoint(_ scene: CGPoint) -> CGPoint {
         let s = scale
-        let oy = (size.height - layout.size.height * s) / 2
-        return CGPoint(x: screenX(scene.x), y: oy + (layout.size.height - scene.y) * s)
+        let oy = (sceneViewSize.height - layout.size.height * s) / 2
+        let p = CGPoint(x: screenX(scene.x), y: oy + (layout.size.height - scene.y) * s)
+        return rotated ? CGPoint(x: sceneViewSize.height - p.y, y: p.x) : p
     }
 
-    /// Screen rect of a scene rect.
+    /// Screen rect of a scene rect (a quarter turn keeps rects axis-aligned: opposite corners stay opposite).
     func screenRect(_ scene: CGRect) -> CGRect {
         let a = screenPoint(CGPoint(x: scene.minX, y: scene.maxY))
         let b = screenPoint(CGPoint(x: scene.maxX, y: scene.minY))
         return CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
     }
 
-    var foldMinX: CGFloat { screenX(layout.creaseMinX) }
-    var foldMaxX: CGFloat { screenX(layout.creaseMaxX) }
+    /// R8: the fold band on screen: a column down the middle (landscape) or a row across it (portrait).
+    var foldBand: CGRect {
+        let a = screenX(layout.creaseMinX)
+        let b = screenX(layout.creaseMaxX)
+        return rotated ? CGRect(x: 0, y: a, width: size.width, height: max(b - a, 0))
+                       : CGRect(x: a, y: 0, width: max(b - a, 0), height: size.height)
+    }
 
+    var foldMinX: CGFloat { foldBand.minX }
+    var foldMaxX: CGFloat { foldBand.maxX }
+    /// R8 portrait: the fold band's top and bottom (landscape: the canvas's).
+    var foldMinY: CGFloat { foldBand.minY }
+    var foldMaxY: CGFloat { foldBand.maxY }
+
+    /// Landscape: the left page. R8 portrait: the top page (the scene's left lobe), the full width less the margins,
+    /// from the top of the screen to the fold.
     var leftPage: CGRect {
+        if rotated {
+            let x0 = max(insets.leading, 0) + edgeMargin
+            let x1 = size.width - max(insets.trailing, 0) - edgeMargin
+            return CGRect(x: x0, y: 0, width: max(x1 - x0, 0), height: max(foldMinY - foldClear, 0))
+        }
         let x0 = max(insets.leading, 0) + edgeMargin
         let x1 = foldMinX - foldClear
         return CGRect(x: x0, y: 0, width: max(x1 - x0, 0), height: size.height)
     }
 
+    /// Landscape: the right page. R8 portrait: the bottom page (the scene's right lobe), from the fold down.
     var rightPage: CGRect {
+        if rotated {
+            let x0 = max(insets.leading, 0) + edgeMargin
+            let x1 = size.width - max(insets.trailing, 0) - edgeMargin
+            let y0 = foldMaxY + foldClear
+            return CGRect(x: x0, y: y0, width: max(x1 - x0, 0), height: max(size.height - y0, 0))
+        }
         let x0 = foldMaxX + foldClear
         let x1 = size.width - max(insets.trailing, 0) - edgeMargin
         return CGRect(x: x0, y: 0, width: max(x1 - x0, 0), height: size.height)
     }
 
-    /// The HUD's page (right by default; "HUD on the left" mirrors it).
-    var hudPage: CGRect { hudOnLeft ? leftPage : rightPage }
-    /// The other page (the title, the big number).
-    var otherPage: CGRect { hudOnLeft ? rightPage : leftPage }
+    /// The HUD's page (right by default; "HUD on the left" mirrors it). R8 portrait: the bottom page (the scene's
+    /// right lobe; GameController lays a turned scene out with the HUD on its right).
+    var hudPage: CGRect { hudOnLeft && !rotated ? leftPage : rightPage }
+    /// The other page (the title, the big number). R8 portrait: the top page.
+    var otherPage: CGRect { hudOnLeft && !rotated ? rightPage : leftPage }
+
+    /// R8: the HUD's half of the screen, from the fold to the screen's own edge (no margins: the menus' shade).
+    var hudHalf: CGRect {
+        if rotated { return CGRect(x: 0, y: foldMaxY, width: size.width, height: max(size.height - foldMaxY, 0)) }
+        return hudOnLeft ? CGRect(x: 0, y: 0, width: max(foldMinX, 0), height: size.height)
+                         : CGRect(x: foldMaxX, y: 0, width: max(size.width - foldMaxX, 0), height: size.height)
+    }
+
+    /// R8: the other half of the screen, edge to fold.
+    var otherHalf: CGRect {
+        if rotated { return CGRect(x: 0, y: 0, width: size.width, height: max(foldMinY, 0)) }
+        return hudOnLeft ? CGRect(x: foldMaxX, y: 0, width: max(size.width - foldMaxX, 0), height: size.height)
+                         : CGRect(x: 0, y: 0, width: max(foldMinX, 0), height: size.height)
+    }
+
+    /// R8: a gradient's ends from the fold out to the HUD half's own edge (the menus' shade under the actions).
+    var towardHUD: (start: UnitPoint, end: UnitPoint) {
+        if rotated { return (.top, .bottom) }
+        return hudOnLeft ? (.trailing, .leading) : (.leading, .trailing)
+    }
 
     var top: CGFloat { max(insets.top, 0) + (hasFold ? 18 : 10) }
     var bottom: CGFloat { size.height - max(insets.bottom, 0) - (hasFold ? 18 : 10) }
 
+    /// R8: the top padding a column in `page` takes inside its own frame: under the back button when that sits at the
+    /// page's top, else `top` (landscape: the HUD page's column starts under the back button, the other at `top`).
+    func columnTop(_ page: CGRect, back: CGRect) -> CGFloat {
+        let inPage = back.midX >= page.minX - 1 && back.midX <= page.maxX + 1 && back.midY >= page.minY
+            && back.midY <= page.maxY
+        return inPage ? back.maxY + 10 - page.minY : top
+    }
+
+    /// R8: how far a page's header row keeps in from each side for the back button, when it sits in that header
+    /// (landscape: the HUD page's top outer corner; portrait: the top page's top-left corner). Pure; tested.
+    func headerPads(_ page: CGRect, back: CGRect) -> (leading: CGFloat, trailing: CGFloat) {
+        guard back.midX >= page.minX - 1 && back.midX <= page.maxX + 1 && back.midY >= page.minY
+                && back.minY < page.minY + 100 else {
+            return (0, 0)
+        }
+        if back.midX > page.midX { return (0, max(page.maxX - back.minX, 0) + 8) }
+        return (max(back.maxX - page.minX, 0) + 8, 0)
+    }
+
     /// Nothing tappable may overlap the fold band. Pure; tested.
     func isFoldClear(_ rect: CGRect) -> Bool {
-        rect.maxX <= foldMinX + 0.5 || rect.minX >= foldMaxX - 0.5
+        if rotated { return rect.maxY <= foldMinY + 0.5 || rect.minY >= foldMaxY - 0.5 }
+        return rect.maxX <= foldMinX + 0.5 || rect.minX >= foldMaxX - 0.5
     }
 
     /// The trap zone's ellipse on screen.
@@ -91,9 +172,12 @@ struct AppCanvas: Equatable {
     /// Scene point (SpriteKit, y up) of a screen point (SwiftUI, y down). The inverse of `screenPoint`. Pure; tested.
     func scenePoint(_ screen: CGPoint) -> CGPoint {
         let s = max(scale, 0.0001)
-        let ox = (size.width - layout.size.width * s) / 2
-        let oy = (size.height - layout.size.height * s) / 2
-        return CGPoint(x: (screen.x - ox) / s, y: layout.size.height - (screen.y - oy) / s)
+        let v = sceneViewSize
+        // R8 portrait: undo the quarter turn first (the canvas point (x, y) is the view's (y, view height − x)).
+        let p = rotated ? CGPoint(x: screen.y, y: v.height - screen.x) : screen
+        let ox = (v.width - layout.size.width * s) / 2
+        let oy = (v.height - layout.size.height * s) / 2
+        return CGPoint(x: (p.x - ox) / s, y: layout.size.height - (p.y - oy) / s)
     }
 
     /// The trap's normalised radius (0 centre … 1 the rim's edge) at a screen point.
@@ -141,10 +225,15 @@ struct AppCanvas: Equatable {
 
     /// Where the hands rest (no hint plate goes there). On the Duo in book pose the thumbs cover ~0–80 pt in from
     /// each outer edge over the middle 40 % of the height (REVIEW-1-duo); on a phone in landscape they rest on the
-    /// lower outer corners.
+    /// lower outer corners. R8 portrait (held like a laptop): the hands hold the bottom half by its sides.
     var thumbZones: [CGRect] {
         let w = size.width
         let h = size.height
+        if rotated {
+            let low = max(h - foldMaxY, 0)
+            return [CGRect(x: 0, y: foldMaxY + low * 0.35, width: 80, height: low * 0.45),
+                    CGRect(x: w - 80, y: foldMaxY + low * 0.35, width: 80, height: low * 0.45)]
+        }
         if hasFold {
             return [CGRect(x: 0, y: h * 0.30, width: 80, height: h * 0.40),
                     CGRect(x: w - 80, y: h * 0.30, width: 80, height: h * 0.40)]
@@ -280,8 +369,14 @@ struct HUDLayout: Equatable {
     var card: CGRect
     var tired: CGRect
     var snapRows: Int
-    /// The HUD hugs the right edge (false: the left edge, "HUD on the left").
+    /// The HUD hugs the right edge (false: the left edge, "HUD on the left"). R8 portrait: the score's side.
     var trailing: Bool
+    /// R8 portrait: the side the snaps (rows, numeral, tag) hug; the score's other side (landscape: `trailing`).
+    var snapsTrailing: Bool
+    /// R8 portrait: the side the chain chip hugs (landscape: `trailing`).
+    var chainTrailing: Bool
+    /// R8: glyphs per row (landscape: `snapColumns`; portrait: 7 or 5, whichever draws them bigger off the cilia).
+    var columns: Int
 
     static let pauseSide: CGFloat = 56
     /// The snaps: rows of seven mini closed traps (REVIEW-2 #11, #23).
@@ -338,10 +433,16 @@ struct HUDLayout: Equatable {
     /// The glyphs the row shows: every snap the trap can hold (`Tuning.maxSnaps`), at most two rows.
     static var slotCount: Int { min(max(Tuning.maxSnaps, 1), snapColumns * 2) }
 
-    /// The width of a row of `snapColumns` glyphs.
-    static func rowsWidth(glyph g: CGFloat) -> CGFloat {
-        CGFloat(snapColumns) * g + CGFloat(snapColumns - 1) * snapGap
+    /// The width of a row of `columns` glyphs (`snapColumns` by default).
+    static func rowsWidth(glyph g: CGFloat, columns n: Int = HUDLayout.snapColumns) -> CGFloat {
+        let k = max(n, 1)
+        return CGFloat(k) * g + CGFloat(k - 1) * snapGap
     }
+
+    /// R8 portrait: the score's narrowest box (the portrait corners are narrow strips; the number scales to fit).
+    static let portraitScoreMin: CGFloat = 64
+    /// R8 portrait: the row lengths tried for the snaps (the one drawing the biggest glyphs off the cilia wins).
+    static let portraitColumns = [7, 5]
 
     /// R7: the layout with the biggest glyphs whose every cilia rect (score, chain, numeral, rows) clears the cilia by
     /// `AppCanvas.ciliaClear`; the glyphs step down to `glyphMin` until it does.
@@ -359,6 +460,7 @@ struct HUDLayout: Equatable {
     }
 
     private static func make(_ c: AppCanvas, outline: [CGPoint], glyphCap: CGFloat) -> HUDLayout {
+        if c.rotated { return portrait(c, outline: outline, glyphCap: glyphCap) }
         let page = c.hudPage
         let right = !c.hudOnLeft
         let compact = c.isCompact
@@ -519,17 +621,145 @@ struct HUDLayout: Equatable {
         return HUDLayout(pause: pause, back: back, score: score, chain: chain, chainCompact: chainCompact, snaps: snaps,
                          snapRowRects: rects, numeral: numeral, numeralSize: numeralSize, numeralLabeled: labeled,
                          snapsLabel: rowLabel, glyph: glyph, hint: hint, lessonHint: lessonHint,
-                         lesson: lesson, card: card, tired: tired, snapRows: rows, trailing: right)
+                         lesson: lesson, card: card, tired: tired, snapRows: rows, trailing: right,
+                         snapsTrailing: right, chainTrailing: right, columns: snapColumns)
+    }
+
+    /// R8 portrait (the Duo held like a laptop; the scene turned a quarter, so its four corners are the screen's, each
+    /// a narrow strip up a side edge). The HUD lives on the bottom page:
+    /// - the score in its bottom corner on the right (the left with "HUD on the left"), the pause button over it;
+    /// - the snaps in the other bottom corner, in rows of 7 or 5 (whichever draws the bigger glyphs off the cilia,
+    ///   a labelled numeral first), the numeral with "SNAPS" over them;
+    /// - the chain chip in the top corner over the score (the only other spot off the cilia it fits);
+    /// - the hint just under the fold on the score's side, its alternate slot on the snaps' side;
+    /// - the tired banner and the pause card on the bottom page; the menus' back button top left.
+    /// Every rect is upright and off the fold band. Pure; tested.
+    private static func portrait(_ c: AppCanvas, outline: [CGPoint], glyphCap: CGFloat) -> HUDLayout {
+        let w = c.size.width
+        let h = c.size.height
+        let page = c.hudPage
+        let compact = c.isCompact
+        let fold = c.hasFold
+        let pad = AppCanvas.ciliaPad
+        let scoreRight = !c.hudOnLeft
+        let snapsRight = !scoreRight
+        let mid = w / 2
+        let inset: CGFloat = fold ? 14 : 8
+        /// Glyphs and text may sit nearer the screen's edge than a button (there's nothing to tap).
+        func textEdge(_ right: Bool) -> CGFloat {
+            right ? w - max(c.insets.trailing, 0) - inset : max(c.insets.leading, 0) + inset
+        }
+        func box(_ right: Bool, _ edge: CGFloat, _ y: CGFloat, _ bw: CGFloat, _ bh: CGFloat) -> CGRect {
+            CGRect(x: right ? edge - bw : edge, y: y, width: bw, height: bh)
+        }
+        /// The width from `edge` inward before the outline (plus the pad) over the band y…y+bh; never past the middle.
+        func room(_ right: Bool, _ edge: CGFloat, _ y: CGFloat, _ bh: CGFloat) -> CGFloat {
+            let cap = right ? edge - (mid + 4) : (mid - 4) - edge
+            guard let reach = AppCanvas.outlineReach(outline, y0: y - pad, y1: y + bh + pad, right: right) else {
+                return max(cap, 0)
+            }
+            let rw = right ? edge - (reach + pad) : (reach - pad) - edge
+            return min(max(rw, 0), max(cap, 0))
+        }
+        let topY = max(c.insets.top, 0) + (fold ? 6 : 4)
+        let bottomY = h - max(c.insets.bottom, 0) - (fold ? 10 : 4)
+
+        // The score: its bottom corner; the pause button over it.
+        let scoreEdge = textEdge(scoreRight)
+        let scoreH: CGFloat = compact ? 51 : 62
+        let scoreMax: CGFloat = compact ? 160 : 190
+        let scoreY = bottomY - scoreH
+        let scoreW = max(min(room(scoreRight, scoreEdge, scoreY, scoreH), scoreMax), portraitScoreMin)
+        let score = box(scoreRight, scoreEdge, scoreY, scoreW, scoreH)
+        let pause = CGRect(x: scoreRight ? page.maxX - pauseSide : page.minX, y: score.minY - 4 - pauseSide,
+                           width: pauseSide, height: pauseSide)
+        let back = CGRect(x: max(c.insets.leading, 0) + c.edgeMargin, y: c.top - 6, width: pauseSide,
+                          height: pauseSide)
+
+        // The snaps: the other bottom corner.
+        let snapsEdge = textEdge(snapsRight)
+        let count = slotCount
+        let blockW = compact ? snapNumeralWPhone : snapNumeralW
+        func rowRects(_ g: CGFloat, _ n: Int) -> [CGRect] {
+            let gh = g * glyphAspect
+            let rows = max((count + n - 1) / max(n, 1), 1)
+            var out: [CGRect] = []
+            for r in 0..<rows {
+                let fromBottom = CGFloat(rows - 1 - r)
+                out.append(box(snapsRight, snapsEdge, bottomY - gh - fromBottom * (gh + snapRowGap),
+                               rowsWidth(glyph: g, columns: n), gh))
+            }
+            return out
+        }
+        /// At `n` a row: the biggest glyph (≤ the cap) whose rows clear the cilia, its rows, and the labelled
+        /// numeral's block over them (and whether that clears too).
+        func fit(_ n: Int) -> (columns: Int, glyph: CGFloat, rects: [CGRect], block: CGRect, blockFits: Bool) {
+            var g = glyphCap
+            var rs = rowRects(g, n)
+            while g > glyphMin && rs.contains(where: { room(snapsRight, snapsEdge, $0.minY, $0.height) < $0.width }) {
+                g -= 1
+                rs = rowRects(g, n)
+            }
+            let bh = max(numeralBlockHeight(compact: compact), numeralHeight(glyph: g))
+            let rowsTop = rs.first?.minY ?? bottomY
+            let block = box(snapsRight, snapsEdge, rowsTop - 3 - bh, blockW, bh)
+            return (n, g, rs, block, room(snapsRight, snapsEdge, block.minY, block.height) >= blockW)
+        }
+        var best = fit(snapColumns)
+        for n in portraitColumns where n != snapColumns {
+            let f = fit(n)
+            if (f.blockFits && !best.blockFits) || (f.blockFits == best.blockFits && f.glyph > best.glyph) { best = f }
+        }
+        let labeled = best.blockFits
+        let numeral: CGRect
+        if labeled {
+            numeral = best.block
+        } else {
+            // No room for the labelled block: R5's numeral alone over the rows' outer end.
+            let nh = numeralHeight(glyph: best.glyph)
+            let rowsTop = best.rects.first?.minY ?? bottomY
+            numeral = box(snapsRight, snapsEdge, rowsTop - 3 - nh, snapNumeralWRow, nh)
+        }
+        let snaps = best.rects.reduce(numeral) { $0.union($1) }
+
+        // The chain chip: the top corner over the score ("Chain ×2" where it has room, else "×2").
+        let chainH: CGFloat = compact ? 28 : 32
+        let fullW = compact ? chainFullPhone : chainFullDuo
+        let shortW = compact ? chainShortPhone : chainShortDuo
+        let chainCompact = room(scoreRight, scoreEdge, topY, chainH) < fullW
+        let chain = box(scoreRight, scoreEdge, topY, chainCompact ? shortW : fullW, chainH)
+
+        // The hint: just under the fold, on the score's side; the alternate slot on the snaps' side.
+        let hintH = compact ? hintHeightPhone : hintHeightDuo
+        let hintW = max(min(compact ? hintPhone : hintDuo, (page.width - 8) / 2), hintMin)
+        let hint = CGRect(x: scoreRight ? page.maxX - hintW : page.minX, y: page.minY, width: hintW, height: hintH)
+        let lessonHint = CGRect(x: scoreRight ? page.minX : page.maxX - hintW, y: page.minY, width: hintW,
+                                height: hintH)
+        let lesson = CGRect(x: page.minX, y: page.minY, width: max(page.width - pauseSide - 10, 160),
+                            height: compact ? 128 : 150)
+        let cardW = min(page.width, 380)
+        let card = CGRect(x: page.midX - cardW / 2, y: page.minY, width: cardW, height: max(c.bottom - page.minY, 0))
+        let tiredW = min(page.width, compact ? 300 : 360)
+        let tiredH: CGFloat = compact ? 76 : 90
+        let tired = CGRect(x: page.midX - tiredW / 2, y: page.midY - tiredH / 2, width: tiredW, height: tiredH)
+        let numeralSize: CGFloat = labeled ? (compact ? numeralPhone : numeralDuo)
+                                           : (compact ? numeralRowPhone : numeralRowDuo)
+        return HUDLayout(pause: pause, back: back, score: score, chain: chain, chainCompact: chainCompact, snaps: snaps,
+                         snapRowRects: best.rects, numeral: numeral, numeralSize: numeralSize, numeralLabeled: labeled,
+                         snapsLabel: nil, glyph: best.glyph, hint: hint, lessonHint: lessonHint, lesson: lesson,
+                         card: card, tired: tired, snapRows: best.rects.count, trailing: scoreRight,
+                         snapsTrailing: snapsRight, chainTrailing: scoreRight, columns: best.columns)
     }
 
     /// The centre (screen) of glyph `i` (reading order: the top row first, left to right). Pure; tested.
     func glyphCenter(_ i: Int) -> CGPoint {
         guard !snapRowRects.isEmpty else { return CGPoint(x: snaps.midX, y: snaps.midY) }
+        let n = max(columns, 1)
         let k = max(i, 0)
-        let r = min(k / Self.snapColumns, snapRowRects.count - 1)
-        let col = min(k - r * Self.snapColumns, Self.snapColumns - 1)
+        let r = min(k / n, snapRowRects.count - 1)
+        let col = min(k - r * n, n - 1)
         let rect = snapRowRects[r]
-        let x0 = trailing ? rect.maxX - Self.rowsWidth(glyph: glyph) : rect.minX
+        let x0 = snapsTrailing ? rect.maxX - Self.rowsWidth(glyph: glyph, columns: n) : rect.minX
         return CGPoint(x: x0 + CGFloat(col) * (glyph + Self.snapGap) + glyph / 2, y: rect.midY)
     }
 

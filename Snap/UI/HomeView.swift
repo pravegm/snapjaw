@@ -10,45 +10,42 @@ struct HomeView: View {
     @ObservedObject var store: ProgressStore
     let info: AppCanvas
 
-    /// R8: the input in words (the pose card, Settings).
+    /// R8: the input in words (Settings). R8 portrait: the pose card is gone (every angle plays).
     static let foldCaption = "Close the phone to bite"
     static let foldDetail = "The two halves are the trap. Open them to feed."
-    /// R4 (REVIEW-3 #8): kept for the fold diagram's other uses (the pose card).
-    static let foldDiagramHeight: CGFloat = 120
 
     var body: some View {
         let c = info.isCompact
         let page = info.hudPage
         let other = info.otherPage
         let actionsW = min(page.width, c ? 320 : 360)
-        // The shade under the actions runs from the fold to the screen's own edge (no seam at the safe area).
-        let shadeX0 = info.hudOnLeft ? 0 : info.foldMaxX
-        let shadeX1 = info.hudOnLeft ? info.foldMinX : info.size.width
-        let otherX0 = info.hudOnLeft ? info.foldMaxX : 0
-        let otherX1 = info.hudOnLeft ? info.size.width : info.foldMinX
+        // The shade under the actions runs from the fold to the screen's own edge (no seam at the safe area). R8
+        // portrait: the halves are the top and the bottom of the screen.
+        let shade = info.hudHalf
+        let otherHalf = info.otherHalf
+        let toward = info.towardHUD
         ZStack {
             if controller.scene == nil { SnapBackdrop() }
             HomeTrapLayer(trap: controller.homeTrap, info: info, reduceMotion: controller.reduceMotion,
                           onTap: { controller.homeTrapTapped() })
             LinearGradient(colors: [SnapTheme.night.opacity(0.08), SnapTheme.night.opacity(0.72)],
-                           startPoint: info.hudOnLeft ? .trailing : .leading,
-                           endPoint: info.hudOnLeft ? .leading : .trailing)
-                .frame(width: max(shadeX1 - shadeX0, 0), height: info.size.height)
-                .position(x: (shadeX0 + shadeX1) / 2, y: info.size.height / 2)
+                           startPoint: toward.start, endPoint: toward.end)
+                .frame(width: shade.width, height: shade.height)
+                .position(x: shade.midX, y: shade.midY)
                 .allowsHitTesting(false)
             // A soft shade behind the title so it reads over the lobe (never a slab over the trap).
             RadialGradient(colors: [SnapTheme.night.opacity(0.66), SnapTheme.night.opacity(0)], center: .center,
-                           startRadius: 10, endRadius: max(otherX1 - otherX0, 1) * 0.62)
-                .frame(width: max(otherX1 - otherX0, 0), height: info.size.height)
-                .position(x: (otherX0 + otherX1) / 2, y: info.size.height * 0.45)
+                           startRadius: 10, endRadius: max(min(otherHalf.width, info.size.width), 1) * 0.62)
+                .frame(width: otherHalf.width, height: otherHalf.height)
+                .position(x: otherHalf.midX, y: otherHalf.minY + otherHalf.height * 0.45)
                 .allowsHitTesting(false)
             titleBlock(c)
                 .frame(width: min(other.width, 420))
-                .position(x: other.midX, y: info.size.height * 0.47)
+                .position(x: other.midX, y: other.minY + other.height * 0.47)
                 .allowsHitTesting(false)
             actions(c)
                 .frame(width: actionsW)
-                .position(x: page.midX, y: info.size.height / 2 + (c ? 2 : 8))
+                .position(x: page.midX, y: page.midY + (c ? 2 : 8))
         }
         .frame(width: info.size.width, height: info.size.height)
         // R7 (Scene/Core #4): the buttons' real frames, in scene space, are the Home bog's clear zone.
@@ -317,7 +314,7 @@ struct HomeTrapLayer: View {
             if chompShown {
                 DisplayText(text: "CHOMP!", size: info.isCompact ? 54 : 76, fill: [SnapTheme.goldLight, SnapTheme.gold],
                             tilt: -6)
-                    .position(x: other.midX, y: info.size.height * 0.14)
+                    .position(x: other.midX, y: other.minY + other.height * 0.14)
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
                     .allowsHitTesting(false)
             }

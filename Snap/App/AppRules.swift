@@ -18,7 +18,8 @@ enum AppRules {
         return short / long > 0.62 && short >= 600
     }
 
-    /// The pose for a canvas (Swoop's rule, landscape play).
+    /// The pose for a canvas: the cover display (or a shut Duo), else play. R8 (founder rule: no pose demands, ever):
+    /// a portrait canvas plays too (`turnsScene`); there is no pose card. Pure; tested.
     static func pose(canvas: CGSize, hingeSeen: Bool, isShut: Bool) -> AppPose {
         let valid = canvas.width > 10 && canvas.height > 10
         let long = max(canvas.width, canvas.height)
@@ -26,16 +27,41 @@ enum AppRules {
         if hingeSeen && small { return .cover }
         // A lit inner display (long side ≥ 760) is never "shut", whatever a stale latch says.
         if hingeSeen && isShut && !(valid && long >= coverMaxSide) { return .cover }
-        if valid && canvas.height > canvas.width { return .pose }
         return .play
     }
 
-    /// A vertical fold runs down the middle of a landscape Duo inner display (book pose).
+    /// The Duo inner display's fold: down the middle in book pose (landscape), across it held like a laptop (R8
+    /// portrait: the turned scene's midrib lies along it). Pure; tested.
     static func hasFold(canvas: CGSize, hingeSeen: Bool, demoFold: Bool, divisionSeen: Bool) -> Bool {
-        guard canvas.width >= canvas.height else { return false }
         if demoFold { return true }
         if hingeSeen || divisionSeen { return max(canvas.width, canvas.height) >= coverMaxSide }
         return looksLikeDuoInner(canvas)
+    }
+
+    // MARK: R8 portrait (design/notes/portrait-R8.md)
+
+    /// R8: a portrait canvas plays the landscape scene turned a quarter clockwise, so its vertical midrib lies along
+    /// the Duo's horizontal (laptop) fold and the lobes are the top and bottom halves. Core and the Scene keep
+    /// landscape scene space; only the view turns. Pure; tested.
+    static func turnsScene(_ canvas: CGSize) -> Bool {
+        canvas.width > 10 && canvas.height > canvas.width
+    }
+
+    /// R8: the scene view's own size (landscape) for a canvas: the canvas, or the canvas turned. Pure; tested.
+    static func sceneViewSize(_ canvas: CGSize) -> CGSize {
+        turnsScene(canvas) ? CGSize(width: canvas.height, height: canvas.width) : canvas
+    }
+
+    /// R8: "HUD on the left" is a book-pose setting (the left half blurs as a fold starts from flat); a turned scene
+    /// keeps its HUD on the bottom page, the scene's right lobe. Pure; tested.
+    static func hudOnLeft(_ setting: Bool, canvas: CGSize) -> Bool {
+        setting && !turnsScene(canvas)
+    }
+
+    /// R8 demo `portrait=1` (`screen=pose`): a landscape simulator screen lays the app out as the portrait canvas,
+    /// turned a quarter counter-clockwise onto it (CI has no rotate verb). Pure; tested.
+    static func demoTurnsCanvas(_ screen: CGSize, demoPortrait: Bool) -> Bool {
+        demoPortrait && screen.width > screen.height
     }
 
     // MARK: Frame step

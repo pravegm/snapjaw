@@ -1,8 +1,14 @@
 import SpriteKit
 import SwiftUI
 
-/// The whole app: the SpriteKit bog underneath (full-bleed, aspect-filled), the SwiftUI screens on top, the pose cards
-/// above all (Swoop's structure, landscape play).
+/// The whole app: the SpriteKit bog underneath (full-bleed, aspect-filled), the SwiftUI screens on top, the cover
+/// cards above all (Swoop's structure, landscape play).
+///
+/// R8 portrait (founder rule: no pose demands, ever; design/notes/portrait-R8.md): there is no pose card. A portrait
+/// canvas (the Duo held like a laptop, the fold across the middle) plays: the same landscape scene is drawn turned a
+/// quarter clockwise (`gameLayer`), its midrib on the fold and its lobes the top and bottom halves, and every screen
+/// lays out upright on the top and bottom pages (`AppCanvas.rotated`). Core and the Scene stay in landscape scene
+/// space. A phone held upright asks iOS to turn (its mask is landscape only) and plays turned meanwhile.
 ///
 /// Safe areas: the content ignores the safe area (the scene is full-bleed), so the insets are read from an outer
 /// GeometryReader that does NOT ignore it and from the key window (whichever is larger), and handed to every screen in
@@ -19,23 +25,25 @@ struct RootView: View {
     @State private var windowInsets = EdgeInsets()
     /// The `.division` reserved region (iOS 27.1: present while the Duo is partly folded) has been seen.
     @State private var divisionSeen = false
-    /// A phone's pose card shows only if the canvas is still portrait 0.6 s later (the landscape mask usually turns
-    /// the UI first, so it never flashes).
-    @State private var phoneCardReady = false
-
-    static let phoneCardDelay: Double = 0.6
 
     var body: some View {
         GeometryReader { safeGeo in
             let safe = safeGeo.safeAreaInsets
             GeometryReader { geo in
                 let division = Self.activeDivision(in: geo)
-                content(canvas: geo.size, safe: merged(safe, windowInsets))
+                // R8 demo `portrait=1` / `screen=pose` (CI): the portrait layout on the landscape simulator, the whole
+                // app turned a quarter counter-clockwise (turn the frame a quarter clockwise to read it).
+                let demoTurn = AppRules.demoTurnsCanvas(geo.size, demoPortrait: controller.demoPortrait)
+                let canvas = demoTurn ? CGSize(width: geo.size.height, height: geo.size.width) : geo.size
+                let insets = merged(safe, windowInsets)
+                content(canvas: canvas, safe: demoTurn ? Self.turnedInsets(insets) : insets)
+                    .rotationEffect(.degrees(demoTurn ? -90 : 0))
+                    .frame(width: geo.size.width, height: geo.size.height)
                     .onChange(of: division ?? .zero) { _, frame in
                         logFold(frame)
                         if frame != .zero && !divisionSeen {
                             divisionSeen = true
-                            handleCanvas(geo.size)
+                            handleCanvas(canvas)
                         }
                     }
             }
@@ -72,15 +80,9 @@ struct RootView: View {
             gameLayer(canvas, visible: pose == .play)
             switch pose {
             case .play:
-                let layout = ScreenLayout.make(viewSize: canvas, hasFold: fold, hudOnLeft: controller.hudOnLeft)
+                let layout = ScreenLayout.make(viewSize: canvas, hasFold: fold,
+                                               hudOnLeft: AppRules.hudOnLeft(controller.hudOnLeft, canvas: canvas))
                 screenLayer(AppCanvas(size: canvas, insets: safe, layout: layout))
-            case .pose:
-                if phoneCardReady || isDuoLike(canvas) {
-                    PoseCard(insets: safe, isDuo: isDuoLike(canvas), reduceMotion: controller.reduceMotion)
-                        .transition(.opacity)
-                } else {
-                    SnapBackdrop()
-                }
             case .cover:
                 CoverCard(controller: controller, store: store, insets: safe)
                     .transition(.opacity)
@@ -116,24 +118,26 @@ struct RootView: View {
         .onChange(of: controller.hingeSeen) { _, _ in handleCanvas(canvas) }
         .onChange(of: controller.isShut) { _, _ in handleCanvas(canvas) }
         .onChange(of: controller.forcedPose) { _, _ in handleCanvas(canvas) }
-        .task(id: pose == .pose) {
-            phoneCardReady = false
-            guard pose == .pose else { return }
-            try? await Task.sleep(nanoseconds: UInt64(Self.phoneCardDelay * 1_000_000_000))
-            if !Task.isCancelled { phoneCardReady = true }
-        }
     }
 
     // MARK: - Pose and canvas
 
     private func toastX(_ canvas: CGSize, safe: EdgeInsets, pose: AppPose, fold: Bool) -> CGFloat {
         guard pose == .play else { return canvas.width / 2 }
-        let layout = ScreenLayout.make(viewSize: canvas, hasFold: fold, hudOnLeft: controller.hudOnLeft)
+        let layout = ScreenLayout.make(viewSize: canvas, hasFold: fold,
+                                       hudOnLeft: AppRules.hudOnLeft(controller.hudOnLeft, canvas: canvas))
         return AppCanvas(size: canvas, insets: safe, layout: layout).hudPage.midX
+    }
+
+    /// R8 demo portrait: the safe-area insets of a landscape screen as the portrait canvas turned a quarter
+    /// counter-clockwise onto it sees them (its top is the screen's left, its right the screen's top). Pure; tested.
+    static func turnedInsets(_ i: EdgeInsets) -> EdgeInsets {
+        EdgeInsets(top: i.leading, leading: i.bottom, bottom: i.trailing, trailing: i.top)
     }
 
     private func isDuoLike(_ canvas: CGSize) -> Bool {
         controller.hingeSeen || AppRules.looksLikeDuoInner(canvas) || controller.forcedPose != nil
+            || OrientationLock.allowsPortrait(hasHinge: false, screen: canvas)
     }
 
     private func currentPose(_ canvas: CGSize) -> AppPose {
@@ -150,8 +154,10 @@ struct RootView: View {
         guard canvas.width > 1, canvas.height > 1 else { return }
         let pose = currentPose(canvas)
         controller.setPose(pose)
-        if pose == .pose && controller.forcedPose == nil && !isDuoLike(canvas) {
-            // A phone held upright (landscape-only mask): ask iOS to turn the interface now.
+        if AppRules.turnsScene(canvas) && controller.forcedPose == nil && !isDuoLike(canvas)
+            && !controller.demoPortrait {
+            // A phone held upright (landscape-only mask): ask iOS to turn the interface now (R8: it plays turned
+            // meanwhile; there is no card).
             OrientationLock.requestLandscape()
         }
         if pose == .play {
@@ -217,12 +223,18 @@ struct RootView: View {
         return !visible || controller.isMenuOpen
     }
 
+    /// R8 portrait: the scene view keeps its landscape size (`AppRules.sceneViewSize`) and is turned a quarter
+    /// clockwise about its centre (`AppCanvas.screenPoint` maps through the same turn), so its vertical midrib lies
+    /// along the portrait Duo's fold. Landscape: no turn (the same view, so a rotation never rebuilds it).
     @ViewBuilder
     private func gameLayer(_ canvas: CGSize, visible: Bool) -> some View {
         if let scene = controller.scene {
+            let view = AppRules.sceneViewSize(canvas)
             SpriteView(scene: scene, isPaused: sceneIdle(visible: visible),
                        preferredFramesPerSecond: controller.route.isPlay ? 120 : 60)
                 .id(controller.sceneGeneration)
+                .frame(width: view.width, height: view.height)
+                .rotationEffect(.degrees(AppRules.turnsScene(canvas) ? 90 : 0))
                 .frame(width: canvas.width, height: canvas.height)
                 .opacity(visible ? 1 : 0.001)
                 .allowsHitTesting(visible)

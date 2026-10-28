@@ -18,8 +18,8 @@ struct BugBookView: View {
         let headerH = BugBookView.headerHeight(compact: c, pauseMaxY: pause.maxY, top: info.top)
         ZStack {
             BogBackdrop(controller: controller)
-            page(first, rect: info.leftPage, headerH: headerH, header: true, c)
-            page(second, rect: info.rightPage, headerH: headerH, header: false, c)
+            page(first, rect: info.leftPage, headerH: headerH, header: true, back: pause, c)
+            page(second, rect: info.rightPage, headerH: headerH, header: false, back: pause, c)
             SnapRoundButton(systemImage: "chevron.backward", label: "Back") { controller.show(.home) }
                 .position(x: pause.midX, y: pause.midY)
         }
@@ -31,7 +31,8 @@ struct BugBookView: View {
         max(compact ? 46 : 64, pauseMaxY + 4 - (top - 8))
     }
 
-    private func page(_ species: [BugSpecies], rect: CGRect, headerH: CGFloat, header: Bool, _ c: Bool) -> some View {
+    private func page(_ species: [BugSpecies], rect: CGRect, headerH: CGFloat, header: Bool, back: CGRect,
+                      _ c: Bool) -> some View {
         VStack(alignment: .leading, spacing: c ? 6 : 10) {
             HStack(alignment: .bottom) {
                 if header {
@@ -49,8 +50,9 @@ struct BugBookView: View {
                 Spacer(minLength: 0)
             }
             .frame(height: headerH, alignment: .bottom)
-            .padding(.trailing, !header && !info.hudOnLeft ? 64 : 0)
-            .padding(.leading, header && info.hudOnLeft ? 64 : 0)
+            // Clear of the back button where it sits in this page's header (R8: portrait's top left too).
+            .padding(.trailing, info.headerPads(rect, back: back).trailing)
+            .padding(.leading, info.headerPads(rect, back: back).leading)
             ScrollView(showsIndicators: false) {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: c ? 8 : 10), GridItem(.flexible())],
                           spacing: c ? 8 : 10) {
@@ -64,8 +66,8 @@ struct BugBookView: View {
             .scrollColumn(initially: true)
         }
         .padding(.top, info.top - 8)
-        .frame(width: rect.width, height: info.size.height, alignment: .top)
-        .position(x: rect.midX, y: info.size.height / 2)
+        .frame(width: rect.width, height: rect.height, alignment: .top)
+        .position(x: rect.midX, y: rect.midY)
     }
 }
 

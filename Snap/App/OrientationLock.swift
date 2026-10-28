@@ -12,7 +12,8 @@ enum InterfaceSide: String, Equatable {
 /// portrait (tabletop) inner display. The app itself decides what it supports:
 /// - an iPhone Duo (a hinge reported on this device, or the screen already looks foldable: both Duo displays are ~0.7
 ///   short-to-long, other iPhones ~0.46): portrait and both landscapes, so the inner display follows the way the phone
-///   is held. Landscape (book pose) plays; portrait shows the "Hold it open like a book" card (PoseCards);
+///   is held. Every pose plays (R8, founder rule: no pose demands): landscape (book pose) as ever, portrait (held like
+///   a laptop, the fold across) with the scene turned a quarter (`AppRules.turnsScene`, design/notes/portrait-R8.md);
 /// - every other iPhone: landscape only, so the UI turns sideways by itself.
 /// Never upside down (full-screen apps are refused it).
 @MainActor

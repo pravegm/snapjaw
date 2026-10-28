@@ -23,7 +23,7 @@
 16-settings|screen=settings|4|Settings on the Duo|SNAP-T canvas
 # R5 (REVIEW-4 #1, #11, #15): the R4 frames still missing at Duo aspect. R8: the lesson frames (14, 15, 22, 23) are
 # gone with the lesson (app-R8.md); Levels 1–5 teach, framed by 26–30.
-17-pose|screen=pose|5|(R4 31) The pose card at 951 x 669 (R8: "Snapjaw plays sideways", no hold instruction)|SNAP-T canvas
+17-pose|screen=pose|5|R8 portrait: the pose card is gone (founder rule: every angle plays). `screen=pose` is now the portrait Duo (held like a laptop, the fold across): Home laid out at 669 x 951, turned a quarter counter-clockwise onto the book-pose capture (turn the PNG a quarter clockwise to read it)|turned=1
 18-cover-card|screen=cover|8|(R4 32) The cover-display card forced on the inner display: the closed trap at rest, "Open to play"|SNAP-T canvas
 19-cover-display|screen=cover;ciHinge=0|8|The cover display itself, the Duo closed: the card at 1398 x 2034 (REVIEW-4 Duo P2-4)|SNAP-T
 20-snap-casual|screen=play;seed=7;pilot=casual;freezeOn=snap|45|(R4 13) 0.12 s after a casual bite|SNAP-T event snapped
@@ -37,3 +37,13 @@
 29-level-intro|screen=levelIntro;level=4|6|Level 4's intro card: "Catch 2 flies. Never bite the bee"|SNAP-T level intro 4
 30-level-results|screen=levelResults;level=1;pilot=perfect|40|Level 1 played by the perfect pilot, then its results: 3 stars|SNAP-T level result 1
 31-chomp-sting|screen=chomp;chomp=sting;ciHinge=0|10|The outer display after biting a bee: the sting message|SNAP-T chomp card
+# R8 portrait (design/notes/portrait-R8.md; demo key `portrait=1`): the Duo held like a laptop plays. The simulator has
+# no rotate verb, so the app lays itself out at 669 x 951 and turns the whole picture a quarter counter-clockwise onto
+# the book-pose panel: turn these PNGs a quarter clockwise (`sips -r 90`) to read them. The scene inside is the book
+# pose's, turned back: its midrib lies along the (real) fold. Every line logs `SNAP-T canvas 669x951 fold=1 hudLeft=0
+# turned=1`.
+32-portrait-home|portrait=1;screen=home;progress=mid|6|Portrait Home: the title, rank and goals on the top half, Play and the lily pads on the bottom half, nothing on the fold, the trap turned (its lobes the two halves)|turned=1
+33-portrait-crowd|portrait=1;screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd|60|Portrait play: a crowd sipping on the turned trap; the score bottom right with Pause over it, the snaps bottom left, the hint just under the fold, all upright and off the cilia|SNAP-T freeze crowd
+34-portrait-feast|portrait=1;screen=play;seed=7;wave=8;pilot=perfect;freezeOn=feast|90|Portrait: a Feast's pops ("4 bugs · +N", "Feast! +1 snap") upright on the turned scene, rising toward the top|SNAP-T event feast
+35-portrait-results|portrait=1;screen=results;seed=7;progress=mid;pilot=casual|8|Portrait Results: the title and the big score on the top half (no trap picture), the cards and Again / Home on the bottom|turned=1
+36-portrait-levels|portrait=1;screen=levels;progress=mid|6|Portrait level map: the worlds on the top half under Back (top left), the ten pads on the bottom half|SNAP-T screen levels

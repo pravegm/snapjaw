@@ -564,6 +564,33 @@ final class BogPops {
 
     var capacity: Int { labels.count }
 
+    /// R8 portrait (`BogScene.textTurned`; design/notes/portrait-R8.md): the App shows the scene turned a quarter
+    /// clockwise, so every label is drawn a quarter turn counter-clockwise (upright on screen) and rises toward scene −x
+    /// (the screen's top); `activeRects` and `liveRects` are the turned boxes. False: as before.
+    var quarterTurn = false {
+        didSet {
+            guard quarterTurn != oldValue else { return }
+            let angle = BogPops.labelAngle(quarterTurn)
+            for l in labels { l.zRotation = angle }
+            for s in shadows { s.zRotation = angle }
+        }
+    }
+
+    /// R8: the labels' z rotation (radians, counter-clockwise). Pure; tested.
+    nonisolated static func labelAngle(_ turned: Bool) -> CGFloat { turned ? .pi / 2 : 0 }
+    /// R8: the way a pop rises, in scene space (a unit vector: the screen's up). Pure; tested.
+    nonisolated static func riseDirection(_ turned: Bool) -> CGVector {
+        turned ? CGVector(dx: -1, dy: 0) : CGVector(dx: 0, dy: 1)
+    }
+    /// R8: the drop shadow's offset in scene space (2 pt right and 3 pt down on screen). Pure; tested.
+    nonisolated static func shadowOffset(_ turned: Bool) -> CGVector {
+        turned ? CGVector(dx: 3, dy: 2) : CGVector(dx: 2, dy: -3)
+    }
+    /// R8: a text box as drawn in scene space (turned: the text runs along scene y). Pure; tested.
+    nonisolated static func drawnBox(_ b: CGSize, turned: Bool) -> CGSize {
+        turned ? CGSize(width: b.height, height: b.width) : b
+    }
+
     /// The rounded black display face (cached per point size).
     static func font(_ size: CGFloat) -> UIFont {
         let key = Int(size.rounded())
@@ -616,12 +643,13 @@ final class BogPops {
     /// Each active pop's text box at its resting scale, where it is now (scene space; tests: off the crease).
     var activeRects: [CGRect] {
         var out: [CGRect] = []
+        let d = BogPops.riseDirection(quarterTurn)
         for i in 0..<ages.count where ages[i] >= 0 {
             let u = max(ages[i] - delays[i], 0)
             let f = CGFloat(min(u / lives[i], 1))
             let ease = 1 - (1 - f) * (1 - f)
-            let p = CGPoint(x: starts[i].x, y: starts[i].y + rises[i] * ease)
-            let b = boxes[i]
+            let p = CGPoint(x: starts[i].x + d.dx * rises[i] * ease, y: starts[i].y + d.dy * rises[i] * ease)
+            let b = BogPops.drawnBox(boxes[i], turned: quarterTurn)
             out.append(CGRect(x: p.x - b.width / 2, y: p.y - b.height / 2, width: b.width, height: b.height))
         }
         return out
@@ -639,10 +667,20 @@ final class BogPops {
             let u = max(ages[i] - delays[i], 0)
             let f = CGFloat(min(u / lives[i], 1))
             let ease = 1 - (1 - f) * (1 - f)
-            let y0 = starts[i].y + rises[i] * ease
-            let y1 = starts[i].y + rises[i]
             let over = 1 + overs[i]
             let b = boxes[i]
+            if quarterTurn {
+                // R8 portrait: the box runs along y (its text) and sweeps toward −x; the shadow sits +x, +y.
+                let x0 = starts[i].x - rises[i] * ease
+                let x1 = starts[i].x - rises[i]
+                let w = b.height * over, h = b.width * over
+                let lo = min(x0, x1) - w / 2, hi = max(x0, x1) + w / 2 + 3
+                let r = CGRect(x: lo, y: starts[i].y - h / 2, width: hi - lo, height: h + 2)
+                out.append(r.insetBy(dx: -BogPops.clearance, dy: -BogPops.clearance))
+                continue
+            }
+            let y0 = starts[i].y + rises[i] * ease
+            let y1 = starts[i].y + rises[i]
             let w = b.width * over, h = b.height * over
             let lo = min(y0, y1) - h / 2 - 3, hi = max(y0, y1) + h / 2
             let r = CGRect(x: starts[i].x - w / 2, y: lo, width: w + 2, height: hi - lo)
@@ -731,13 +769,15 @@ final class BogPops {
             }
             let f = CGFloat(min(u / lives[i], 1))
             let ease = 1 - (1 - f) * (1 - f)
-            let p = CGPoint(x: starts[i].x, y: starts[i].y + rises[i] * ease)
+            let d = BogPops.riseDirection(quarterTurn)
+            let p = CGPoint(x: starts[i].x + d.dx * rises[i] * ease, y: starts[i].y + d.dy * rises[i] * ease)
             k *= BogPops.exitScale(f)
             let a = BogPops.exitAlpha(f)
             l.position = p
             l.setScale(k)
             l.alpha = a
-            sh.position = CGPoint(x: p.x + 2, y: p.y - 3)
+            let so = BogPops.shadowOffset(quarterTurn)
+            sh.position = CGPoint(x: p.x + so.dx, y: p.y + so.dy)
             sh.setScale(k)
             sh.alpha = a
         }

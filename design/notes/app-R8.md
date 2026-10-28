@@ -79,6 +79,5 @@ P10/D10 and DR1/DR4/DR5/DR6/DR8/DR12 in the store files are re-pointed off the l
 - **ci/duo.sh** (Core/CI): the `ui-lesson-*` launches use `screen=lesson;lessonStep=…` (now Home) and grep
   `SNAP-T lesson step`; `close-pause` greps `SNAP-T paused closing` (gone). **ci/duo-scenarios.txt** 14, 15, 22, 23
   are lesson frames too, and 17/18 captions say "Hold it open like a book" / "the score".
-- The Duo's portrait canvas (tabletop/"laptop") still shows the pose card (now "Snapjaw plays sideways", no hold
-  instruction): playing in portrait needs a portrait layout (founder rule 2 asks "any angle plays"). Not done.
-- `DuoClapDiagram` (TrapDrawing) still claps 160° → 138° (the old verb); only the pose card draws it now.
+- Done since (design/notes/portrait-R8.md): the Duo's portrait canvas plays (the scene turned a quarter, a portrait
+  HUD and menus); the pose card and `DuoClapDiagram` are deleted.

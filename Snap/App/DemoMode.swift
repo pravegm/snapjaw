@@ -20,7 +20,8 @@ import UIKit
 //               `progress=mid` or `late` the streak is 3 or 5 days). `mode=zen` plays 150 s, then ends the visit
 //               (the pause menu's End): no best, no leaderboard.
 //     lesson    the First Bite lesson (at `lessonStep=`, default 1).
-//     pose      force the pose card "Hold it open like a book" (over a run of `mode` if given, else Home).
+//     pose      R8: the portrait layout (`portrait=1`, below) over a run of `mode` if given, else Home. The pose
+//               card it once forced is gone.
 //     cover     force the cover-display card ("Open it up to carry on" and the score): a run of `mode` (default
 //               feed) is played headless for 24 s first by the pilot (default casual), so the score is real.
 //     icon      render the app icon (AppIconArt) to Documents/AppIcon-1024.png (`SNAP-T icon ok 1024x1024`,
@@ -99,6 +100,15 @@ import UIKit
 // - `mode=level;level=<n>` play level n (with `pilot=`, straight past its intro).
 // Log lines: `SNAP-T verdict '<words>' ratio=<r>`, `SNAP-T hinge step shut=<0|1> angle=<deg>`,
 // `SNAP-T level intro|go|passed|time up|result …`, `SNAP-T chomp card <kind> …`, `SNAP-T level demo <id> played=<s>`.
+//
+// R8 portrait (design/notes/portrait-R8.md: the pose card is gone, every angle plays):
+// - `portrait=1`           lay the app out as the Duo held like a laptop (the portrait canvas, the scene turned a
+//                          quarter, the HUD and menus upright on the top and bottom pages), on any screen: the
+//                          landscape simulator shows it turned a quarter counter-clockwise (turn the PNG a quarter
+//                          clockwise, `sips -r 90`, to read it). Works with every other key.
+// - `screen=pose`          the same as `portrait=1` over Home (or a run of `mode`): the old pose card's key, so
+//                          ci/duo.sh's `frames-pose` launch now frames the portrait Duo.
+// Log line: `SNAP-T canvas <w>x<h> fold=<0|1> hudLeft=0 turned=1` (a portrait canvas; `turned=1` only then).
 
 struct DemoMode: Equatable {
     enum Screen: String, Equatable, CaseIterable {
@@ -194,6 +204,8 @@ struct DemoMode: Equatable {
     var chomp: ChompInfo.Kind?
     var hudLeft: Bool?
     var fold = false
+    /// R8: `portrait=1`: the portrait (laptop) layout, turned onto a landscape simulator.
+    var portrait = false
     var sound = true
     /// R4 (REVIEW-3 #2): `firstRun=1` plays Sprout run 1's rules (14 snaps, no wilt, a free first sting); `firstRun=0`
     /// never does. Unset: only `progress=fresh` does, so every other play demo runs the standard rules.
@@ -203,6 +215,9 @@ struct DemoMode: Equatable {
 
     /// Whether a demo run gets the first-run rules.
     var playsFirstRun: Bool { AppRules.demoFirstRun(firstRun: firstRun, progress: progress) }
+
+    /// R8: the app is laid out portrait (`portrait=1`, or `screen=pose`, the old pose card's key). Pure; tested.
+    var showsPortrait: Bool { portrait || screen == .pose }
 
     init(raw: String) { self.raw = raw }
 
@@ -270,6 +285,7 @@ struct DemoMode: Equatable {
             case "chomp": config.chomp = chompKind(value)
             case "hudLeft": config.hudLeft = flag(value)
             case "fold": config.fold = flag(value)
+            case "portrait": config.portrait = flag(value)
             case "sound": config.sound = flag(value)
             case "firstRun": config.firstRun = flag(value)
             case "variety":

@@ -2352,3 +2352,63 @@ struct SceneTests {
         #expect(touch.juiceStains == 0)
     }
 }
+
+/// R8 portrait (design/notes/portrait-R8.md): on a Duo held like a laptop the App shows the scene turned a quarter
+/// clockwise (`BogScene.textTurned`); the word pops are drawn turned back, so they read upright, and rise toward the
+/// screen's top (scene −x). Book pose and phones are unchanged.
+@MainActor
+struct ScenePortraitTests {
+    @Test func turnedPopsReadUprightAndRiseUp() {
+        #expect(abs(BogPops.labelAngle(true) - CGFloat.pi / 2) < CGFloat(0.0001))
+        #expect(abs(BogPops.labelAngle(false)) < CGFloat(0.0001))
+        let up = BogPops.riseDirection(true)
+        #expect(abs(up.dx + 1) < CGFloat(0.0001) && abs(up.dy) < CGFloat(0.0001))
+        let flatUp = BogPops.riseDirection(false)
+        #expect(abs(flatUp.dx) < CGFloat(0.0001) && abs(flatUp.dy - 1) < CGFloat(0.0001))
+        let box = BogPops.drawnBox(CGSize(width: 120, height: 40), turned: true)
+        #expect(abs(box.width - 40) < CGFloat(0.0001) && abs(box.height - 120) < CGFloat(0.0001))
+
+        let start = CGPoint(x: 400, y: 300)
+        let flat = BogPops()
+        flat.pop("3 bugs · +360", at: start, size: 40, fill: .white, stroke: .black, rise: 46)
+        flat.update(0.5)
+        let turned = BogPops()
+        turned.quarterTurn = true
+        turned.pop("3 bugs · +360", at: start, size: 40, fill: .white, stroke: .black, rise: 46)
+        turned.update(0.5)
+        guard let a = flat.activeRects.first, let b = turned.activeRects.first,
+              let live = turned.liveRects.first else {
+            Issue.record("no pop on screen")
+            return
+        }
+        // Book pose: wide, rising up (+y). Turned: tall in scene space (wide on the turned screen), rising toward −x.
+        #expect(a.width > a.height)
+        #expect(b.height > b.width)
+        #expect(abs(a.width - b.height) < CGFloat(0.5))
+        #expect(a.midY > start.y + 1)
+        #expect(abs(a.midX - start.x) < CGFloat(0.5))
+        #expect(b.midX < start.x - 1)
+        #expect(abs(b.midY - start.y) < CGFloat(0.5))
+        // The App's plate keeps off the whole turned footprint: it sweeps toward −x, to the end of the rise.
+        #expect(live.contains(CGPoint(x: b.midX, y: b.midY)))
+        #expect(live.minX < start.x - 46)
+        #expect(live.height >= b.height)
+        // The placement footprint turns with it.
+        let foot = BogScene.popFootprint(center: start, halfWidth: 20, halfHeight: 60, rise: 30, turned: true)
+        #expect(foot.minX <= start.x - 20 - 30 - BogScene.popGap + CGFloat(0.5))
+        #expect(foot.maxY >= start.y + 60)
+        #expect(foot.maxY <= start.y + 60 + 2 + BogScene.popGap + CGFloat(0.5))
+        let book = BogScene.popFootprint(center: start, halfWidth: 60, halfHeight: 20, rise: 30)
+        #expect(book.maxY >= start.y + 20 + 30)
+        #expect(book.minX >= start.x - 60 - BogScene.popGap - CGFloat(0.5))
+    }
+
+    @Test func theSceneTurnsItsTextOnlyWhenAsked() {
+        let scene = BogScene(layout: ScreenLayout(hasFold: true))
+        #expect(!scene.textTurned)
+        scene.textTurned = true
+        #expect(scene.textTurned)
+        SceneHooks.setTextTurned(scene, false)
+        #expect(!scene.textTurned)
+    }
+}

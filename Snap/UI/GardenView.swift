@@ -26,8 +26,8 @@ struct GardenView: View {
         let headerH = BugBookView.headerHeight(compact: c, pauseMaxY: pause.maxY, top: info.top)
         ZStack {
             BogBackdrop(controller: controller, glow: SnapTheme.limeLight)
-            page(first, rect: info.leftPage, headerH: headerH, header: true, c)
-            page(second, rect: info.rightPage, headerH: headerH, header: false, c)
+            page(first, rect: info.leftPage, headerH: headerH, header: true, back: pause, c)
+            page(second, rect: info.rightPage, headerH: headerH, header: false, back: pause, c)
             SnapRoundButton(systemImage: "chevron.backward", label: "Back") { controller.show(.home) }
                 .position(x: pause.midX, y: pause.midY)
         }
@@ -35,7 +35,7 @@ struct GardenView: View {
         .onDisappear { store.markVarietiesSeen() }
     }
 
-    private func page(_ varieties: [TrapVariety], rect: CGRect, headerH: CGFloat, header: Bool,
+    private func page(_ varieties: [TrapVariety], rect: CGRect, headerH: CGFloat, header: Bool, back: CGRect,
                       _ c: Bool) -> some View {
         let data = store.data
         let grown = data.unlockedVarieties
@@ -57,8 +57,9 @@ struct GardenView: View {
                 Spacer(minLength: 0)
             }
             .frame(height: headerH, alignment: .bottom)
-            .padding(.trailing, !header && !info.hudOnLeft ? 64 : 0)
-            .padding(.leading, header && info.hudOnLeft ? 64 : 0)
+            // Clear of the back button where it sits in this page's header (R8: portrait's top left too).
+            .padding(.trailing, info.headerPads(rect, back: back).trailing)
+            .padding(.leading, info.headerPads(rect, back: back).leading)
             ScrollView(showsIndicators: false) {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: c ? 8 : 10), GridItem(.flexible())],
                           spacing: c ? 8 : 10) {
@@ -73,8 +74,8 @@ struct GardenView: View {
             .scrollColumn(initially: true)
         }
         .padding(.top, info.top - 8)
-        .frame(width: rect.width, height: info.size.height, alignment: .top)
-        .position(x: rect.midX, y: info.size.height / 2)
+        .frame(width: rect.width, height: rect.height, alignment: .top)
+        .position(x: rect.midX, y: rect.midY)
     }
 }
 

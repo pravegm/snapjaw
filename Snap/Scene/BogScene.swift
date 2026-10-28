@@ -79,6 +79,16 @@ final class BogScene: SKScene {
     /// are never drawn and the bite's moment plays as the digest on the reopen. Touch: today's slam.
     var usesHinge = false
 
+    /// R8 portrait (the App sets it: design/notes/portrait-R8.md): on a Duo held like a laptop the App shows this scene
+    /// turned a quarter clockwise (its midrib along the fold). Every word pop is then drawn turned a quarter back, so it
+    /// reads upright, rises toward the screen's top (scene −x), and is placed by its turned box. Scene space and all
+    /// the rest are unchanged. Default false (book pose, phones).
+    var textTurned = false {
+        didSet {
+            if textTurned != oldValue { pops.quarterTurn = textTurned }
+        }
+    }
+
     /// Where the HUD's snaps row is, in scene space (the glyph a Feast wins flies there; a sting cracks one there; a
     /// wilt droops one there). The App sets it from `HUDLayout` (QA-2 #6: the glyph that changes,
     /// `glyphCenter(snapsLeft − 1)`). nil = a fallback near the bottom of the HUD half.
@@ -971,7 +981,8 @@ final class BogScene: SKScene {
                                   minSize: 44, avoid: obstacles, banner: true)
                 pops.pop(BogScene.feastBanner, at: bp, size: bs, fill: BogPaint.ui(pal.gold),
                          stroke: BogPaint.ui(pal.ink), rise: 18, life: 1.7, hero: true, banner: true)
-                let bb = BogPops.measure(BogScene.feastBanner, size: bs)
+                // R8 portrait: the banner's box as drawn (turned when `textTurned`).
+                let bb = BogPops.drawnBox(BogPops.measure(BogScene.feastBanner, size: bs), turned: textTurned)
                 effects.bannerSparkles(around: CGRect(x: bp.x - bb.width / 2, y: bp.y - bb.height / 2,
                                                       width: bb.width, height: bb.height))
                 effects.feastBurst(at: a, tint: tint)
@@ -1124,6 +1135,9 @@ final class BogScene: SKScene {
         let g = layout.geometry
         let over = 1 + (banner ? BogPops.bannerOvershoot : BogPops.overshoot(hero: hero))
         let w = layout.size.width, h = layout.size.height
+        // R8 portrait (`textTurned`): the pop is drawn turned, so its text runs along y, it rises toward −x, and the
+        // lines "under" a callout come out along +x (the screen's down).
+        let turned = pops.quarterTurn
         let leftEdge = inTrap ? max(g.center.x - g.a - TrapArt.exteriorWidth, 12) : 12
         let rightEdge = inTrap ? min(g.center.x + g.a + TrapArt.exteriorWidth, w - 12) : w - 12
         let lo: CGFloat, hi: CGFloat
@@ -1138,7 +1152,10 @@ final class BogScene: SKScene {
             lo = layout.creaseMaxX + BogScene.creaseClear
             hi = rightEdge
         }
-        let avail = max(hi - lo, 40)
+        let yLo = inTrap ? g.center.y - g.b + 40 : 40
+        let yHi = inTrap ? min(g.center.y + g.b - 30, h - 24) : h - 24
+        // The length the text may take: across its half (landscape), or up the trap's height (turned).
+        let avail = turned ? max(yHi - yLo, 40) : max(hi - lo, 40)
         var box = BogPops.measure(text, size: size)
         if box.width * over > avail {
             // Shrink to fit, but never under `minSize` unless even that would cross the crease (the crease wins).
@@ -1148,19 +1165,22 @@ final class BogScene: SKScene {
             size = next
             box = BogPops.measure(text, size: size)
         }
-        let half = box.width * over / 2
-        let floorY = (inTrap ? g.center.y - g.b + 40 : 40) + minY + box.height / 2
-        let ceilY = (inTrap ? min(g.center.y + g.b - 30, h - 24) : h - 24) - rise - box.height / 2
+        let drawn = BogPops.drawnBox(box, turned: turned)
+        let half = drawn.width * over / 2
+        let riseX: CGFloat = turned ? rise : 0
+        let riseY: CGFloat = turned ? 0 : rise
+        let floorY = yLo + (turned ? 0 : minY) + drawn.height / 2
+        let ceilY = yHi - riseY - drawn.height / 2
         func clampX(_ v: CGFloat) -> CGFloat {
-            lo + half <= hi - half ? min(max(v, lo + half), hi - half) : (lo + hi) / 2
+            lo + half + riseX <= hi - half ? min(max(v, lo + half + riseX), hi - half) : (lo + hi) / 2
         }
         func clampY(_ v: CGFloat) -> CGFloat { floorY <= ceilY ? min(max(v, floorY), ceilY) : ceilY }
         let start = CGPoint(x: clampX(p.x), y: clampY(p.y))
         let blocks = avoid + pops.liveRects
         guard !blocks.isEmpty else { return start }
-        let hh = box.height * over / 2
+        let hh = drawn.height * over / 2
         func cost(_ c: CGPoint) -> CGFloat {
-            let foot = BogScene.popFootprint(center: c, halfWidth: half, halfHeight: hh, rise: rise)
+            let foot = BogScene.popFootprint(center: c, halfWidth: half, halfHeight: hh, rise: rise, turned: turned)
             var a: CGFloat = 0
             for b in blocks {
                 let i = foot.intersection(b)
@@ -1171,7 +1191,9 @@ final class BogScene: SKScene {
         var best = start
         var bestCost = cost(start)
         if bestCost <= 0 { return best }
-        for o in BogScene.popOffsets(downFirst: downFirst) {
+        for offset in BogScene.popOffsets(downFirst: downFirst) {
+            // Turned: the screen's down is scene +x and its right scene +y.
+            let o = turned ? CGPoint(x: -offset.y, y: offset.x) : offset
             let c = CGPoint(x: clampX(start.x + o.x), y: clampY(start.y + o.y))
             let k = cost(c)
             if k < bestCost {
@@ -1188,9 +1210,17 @@ final class BogScene: SKScene {
 
     /// R5 (#12): a pop's footprint for its whole life: its box at the pop-in overshoot (half extents `halfWidth`,
     /// `halfHeight`) about `center`, swept up its `rise`, with its drop shadow and `popGap` round it.
-    static func popFootprint(center c: CGPoint, halfWidth: CGFloat, halfHeight: CGFloat, rise: CGFloat) -> CGRect {
-        CGRect(x: c.x - halfWidth, y: c.y - halfHeight - 3, width: 2 * halfWidth + 2,
-               height: 2 * halfHeight + 3 + max(rise, 0)).insetBy(dx: -popGap, dy: -popGap)
+    /// R8 portrait (`turned`): the half extents are the turned box's (scene space), it rises toward −x and its shadow
+    /// sits +x, +y.
+    static func popFootprint(center c: CGPoint, halfWidth: CGFloat, halfHeight: CGFloat, rise: CGFloat,
+                             turned: Bool = false) -> CGRect {
+        if turned {
+            let r = max(rise, 0)
+            return CGRect(x: c.x - halfWidth - r, y: c.y - halfHeight, width: 2 * halfWidth + 3 + r,
+                          height: 2 * halfHeight + 2).insetBy(dx: -popGap, dy: -popGap)
+        }
+        return CGRect(x: c.x - halfWidth, y: c.y - halfHeight - 3, width: 2 * halfWidth + 2,
+                      height: 2 * halfHeight + 3 + max(rise, 0)).insetBy(dx: -popGap, dy: -popGap)
     }
 
     /// R5 (#12): the spots a pop tries, nearest first (sideways costs a little more than up or down; with

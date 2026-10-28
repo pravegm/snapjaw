@@ -6,16 +6,16 @@ import UIKit
 
 /// The hub of the frame loop (ARCHITECTURE "The frame loop"): BogScene.update → advance(dt:now:) → trap source (hinge,
 /// touch, pilot, fixed) → TrapSession.step → FeedbackDirector → HUD. Owns the session, the scene, the sources, the
-/// app's route, the levels and the Duo states (pose card, shut).
+/// app's route, the levels and the Duo states (the cover, shut; R8: portrait plays, the scene turned a quarter).
 ///
 /// R8 (ROUND-8 §1: the phone IS the trap): closed is not a pause. Shutting the Duo is the bite (Core's `snapped`, at
 /// the shut) and the clock stands still while it is shut (`TrapSnapshot.shut`). iOS moves the app to the outer display
 /// then, so the scene stops drawing: the hinge's own reports step the session (`stepFromHinge`), so the bite, its CHOMP
 /// and its haptic land at the shut, and the outer display shows the CHOMP card (`coverChomp`).
 ///
-/// Pauses (no stepping): the app inactive or in the background, the pause menu (the pause button only), a pose card
-/// (portrait) and a touch level's intro card. The "tired" ending plays out under a pose pause, so a finished run
-/// always reaches Results.
+/// Pauses (no stepping): the app inactive or in the background, the pause menu (the pause button only), the cover
+/// (`pose`: the cover display; R8: never portrait, which plays) and a touch level's intro card. The "tired" ending plays
+/// out under a pose pause, so a finished run always reaches Results.
 @MainActor
 final class GameController: ObservableObject, SceneDriver {
     private enum PauseReason: String, Hashable { case menu, background, pose, intro }
@@ -64,7 +64,7 @@ final class GameController: ObservableObject, SceneDriver {
     /// R8: a level's intro card (its goal in one line, a picture), up at the level's start.
     @Published private(set) var levelIntro: LevelIntro?
     @Published private(set) var pose: AppPose = .play
-    /// Demo `screen=pose|cover` forces a pose.
+    /// Demo `screen=cover|shut|chomp` forces the cover. (R8: `screen=pose` is the portrait layout, `demoPortrait`.)
     @Published private(set) var forcedPose: AppPose?
     /// Demo `screen=icon`: the app icon full screen (and rendered to Documents).
     @Published private(set) var showsIcon = false
@@ -117,6 +117,8 @@ final class GameController: ObservableObject, SceneDriver {
     private var layout: ScreenLayout?
     private var lastCanvasSize: CGSize = .zero
     private var lastCanvasFold = false
+    /// R8: the last canvas is portrait, its scene shown turned a quarter (`AppRules.turnsScene`).
+    private(set) var canvasTurned = false
     /// The layout the session was built for (its trap geometry).
     private var sessionLayout = ScreenLayout(hasFold: false)
     private var pauseReasons: Set<PauseReason> = []
@@ -187,7 +189,11 @@ final class GameController: ObservableObject, SceneDriver {
     var hasHinge: Bool { hinge.hasHinge }
     var isPaused: Bool { !pauseReasons.isEmpty }
     var hudOnLeft: Bool { demo?.hudLeft ?? settings.hudOnLeft }
+    /// R8: the HUD side the scene is laid out with (a turned, portrait scene keeps it on the right: `AppRules.hudOnLeft`).
+    private var layoutHudOnLeft: Bool { hudOnLeft && !canvasTurned }
     var demoFold: Bool { demo?.fold ?? false }
+    /// R8 demo `portrait=1` or `screen=pose`: the portrait layout on a landscape simulator (`RootView`).
+    var demoPortrait: Bool { demo?.showsPortrait ?? false }
     /// No hinge drives the trap: the copy says "tap".
     var touchWording: Bool { input == .touch }
     /// R3: the hint plate's wording. The fold is the input on a hinge, and for a pilot or held demo on a Duo layout
@@ -499,9 +505,14 @@ final class GameController: ObservableObject, SceneDriver {
         guard size.width > 10, size.height > 10 else { return }
         lastCanvasSize = size
         lastCanvasFold = hasFold
-        let newLayout = ScreenLayout.make(viewSize: size, hasFold: hasFold, hudOnLeft: hudOnLeft)
+        // R8 portrait: the same landscape scene, shown turned a quarter (its layout is the landscape one; the HUD
+        // stays on the scene's right lobe, the bottom page) and its word pops drawn upright.
+        canvasTurned = AppRules.turnsScene(size)
+        SceneHooks.setTextTurned(scene, canvasTurned)
+        let left = layoutHudOnLeft
+        let newLayout = ScreenLayout.make(viewSize: size, hasFold: hasFold, hudOnLeft: left)
         let line = "SNAP-T canvas \(Int(size.width.rounded()))x\(Int(size.height.rounded())) "
-            + "fold=\(hasFold ? 1 : 0) hudLeft=\(hudOnLeft ? 1 : 0)"
+            + "fold=\(hasFold ? 1 : 0) hudLeft=\(left ? 1 : 0)" + (canvasTurned ? " turned=1" : "")
         if line != lastCanvasLine {
             lastCanvasLine = line
             AppTrace.t(line)
@@ -537,6 +548,7 @@ final class GameController: ObservableObject, SceneDriver {
         newScene.driver = self
         scene = newScene
         SceneHooks.setUsesHinge(newScene, input == .hinge)
+        SceneHooks.setTextTurned(newScene, canvasTurned)
         sceneGeneration += 1
         drawnVariety = nil
         applyVariety()
@@ -578,7 +590,7 @@ final class GameController: ObservableObject, SceneDriver {
         feedback.silence()
     }
 
-    /// The display's pose changed (portrait card, the cover display). Logs `SNAP-T pose <pose>`.
+    /// The display's pose changed (the cover display and back; R8: portrait is play). Logs `SNAP-T pose <pose>`.
     func setPose(_ newPose: AppPose) {
         guard newPose != pose else { return }
         // Keep the bog as it was last drawn for the menus.
@@ -722,7 +734,7 @@ final class GameController: ObservableObject, SceneDriver {
 
     /// A fresh attract bog for Home (its own seed; demo runs keep theirs so frames are stable).
     private func makeHomeSession() {
-        let l = layout ?? ScreenLayout(hasFold: false, hudOnLeft: hudOnLeft)
+        let l = layout ?? ScreenLayout(hasFold: false, hudOnLeft: layoutHudOnLeft)
         sessionLayout = l
         if let scene, scene.layout != l { scene.layout = l }
         let seed: UInt64 = isDemo ? (demo?.seed ?? DemoMode.defaultSeed) : UInt64.random(in: 1...UInt64.max)
@@ -1121,9 +1133,9 @@ final class GameController: ObservableObject, SceneDriver {
             // Not laid out yet (a portrait launch): the trap is built for the screen as it will be held.
             var screen = OrientationLock.screenSize()
             if screen.width < 1 { screen = UIScreen.main.bounds.size }
-            layout = ScreenLayout.make(viewSize: screen, hasFold: false, hudOnLeft: hudOnLeft)
+            layout = ScreenLayout.make(viewSize: screen, hasFold: false, hudOnLeft: layoutHudOnLeft)
         }
-        sessionLayout = layout ?? ScreenLayout(hasFold: false, hudOnLeft: hudOnLeft)
+        sessionLayout = layout ?? ScreenLayout(hasFold: false, hudOnLeft: layoutHudOnLeft)
         let runSeed = seed(for: m)
         // R8: a level's scripted bog, limits and judge are Core's (`SessionOptions.for(.level(id))`).
         var options: SessionOptions = SessionOptions.`for`(m)
@@ -1592,7 +1604,8 @@ final class GameController: ObservableObject, SceneDriver {
             start(d.mode != nil ? d.runMode(today: day) : .feed)
             forcedPose = .cover
         case .pose:
-            forcedPose = .pose
+            // R8: the pose card is gone; `screen=pose` is the portrait layout (`demoPortrait`: RootView lays the app
+            // out turned on the landscape simulator), over a run of `mode` if given, else Home.
             if d.mode != nil { start(d.runMode(today: day)) } else { goHome() }
         case .cover:
             // R8: the outer display off a run: the closed trap at rest, "Open to play" and the next level.

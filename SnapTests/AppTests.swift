@@ -8,7 +8,8 @@ import UIKit
 // App engineer tests: progress/settings round-trip, tolerant decoding, migration and the corrupt-save backup; the
 // Daily one-scored-try rule; recording a run (Bug Book, rank, achievements) and an abandoned one; demo parsing and the
 // seeded profiles; the pose, fold and orientation rules; the First Bite's step gating; the HUD's words and log
-// formats; Game Center queue rules; the canvas and HUD layout maths; the run tally; the opaque PNG writer.
+// formats; Game Center queue rules; the canvas and HUD layout maths; the run tally; the opaque PNG writer. R8: the
+// portrait Duo (no pose card, the scene turned a quarter, the portrait HUD and menus: PortraitTests).
 
 // MARK: - Helpers
 
@@ -289,11 +290,12 @@ struct DemoTests {
 struct PoseRuleTests {
     @Test func poses() {
         #expect(AppRules.pose(canvas: CGSize(width: 951, height: 669), hingeSeen: true, isShut: false) == .play)
-        #expect(AppRules.pose(canvas: CGSize(width: 669, height: 951), hingeSeen: true, isShut: false) == .pose)
+        // R8 (founder rule: no pose demands, ever): portrait plays (the scene turned a quarter).
+        #expect(AppRules.pose(canvas: CGSize(width: 669, height: 951), hingeSeen: true, isShut: false) == .play)
         #expect(AppRules.pose(canvas: CGSize(width: 466, height: 678), hingeSeen: true, isShut: false) == .cover)
         #expect(AppRules.pose(canvas: CGSize(width: 951, height: 669), hingeSeen: true, isShut: true) == .play)
         #expect(AppRules.pose(canvas: CGSize(width: 844, height: 390), hingeSeen: false, isShut: false) == .play)
-        #expect(AppRules.pose(canvas: CGSize(width: 390, height: 844), hingeSeen: false, isShut: false) == .pose)
+        #expect(AppRules.pose(canvas: CGSize(width: 390, height: 844), hingeSeen: false, isShut: false) == .play)
     }
 
     @Test func fold() {
@@ -303,7 +305,12 @@ struct PoseRuleTests {
                                   divisionSeen: false))
         #expect(AppRules.hasFold(canvas: CGSize(width: 844, height: 390), hingeSeen: false, demoFold: true,
                                  divisionSeen: false))
-        #expect(!AppRules.hasFold(canvas: CGSize(width: 669, height: 951), hingeSeen: true, demoFold: true,
+        // R8 portrait: the laptop fold runs across the turned scene's midrib.
+        #expect(AppRules.hasFold(canvas: CGSize(width: 669, height: 951), hingeSeen: true, demoFold: false,
+                                 divisionSeen: false))
+        #expect(AppRules.hasFold(canvas: CGSize(width: 669, height: 951), hingeSeen: false, demoFold: false,
+                                 divisionSeen: false))
+        #expect(!AppRules.hasFold(canvas: CGSize(width: 390, height: 844), hingeSeen: false, demoFold: false,
                                   divisionSeen: false))
     }
 
@@ -421,20 +428,8 @@ struct WordsTests {
         #expect(AppRules.snapGainText(2) == "+2 snaps")
     }
 
-    /// The clap diagrams loop 160° → 138° → 160° and hold the clap for a still frame.
+    /// The snaps numeral's tick (R8 portrait: the clap diagram it once shared this test with is gone with the pose card).
     @Test func clapAngles() {
-        #expect(DuoClapDiagram.theta(at: 0) == DuoClapDiagram.openAngle)
-        #expect(DuoClapDiagram.theta(at: DuoClapDiagram.stillTime) == DuoClapDiagram.shutAngle)
-        #expect(DuoClapDiagram.theta(at: DuoClapDiagram.loop - 0.01) == DuoClapDiagram.openAngle)
-        #expect(DuoClapDiagram.openAngle == 160)
-        #expect(DuoClapDiagram.shutAngle == 138)
-        #expect(DuoClapDiagram.arrows(at: DuoClapDiagram.stillTime) == 1)
-        #expect(DuoClapDiagram.arrows(at: 0) == 0)
-        for i in 0..<100 {
-            let t = Double(i) * 0.05
-            let th = DuoClapDiagram.theta(at: t)
-            #expect(th >= DuoClapDiagram.shutAngle - 0.001 && th <= DuoClapDiagram.openAngle + 0.001)
-        }
         #expect(SnapsRow.tick(at: 10.0) > 1.2)
         #expect(abs(SnapsRow.tick(at: 10.5) - 1) < 1e-9)
     }
@@ -537,9 +532,7 @@ struct WordsTests {
     }
 
     @Test func cardCopy() {
-        // R8 (founder rule 2): no pose demands.
-        #expect(PoseCard.title(isDuo: true) == "Snapjaw plays sideways")
-        #expect(!PoseCard.title(isDuo: true).lowercased().contains("hold"))
+        // R8 (founder rule 2): no pose demands (the pose card is gone: PortraitTests).
         #expect(CoverCard.title(midRun: true) == "Open to keep feeding")
         #expect(CoverCard.title(midRun: false) == "Open to play")
         #expect(CoverCard.openToStart == "Open to start")
@@ -1066,17 +1059,8 @@ struct RoundFourTests {
                                   hasBest: false).sideBySide)
     }
 
-    /// REVIEW-3 #8: the fold diagrams.
+    /// REVIEW-3 #8: the fold diagrams (R8 portrait: the pose diagram is gone with the pose card).
     @Test func foldDiagrams() {
-        #expect(HomeView.foldDiagramHeight >= 120)
-        // R5: the pose diagram's outer edges come in, and grow, as the Duo snaps.
-        let open = PoseDiagramArt.point(side: 1, u: 1, v: 1, tilt: PoseDiagramArt.tilt(theta: DuoClapDiagram.openAngle))
-        let clap = PoseDiagramArt.point(side: 1, u: 1, v: 1, tilt: PoseDiagramArt.tilt(theta: DuoClapDiagram.shutAngle))
-        #expect(clap.x < open.x)
-        #expect(clap.y > open.y)
-        #expect(open.x > PoseDiagramArt.hingeX)
-        let flat = PoseDiagramArt.tilt(theta: 180)
-        #expect(abs(flat) < 1e-9)
         // The angle reads under the hinge: the label fits the glyph's height.
         for h in [CGFloat(30), 48] {
             #expect(FoldAngleGlyph.labelSize(height: h) + 6 <= h)
@@ -1134,42 +1118,7 @@ struct RoundFourTests {
 
 @MainActor
 struct RoundFiveTests {
-    /// REVIEW-4 #2: the pose card's diagram and words never overlap, stay in the safe area, keep off the fold band
-    /// and fit, at 874 × 402, 951 × 669 and both portraits (the Duo's tabletop 669 × 951 and a phone's 402 × 874).
-    @Test func poseCardFits() {
-        let cases: [(CGSize, EdgeInsets)] = [
-            (CGSize(width: 874, height: 402), EdgeInsets(top: 0, leading: 62, bottom: 21, trailing: 62)),
-            (CGSize(width: 951, height: 669), EdgeInsets()),
-            (CGSize(width: 402, height: 874), EdgeInsets(top: 62, leading: 0, bottom: 34, trailing: 0)),
-            (CGSize(width: 669, height: 951), EdgeInsets(top: 24, leading: 0, bottom: 20, trailing: 0)),
-        ]
-        for (size, insets) in cases {
-            for duo in [true, false] {
-                let l = PoseCardLayout.make(size: size, insets: insets, isDuo: duo)
-                let side = size.width >= size.height
-                #expect(l.sideBySide == side)
-                #expect(!l.diagram.intersects(l.text))
-                #expect(l.area.insetBy(dx: -0.5, dy: -0.5).contains(l.diagram))
-                #expect(l.text.minX >= l.area.minX - 0.5 && l.text.maxX <= l.area.maxX + 0.5)
-                #expect(l.text.minY >= l.area.minY - 0.5 && l.text.maxY <= l.area.maxY + 0.5)
-                #expect(l.text.height <= l.textRoom.height + 0.5)
-                #expect(l.diagram.width >= PoseCardLayout.diagramMin)
-                let aspect = l.diagram.height / max(l.diagram.width, 1)
-                #expect(abs(aspect - PoseDiagramArt.box.height / PoseDiagramArt.box.width) < 0.01)
-                let half = PoseCard.foldBand / 2 - 0.5
-                let band = side ? CGRect(x: size.width / 2 - half, y: 0, width: half * 2, height: size.height)
-                                : CGRect(x: 0, y: size.height / 2 - half, width: size.width, height: half * 2)
-                #expect(!l.diagram.intersects(band))
-                #expect(!l.text.intersects(band))
-            }
-        }
-        // A short title and one line.
-        for duo in [true, false] {
-            let sentences = PoseCard.detail(isDuo: duo).split(separator: ".").count
-            #expect(sentences == 1)
-            #expect(PoseCard.title(isDuo: duo).split(separator: " ").count <= 6)
-        }
-    }
+    // R8 portrait: REVIEW-4 #2's `poseCardFits` is gone with the pose card (every angle plays: PortraitTests).
 
     /// REVIEW-4 #4: the tired banner never shows while the numeral shows a snap, and waits ≥ 0.45 s after the bite.
     @Test func tiredBannerWaitsForZero() {
@@ -2137,5 +2086,230 @@ struct PNGTests {
         let png = try #require(SnapPNG.encode(image))
         #expect(SnapPNG.colorType(png) == 2)
         #expect(UIImage(data: png) != nil)
+    }
+}
+
+// MARK: - R8 portrait: no pose card; the scene turned a quarter (design/notes/portrait-R8.md)
+
+@MainActor
+struct PortraitTests {
+    /// The Duo's inner display held like a laptop (the fold across the middle).
+    private static let duoPortrait = CGSize(width: 669, height: 951)
+    private static let duoBook = CGSize(width: 951, height: 669)
+    /// No insets, and a guess at a camera cut-out and a home bar in portrait.
+    private static let insetCases = [EdgeInsets(), EdgeInsets(top: 24, leading: 0, bottom: 20, trailing: 0)]
+
+    private func canvas(_ insets: EdgeInsets = EdgeInsets(), hudLeft: Bool = false) -> AppCanvas {
+        AppCanvas(size: PortraitTests.duoPortrait, insets: insets,
+                  layout: ScreenLayout.make(viewSize: PortraitTests.duoPortrait, hasFold: true, hudOnLeft: hudLeft))
+    }
+
+    /// Founder rule (no pose demands, ever): a portrait Duo plays, hinge or not, open or with a stale shut latch;
+    /// only the small cover display is the cover.
+    @Test func aPortraitDuoNeverShowsAPoseCard() {
+        for hinge in [true, false] {
+            for shut in [false, true] {
+                #expect(AppRules.pose(canvas: PortraitTests.duoPortrait, hingeSeen: hinge, isShut: shut) == .play)
+                #expect(AppRules.pose(canvas: PortraitTests.duoBook, hingeSeen: hinge, isShut: false) == .play)
+            }
+        }
+        #expect(AppRules.pose(canvas: CGSize(width: 466, height: 678), hingeSeen: true, isShut: false) == .cover)
+        // The portrait canvas turns the scene, keeps its fold, and keeps the HUD on the scene's right lobe.
+        #expect(AppRules.turnsScene(PortraitTests.duoPortrait))
+        #expect(!AppRules.turnsScene(PortraitTests.duoBook))
+        #expect(AppRules.sceneViewSize(PortraitTests.duoPortrait) == PortraitTests.duoBook)
+        #expect(AppRules.sceneViewSize(PortraitTests.duoBook) == PortraitTests.duoBook)
+        #expect(AppRules.hasFold(canvas: PortraitTests.duoPortrait, hingeSeen: true, demoFold: false,
+                                 divisionSeen: true))
+        #expect(!AppRules.hudOnLeft(true, canvas: PortraitTests.duoPortrait))
+        #expect(AppRules.hudOnLeft(true, canvas: PortraitTests.duoBook))
+        // The same landscape scene either way (Core's geometry never changes with the pose).
+        let turned = ScreenLayout.make(viewSize: PortraitTests.duoPortrait, hasFold: true)
+        let book = ScreenLayout.make(viewSize: PortraitTests.duoBook, hasFold: true)
+        #expect(turned == book)
+    }
+
+    #if DEBUG
+    /// CI: `portrait=1` (and the old pose card's `screen=pose`) lay the app out portrait on a landscape simulator.
+    @Test func portraitDemoKeys() {
+        #expect(DemoMode.parse("portrait=1").showsPortrait)
+        #expect(DemoMode.parse("screen=pose").showsPortrait)
+        #expect(DemoMode.parse("screen=play;portrait=1;pilot=expert").showsPortrait)
+        #expect(!DemoMode.parse("screen=home").showsPortrait)
+        #expect(AppRules.demoTurnsCanvas(PortraitTests.duoBook, demoPortrait: true))
+        #expect(!AppRules.demoTurnsCanvas(PortraitTests.duoPortrait, demoPortrait: true))
+        #expect(!AppRules.demoTurnsCanvas(PortraitTests.duoBook, demoPortrait: false))
+        let i = RootView.turnedInsets(EdgeInsets(top: 1, leading: 2, bottom: 3, trailing: 4))
+        #expect(i == EdgeInsets(top: 2, leading: 3, bottom: 4, trailing: 1))
+    }
+    #endif
+
+    /// The quarter turn: scene point → screen point and back, and where the fold, the trap and the pages land.
+    @Test func theTurnMapsTheSceneOntoTheScreen() {
+        let c = canvas()
+        #expect(c.rotated)
+        #expect(near(c.sceneViewSize.width, 951))
+        #expect(near(c.sceneViewSize.height, 669))
+        // The trap's centre is the screen's centre.
+        let mid = c.screenPoint(CGPoint(x: 476, y: 335))
+        #expect(near(mid.x, 334.5))
+        #expect(near(mid.y, 475.5))
+        // Turned clockwise: the scene's top-left corner is the screen's top-right, its bottom-right the bottom-left.
+        let topLeft = c.screenPoint(CGPoint(x: 0, y: 670))
+        #expect(near(topLeft.x, 669))
+        #expect(near(topLeft.y, 0))
+        let bottomRight = c.screenPoint(CGPoint(x: 952, y: 0))
+        #expect(near(bottomRight.x, 0))
+        #expect(near(bottomRight.y, 951))
+        // Scene right is screen down (the right lobe is the bottom half); scene up is screen right.
+        #expect(c.screenPoint(CGPoint(x: 800, y: 335)).y > mid.y + 300)
+        #expect(c.screenPoint(CGPoint(x: 476, y: 600)).x > mid.x + 200)
+        // The whole scene covers the canvas, as the turned SpriteView does.
+        let all = c.screenRect(CGRect(x: 0, y: 0, width: 952, height: 670))
+        #expect(near(all.minX, 0) && near(all.minY, 0))
+        #expect(near(all.width, 669) && near(all.height, 951))
+        // scenePoint inverts it.
+        for p in [CGPoint(x: 700, y: 120), CGPoint(x: 30, y: 640), CGPoint(x: 476, y: 335), CGPoint(x: 900, y: 20)] {
+            let back = c.scenePoint(c.screenPoint(p))
+            #expect(near(back.x, p.x))
+            #expect(near(back.y, p.y))
+        }
+        // The fold runs across the middle; the trap is tall.
+        #expect(near(c.foldMinY, 455.5))
+        #expect(near(c.foldMaxY, 495.5))
+        #expect(near(c.foldBand.width, 669))
+        let t = c.trapRect
+        #expect(t.height > t.width)
+        #expect(near(t.midX, 334.5))
+        #expect(near(t.midY, 475.5))
+        // The pages: the top (other) and the bottom (HUD) halves, off the fold.
+        #expect(c.otherPage == c.leftPage)
+        #expect(c.hudPage == c.rightPage)
+        #expect(c.leftPage.maxY <= c.foldMinY)
+        #expect(c.rightPage.minY >= c.foldMaxY)
+        #expect(!c.isFoldClear(CGRect(x: 100, y: 470, width: 40, height: 10)))
+        #expect(c.isFoldClear(CGRect(x: 100, y: 300, width: 400, height: 100)))
+        // Book pose is untouched.
+        let book = AppCanvas(size: PortraitTests.duoBook, insets: EdgeInsets(),
+                             layout: ScreenLayout.make(viewSize: PortraitTests.duoBook, hasFold: true))
+        #expect(!book.rotated)
+        let bookMid = book.screenPoint(CGPoint(x: 476, y: 335))
+        #expect(near(bookMid.x, 475.5))
+        #expect(near(bookMid.y, 334.5))
+        #expect(near(book.leftPage.height, 669))
+    }
+
+    /// The portrait HUD: upright rects in the bottom page's corners, off the fold band, ≥ 8 pt clear of the cilia
+    /// (the Scene's own `TrapArt.teeth`, every variety), every hint line fitting its plate.
+    @Test func thePortraitHUDIsUprightOffTheFoldAndClearOfTheCilia() {
+        for insets in PortraitTests.insetCases {
+            for left in [false, true] {
+                let c = canvas(insets, hudLeft: left)
+                let outline = c.trapOutline()
+                #expect(outline.count > 700)
+                let l = HUDLayout.make(c)
+                for rect in l.ciliaRects {
+                    #expect(AppCanvas.clearance(rect, from: outline) >= AppCanvas.ciliaClear)
+                    #expect(rect.minX >= -0.5 && rect.maxX <= c.size.width + 0.5)
+                    #expect(rect.minY >= -0.5 && rect.maxY <= c.size.height + 0.5)
+                }
+                for rect in l.textRects + [l.lessonHint, l.lesson, l.pause, l.back] {
+                    #expect(c.isFoldClear(rect))
+                }
+                // The score and the snaps in the bottom page's two corners, the pause button over the score.
+                #expect(l.score.minY >= c.foldMaxY)
+                #expect(l.snaps.minY >= c.foldMaxY)
+                #expect(l.pause.minY >= c.foldMaxY)
+                #expect(l.pause.maxY <= l.score.minY + 0.5)
+                #expect(l.pause.width >= AppCanvas.minTap)
+                #expect(l.score.width >= HUDLayout.portraitScoreMin - 0.5)
+                #expect(l.trailing == !left)
+                #expect(l.snapsTrailing == left)
+                #expect(l.chainTrailing == !left)
+                if left {
+                    #expect(l.score.maxX < c.size.width / 2)
+                    #expect(l.snaps.minX > c.size.width / 2)
+                } else {
+                    #expect(l.score.minX > c.size.width / 2)
+                    #expect(l.snaps.maxX < c.size.width / 2)
+                }
+                #expect(!l.score.intersects(l.snaps))
+                // The glyphs: rows of 7 or 5, every glyph in its row, the numeral over them.
+                #expect(HUDLayout.portraitColumns.contains(l.columns))
+                #expect(l.snapRows == (HUDLayout.slotCount + l.columns - 1) / l.columns)
+                #expect(l.snapRowRects.count == l.snapRows)
+                #expect(l.glyph >= HUDLayout.glyphMin)
+                #expect(l.snaps.contains(l.numeral))
+                for i in 0..<HUDLayout.slotCount {
+                    let p = l.glyphCenter(i)
+                    let row = l.snapRowRects[min(i / l.columns, l.snapRowRects.count - 1)]
+                    #expect(row.insetBy(dx: -0.5, dy: -0.5).contains(p))
+                    #expect(!l.numeral.insetBy(dx: 1, dy: 1).contains(p))
+                }
+                // The hint's two slots hang under the fold, side by side, off the hands; every line fits.
+                #expect(!l.hint.intersects(l.lessonHint))
+                for plate in [l.hint, l.lessonHint] {
+                    #expect(plate.minY >= c.foldMaxY)
+                    #expect(plate.width >= HUDLayout.hintMin)
+                    #expect(!c.inThumbZone(plate))
+                    for line in AppRules.allHintLines {
+                        #expect(HintFit.fits(line.text, plateWidth: plate.width, compact: c.isCompact, long: line.long))
+                    }
+                }
+                // "Your trap is tired." and the pause card on the bottom page.
+                #expect(abs(l.tired.midX - c.hudPage.midX) < 1)
+                #expect(c.hudPage.insetBy(dx: -1, dy: -1).contains(CGPoint(x: l.tired.midX, y: l.tired.midY)))
+                #expect(l.card.minY >= c.foldMaxY)
+                // A level's goal line: the score's mirror through the centre, on the top page.
+                let goal = LevelGoalLayout.rect(c, score: l.score)
+                #expect(goal.maxY <= c.foldMinY)
+                #expect(c.isFoldClear(goal))
+                #expect(!goal.intersects(l.chain))
+                // The score sits on the scene's right lobe (the Scene's HUD half), as in book pose.
+                let s = c.scenePoint(CGPoint(x: l.score.midX, y: l.score.midY))
+                #expect(s.x > c.layout.creaseMaxX)
+            }
+        }
+    }
+
+    /// The menus lay out on the top and bottom pages: the back button top left, headers and columns clear of it.
+    @Test func menusLayOutOnTheTopAndBottomPages() {
+        for insets in PortraitTests.insetCases {
+            let c = canvas(insets)
+            let back = HUDLayout.make(c).back
+            #expect(c.leftPage.contains(CGPoint(x: back.midX, y: back.midY)))
+            #expect(c.isFoldClear(back))
+            #expect(c.headerPads(c.leftPage, back: back).leading >= back.width)
+            #expect(near(c.headerPads(c.leftPage, back: back).trailing, 0))
+            #expect(near(c.headerPads(c.rightPage, back: back).leading, 0))
+            #expect(near(c.headerPads(c.rightPage, back: back).trailing, 0))
+            #expect(c.columnTop(c.leftPage, back: back) >= back.maxY)
+            #expect(near(c.columnTop(c.rightPage, back: back), c.top))
+            for page in [c.leftPage, c.rightPage] {
+                #expect(c.isFoldClear(page))
+                #expect(page.width >= 600)
+                #expect(page.height >= 380)
+            }
+            #expect(!c.isCompact)
+            #expect(near(c.hudHalf.minY, c.foldMaxY))
+            #expect(near(c.hudHalf.maxY, c.size.height))
+            #expect(near(c.otherHalf.maxY, c.foldMinY))
+            #expect(c.towardHUD.start == .top)
+            #expect(c.towardHUD.end == .bottom)
+        }
+        // Book pose keeps R7's paddings: 64 pt on the HUD page's header, its column under the back button.
+        let book = AppCanvas(size: PortraitTests.duoBook, insets: EdgeInsets(),
+                             layout: ScreenLayout.make(viewSize: PortraitTests.duoBook, hasFold: true))
+        let lb = HUDLayout.make(book).back
+        #expect(near(book.headerPads(book.rightPage, back: lb).trailing, 64))
+        #expect(near(book.headerPads(book.leftPage, back: lb).leading, 0))
+        #expect(near(book.columnTop(book.hudPage, back: lb), lb.maxY + 10))
+        #expect(near(book.columnTop(book.otherPage, back: lb), book.top))
+        #expect(book.towardHUD.start == .leading)
+        let left = AppCanvas(size: PortraitTests.duoBook, insets: EdgeInsets(),
+                             layout: ScreenLayout.make(viewSize: PortraitTests.duoBook, hasFold: true, hudOnLeft: true))
+        let ll = HUDLayout.make(left).back
+        #expect(near(left.headerPads(left.leftPage, back: ll).leading, 64))
+        #expect(near(left.headerPads(left.rightPage, back: ll).trailing, 0))
     }
 }

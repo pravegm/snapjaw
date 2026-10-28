@@ -17,11 +17,11 @@ enum AppRoute: String, Equatable {
 }
 
 /// What the display should show, from the canvas shape, the hinge and the shut latch (AppRules.pose).
+/// R8 (founder rule: no pose demands, ever): the pose card is gone; a portrait canvas plays, the scene turned a
+/// quarter (`AppRules.turnsScene`).
 enum AppPose: String, Equatable {
-    /// Landscape (the Duo held like a book, or any phone turned sideways): the game and its screens.
+    /// The game and its screens: the Duo held like a book or like a laptop, flat, any angle; any phone.
     case play
-    /// Portrait on a Duo (tabletop) or a phone held upright: "Hold it open like a book".
-    case pose
     /// The Duo shut, or the small cover display: "Open to carry on".
     case cover
 }

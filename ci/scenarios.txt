@@ -46,7 +46,7 @@
 28-book-mid|screen=book;progress=mid|6|Bug Book: 9 of 16 drawn with name, joke and count; the rest silhouettes|SNAP-T canvas
 29-book-late|screen=book;progress=late|6|Bug Book, all 16 found (bees show "spared")|SNAP-T canvas
 30-settings|screen=settings|5|Settings: Sound, Haptics, Respect silent switch, Score on the left, Reduce motion, Replay First Bite, Game Center, About|SNAP-T canvas
-31-pose|screen=pose|5|The pose card (R8: no pose demand): "Snapjaw plays sideways", "The two halves are its jaws." with its diagram|SNAP-T canvas
+31-pose|screen=pose;fold=1|5|R8 portrait: the pose card is gone (every angle plays). `screen=pose` lays Home out portrait (402 x 874 here, with a fold as on a Duo held like a laptop), turned a quarter counter-clockwise onto the landscape capture (turn the PNG a quarter clockwise to read it); the Duo's own portrait frames are ci/duo-scenarios.txt 17 and 32–36|turned=1
 32-cover|screen=cover|5|R8 the outer display off a run: the closed trap at rest, "Snapjaw", the next level, "Open to play"|SNAP-T canvas
 # R2: hunger (GAME-DESIGN §5)
 33-play-hungry|screen=play;seed=7;freezeOn=hungry|40|No pilot and no taps, so nothing is eaten. Hungry: the next snap glyph draining, "Hungry… bite!"|SNAP-T event hungry

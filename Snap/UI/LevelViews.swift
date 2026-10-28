@@ -3,11 +3,13 @@ import SwiftUI
 // MARK: - R8: Levels (ROUND-8 §4): the map, the intro card, the goal line, "Close the phone to start", the results
 
 /// Where a level's goal line sits: the other page's top outer corner, the score's mirror (so it clears the cilia as
-/// the score does). Pure; tested.
+/// the score does). Pure; tested. R8 portrait: the score sits in a bottom corner, so the goal is its mirror through
+/// the centre (the top page's opposite corner; the trap is symmetric both ways).
 enum LevelGoalLayout {
     static func rect(_ info: AppCanvas, score: CGRect) -> CGRect {
         let extra: CGFloat = info.isCompact ? 8 : 12
-        return CGRect(x: info.size.width - score.maxX, y: score.minY, width: score.width, height: score.height + extra)
+        let y = info.rotated ? info.size.height - score.maxY : score.minY
+        return CGRect(x: info.size.width - score.maxX, y: y, width: score.width, height: score.height + extra)
     }
 }
 
@@ -72,8 +74,7 @@ struct CloseToStartCard: View {
         let c = info.isCompact
         ZStack {
             LinearGradient(colors: [SnapTheme.night.opacity(0.0), SnapTheme.night.opacity(0.55)],
-                           startPoint: info.hudOnLeft ? .trailing : .leading,
-                           endPoint: info.hudOnLeft ? .leading : .trailing)
+                           startPoint: info.towardHUD.start, endPoint: info.towardHUD.end)
             VStack(spacing: c ? 10 : 16) {
                 if !touch {
                     ClosingPhoneGlyph(reduceMotion: reduceMotion)
@@ -96,7 +97,7 @@ struct CloseToStartCard: View {
                 }
             }
             .frame(width: min(page.width, 380))
-            .position(x: page.midX, y: info.size.height / 2)
+            .position(x: page.midX, y: page.midY)
         }
         .frame(width: info.size.width, height: info.size.height)
         .accessibilityElement(children: .combine)
@@ -227,7 +228,7 @@ struct LevelIntroCard: View {
                 }
             }
             .frame(width: min(other.width, 420))
-            .position(x: other.midX, y: info.size.height * 0.46)
+            .position(x: other.midX, y: other.minY + other.height * 0.46)
             .entrance(0, reduceMotion: reduceMotion)
             .allowsHitTesting(false)
             VStack(spacing: c ? 10 : 16) {
@@ -251,7 +252,7 @@ struct LevelIntroCard: View {
             .padding(c ? 14 : 22)
             .frame(width: min(page.width, c ? 320 : 380))
             .background(LeafPanel(big: 34, small: 12, accent: SnapTheme.goldLight))
-            .position(x: page.midX, y: info.size.height / 2)
+            .position(x: page.midX, y: page.midY)
             .entrance(1, reduceMotion: reduceMotion)
         }
         .frame(width: info.size.width, height: info.size.height)
@@ -276,14 +277,18 @@ struct LevelMapView: View {
         let next = LevelRules.next(data)
         let shown = world ?? LevelRules.world(of: next ?? 1)
         let back = HUDLayout.make(info).back
+        let page = info.hudPage
+        // Under the back button when it sits on this page (landscape), else from the page's own top (portrait).
+        let padsTop = page.minY > 0.5 ? page.minY + 8 : back.maxY + 8
+        let padsBottom = page.maxY - 16
         ZStack {
             BogBackdrop(controller: controller, glow: SnapTheme.goldLight)
             worlds(data, shown: shown, c)
                 .frame(width: min(info.otherPage.width, 400))
-                .position(x: info.otherPage.midX, y: info.size.height / 2)
+                .position(x: info.otherPage.midX, y: info.otherPage.midY)
             pads(data, world: shown, next: next, c)
-                .frame(width: info.hudPage.width, height: info.size.height - (back.maxY + 8) - 16)
-                .position(x: info.hudPage.midX, y: (back.maxY + 8 + info.size.height - 16) / 2)
+                .frame(width: page.width, height: max(padsBottom - padsTop, 0))
+                .position(x: page.midX, y: (padsTop + padsBottom) / 2)
             SnapRoundButton(systemImage: "chevron.backward", label: "Back") { controller.show(.home) }
                 .position(x: back.midX, y: back.midY)
         }
@@ -497,7 +502,7 @@ struct LevelResultsView: View {
                     .snapLegible()
             }
             .frame(width: min(other.width, 440))
-            .position(x: other.midX, y: info.size.height / 2)
+            .position(x: other.midX, y: other.midY)
             VStack(spacing: c ? 10 : 14) {
                 if let w = level.worldOpened {
                     HStack(spacing: 8) {
@@ -547,7 +552,7 @@ struct LevelResultsView: View {
                 .entrance(4, reduceMotion: controller.reduceMotion)
             }
             .frame(width: min(page.width, 360))
-            .position(x: page.midX, y: info.size.height / 2)
+            .position(x: page.midX, y: page.midY)
         }
         .frame(width: info.size.width, height: info.size.height)
         .onAppear { landStars(instant: instant) }
