@@ -1,27 +1,27 @@
 import SwiftUI
 
-/// Home: the live bog behind the menu (an attract session drawn by the real scene, REVIEW-1 #12: snap the Duo a
-/// little shut and it chomps whatever has landed, with `FeedbackDirector.homeTrap`; a tap on other iPhones), the title
-/// on the other page, and the four buttons on the HUD page (the right, sharp half by default): Feed, Daily Bog, Bug
-/// Book, Settings. Shows the plant rank (and what grows it), the best and the Daily's status.
+/// Home (R8, rebuilt: "Menus feel cheap"): the live bog behind everything (an attract session drawn by the real scene:
+/// close the phone and it chomps whatever has landed; a tap on other iPhones). One focal action, Play, which goes on to
+/// the next level (Level 1 on a first launch: Levels 1–5 teach); Endless, the Daily and Zen as three lily pads under
+/// it; the map, the Bug Book, the Garden and Settings as a quiet row. The title, the rank and the goals on the other
+/// page, in few words. Everything off the fold, and it rises into place on entry.
 struct HomeView: View {
     @ObservedObject var controller: GameController
     @ObservedObject var store: ProgressStore
     let info: AppCanvas
 
-    /// The caption under Home's clap diagram.
-    /// R7 (ci-R7.md #9, D06): the captions' and the pose card's words.
-    static let foldCaption = "Snap it a little shut"
-    static let foldDetail = "The two halves are the trap. Bite, then open."
-    /// R4 (REVIEW-3 #8): the clap diagram's height on Home (it was ~65 pt, on the cilia).
+    /// R8: the input in words (the pose card, Settings).
+    static let foldCaption = "Close the phone to bite"
+    static let foldDetail = "The two halves are the trap. Open them to feed."
+    /// R4 (REVIEW-3 #8): kept for the fold diagram's other uses (the pose card).
     static let foldDiagramHeight: CGFloat = 120
 
     var body: some View {
         let c = info.isCompact
         let page = info.hudPage
         let other = info.otherPage
-        let buttonsW = min(page.width, c ? 300 : 340)
-        // The shade under the buttons runs from the fold to the screen's own edge (no seam at the safe area).
+        let actionsW = min(page.width, c ? 320 : 360)
+        // The shade under the actions runs from the fold to the screen's own edge (no seam at the safe area).
         let shadeX0 = info.hudOnLeft ? 0 : info.foldMaxX
         let shadeX1 = info.hudOnLeft ? info.foldMinX : info.size.width
         let otherX0 = info.hudOnLeft ? info.foldMaxX : 0
@@ -30,29 +30,28 @@ struct HomeView: View {
             if controller.scene == nil { SnapBackdrop() }
             HomeTrapLayer(trap: controller.homeTrap, info: info, reduceMotion: controller.reduceMotion,
                           onTap: { controller.homeTrapTapped() })
-            LinearGradient(colors: [SnapTheme.night.opacity(0.05), SnapTheme.night.opacity(0.66)],
+            LinearGradient(colors: [SnapTheme.night.opacity(0.08), SnapTheme.night.opacity(0.72)],
                            startPoint: info.hudOnLeft ? .trailing : .leading,
                            endPoint: info.hudOnLeft ? .leading : .trailing)
                 .frame(width: max(shadeX1 - shadeX0, 0), height: info.size.height)
                 .position(x: (shadeX0 + shadeX1) / 2, y: info.size.height / 2)
                 .allowsHitTesting(false)
             // A soft shade behind the title so it reads over the lobe (never a slab over the trap).
-            RadialGradient(colors: [SnapTheme.night.opacity(0.62), SnapTheme.night.opacity(0)], center: .center,
+            RadialGradient(colors: [SnapTheme.night.opacity(0.66), SnapTheme.night.opacity(0)], center: .center,
                            startRadius: 10, endRadius: max(otherX1 - otherX0, 1) * 0.62)
                 .frame(width: max(otherX1 - otherX0, 0), height: info.size.height)
-                .position(x: (otherX0 + otherX1) / 2, y: info.size.height * 0.42)
+                .position(x: (otherX0 + otherX1) / 2, y: info.size.height * 0.45)
                 .allowsHitTesting(false)
             titleBlock(c)
-                .frame(width: min(other.width, 400))
-                .position(x: other.midX, y: info.size.height * (c ? 0.44 : 0.42))
+                .frame(width: min(other.width, 420))
+                .position(x: other.midX, y: info.size.height * 0.47)
                 .allowsHitTesting(false)
-            buttons(c)
-                .frame(width: buttonsW)
-                .position(x: page.midX, y: info.size.height / 2 + (c ? 4 : 10))
+            actions(c)
+                .frame(width: actionsW)
+                .position(x: page.midX, y: info.size.height / 2 + (c ? 2 : 8))
         }
         .frame(width: info.size.width, height: info.size.height)
-        // R7 (Scene/Core #4, frames 01, 52, D06: bugs peeked out from behind the buttons): the buttons' real frames,
-        // in scene space, are the Home bog's clear zone.
+        // R7 (Scene/Core #4): the buttons' real frames, in scene space, are the Home bog's clear zone.
         .coordinateSpace(.named(Self.space))
         .onPreferenceChange(HomeButtonFramesKey.self) { frames in
             controller.setHomeButtonFrames(Self.sceneRects(frames, info: info))
@@ -80,71 +79,58 @@ struct HomeView: View {
 
     // MARK: Title
 
-    /// R5 (REVIEW-4 #12, 03: "Snap it shut a little" was on the subtitle and the clap card): on a Duo the subtitle
-    /// gives the rule and the clap card the move.
-    static let foldSubtitle = "Wait for a crowd, then bite."
-    static let touchSubtitle = "Tap the trap. It bites!"
+    /// R8: one line under the name: the rule (phones: how to bite).
+    static let foldSubtitle = "Feed the flytrap. Spare bees."
+    static let touchSubtitle = "Tap to snap. Spare bees."
 
     static func subtitle(foldInput: Bool) -> String { foldInput ? foldSubtitle : touchSubtitle }
 
     private func titleBlock(_ c: Bool) -> some View {
         let rank = store.rank
         let progress = ProgressRules.rankProgress(lifetime: store.data.growth, rank: rank)
-        return VStack(spacing: c ? 4 : 8) {
-            Text(AppBrand.name)
-                .font(SnapType.wordmark(c))
-                .foregroundStyle(LinearGradient(colors: [SnapTheme.cream, SnapTheme.limeLight], startPoint: .top,
-                                                endPoint: .bottom))
+        let rm = controller.reduceMotion
+        return VStack(spacing: c ? 6 : 12) {
+            DisplayText(text: AppBrand.name, size: c ? 60 : 88, tilt: -3)
+                .entrance(0, reduceMotion: rm)
+            Text(Self.subtitle(foldInput: controller.showsFoldInput(info)))
+                .font(SnapType.headline(c))
+                .foregroundStyle(SnapTheme.cream)
                 .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .shadow(color: SnapTheme.crimsonDeep, radius: 0, x: 0, y: 4)
+                .minimumScaleFactor(0.75)
                 .snapLegible()
-            // R5 (REVIEW-4 #12, 01–02: the attract fly sat on "bees."): the tagline and the subtitle sit on the rank's
-            // card, so a bug of the live bog passes under them, never across the words.
-            VStack(alignment: .leading, spacing: 6) {
-                VStack(spacing: 2) {
-                    Text(AppBrand.tagline)
-                        .font(SnapType.headline(c))
-                        .foregroundStyle(SnapTheme.cream)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                    Text(Self.subtitle(foldInput: controller.showsFoldInput(info)))
-                        .font(SnapType.caption(c))
-                        .foregroundStyle(SnapTheme.mist)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-                .frame(maxWidth: .infinity)
-                Rectangle().fill(SnapTheme.stroke).frame(height: 1)
-                    .padding(.vertical, c ? 1 : 3)
-                HStack(spacing: 8) {
-                    Image(systemName: "leaf.fill")
-                        .foregroundStyle(SnapTheme.lime)
+                .entrance(1, reduceMotion: rm)
+            // The rank and the stars: one strip.
+            HStack(spacing: c ? 10 : 14) {
+                HStack(spacing: 6) {
+                    Image(systemName: "leaf.fill").foregroundStyle(SnapTheme.lime)
                     Text(PlantRanks.title(rank))
                         .font(SnapType.body(c))
                         .foregroundStyle(SnapTheme.cream)
-                    Spacer(minLength: 6)
-                    if store.data.bestFeed > 0 {
-                        Text("Best " + AppRules.formatted(store.data.bestFeed))
-                            .font(SnapType.body(c).monospacedDigit())
-                            .foregroundStyle(SnapTheme.gold)
-                    }
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
-                SnapProgressBar(value: progress, height: 8)
-                Text(AppRules.rankHint(lifetimeBugs: store.data.growth))
-                    .font(SnapType.caption(c))
-                    .foregroundStyle(SnapTheme.mist)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                SnapProgressBar(value: progress, height: 7)
+                    .frame(width: c ? 60 : 84)
+                Text("★ \(LevelRules.totalStars(store.data))")
+                    .font(SnapType.body(c).monospacedDigit().weight(.heavy))
+                    .foregroundStyle(SnapTheme.gold)
+                if store.data.bestFeed > 0 {
+                    Text("Best " + AppRules.formatted(store.data.bestFeed))
+                        .font(SnapType.body(c).monospacedDigit())
+                        .foregroundStyle(SnapTheme.goldLight)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
             }
-            .frame(maxWidth: 320)
-            .snapCard(padding: c ? 10 : 14, radius: 18)
-            .padding(.top, c ? 2 : 6)
+            .padding(.horizontal, c ? 12 : 16)
+            .padding(.vertical, c ? 7 : 10)
+            .background(LeafPanel(big: 20, small: 7))
             .accessibilityElement(children: .combine)
-            // R6: the three goals (the best of any run so far), under the rank they grow.
-            // R7 (#15): each goal wears its tier (a dot and its word).
-            GoalsCard(lines: ProgressRules.goalLines(store.goalBook), compact: c, tierLabels: true)
-                .frame(maxWidth: 320)
+            .entrance(2, reduceMotion: rm)
+            // R6: the three goals (R8: a compact leaf, the goals Endless, the Daily and Zen play for).
+            GoalsCard(lines: ProgressRules.goalLines(store.goalBook), compact: true, tierLabels: false, bars: !c)
+                .frame(maxWidth: c ? 300 : 340)
+                .entrance(3, reduceMotion: rm)
         }
     }
 
@@ -161,122 +147,156 @@ struct HomeView: View {
         data.unlockedVarieties.contains { !data.varietiesSeen.contains($0.rawValue) }
     }
 
-    // MARK: Buttons
+    /// R8: Play's line: the level it goes on to ("Level 3 · Catch 3 flies"), or Endless when every level is done.
+    static func playLine(_ data: ProgressData) -> String {
+        guard let next = LevelRules.next(data) else { return "Endless" }
+        let goal = LevelBridge.spec(next).map { " · " + LevelBridge.goal($0) } ?? ""
+        return LevelWords.levelName(next) + goal
+    }
 
-    private func buttons(_ c: Bool) -> some View {
+    // MARK: Actions
+
+    private func actions(_ c: Bool) -> some View {
         let today = controller.today
-        let found = store.data.speciesFound
-        return VStack(spacing: c ? 8 : 14) {
-            // ROUND-3 founder call, R4 (REVIEW-3 #8): on a Duo the fold is the input, so Home shows it big (≥ 120 pt),
-            // looping, on its own card above Feed (off the trap's cilia).
-            if controller.showsFoldInput(info) {
-                HStack(spacing: c ? 8 : 12) {
-                    DuoClapDiagram(reduceMotion: controller.reduceMotion, showsAngle: true)
-                        .frame(width: Self.foldDiagramHeight * 1.3, height: Self.foldDiagramHeight)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(Self.foldCaption)
-                            .font(SnapType.headline(c))
-                            .foregroundStyle(SnapTheme.cream)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(Self.foldDetail)
-                            .font(SnapType.caption(c))
-                            .foregroundStyle(SnapTheme.mist)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .snapCard(padding: c ? 6 : 10, radius: 18)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(Self.foldCaption + ". " + Self.foldDetail)
+        let rm = controller.reduceMotion
+        let pad: CGFloat = c ? 62 : 84
+        return VStack(spacing: c ? 10 : 18) {
+            // The one focal action.
+            PlayButton(line: Self.playLine(store.data), compact: c, action: { controller.play() })
                 .homeButtonFrame()
-            }
-            SnapButton(kind: .primary, height: c ? 58 : 70, compact: c, action: { controller.play() }) {
-                Label("Feed", systemImage: "fork.knife")
-            }
-            .accessibilityHint("Start a run")
-            .homeButtonFrame()
-            SnapButton(kind: .secondary, height: c ? 52 : 60, compact: c, action: { controller.show(.daily) }) {
-                HStack(spacing: 10) {
-                    Image(systemName: "sun.max.fill").foregroundStyle(SnapTheme.gold)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Daily Bog")
-                        Text(dailyStatus(today))
-                            .font(SnapType.caption(true))
-                            .foregroundStyle(SnapTheme.mist)
-                    }
-                    Spacer(minLength: 0)
-                    // R6: the Daily streak, next to "Today's bog is ready".
-                    if let badge = Self.streakBadge(store.streak(today: today)) {
-                        Text(badge)
-                            .font(SnapType.caption(c).weight(.heavy).monospacedDigit())
-                            .foregroundStyle(SnapTheme.cream)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(SnapTheme.crimson.opacity(0.85)))
-                            .fixedSize()
-                            .accessibilityLabel("\(store.streak(today: today))-day streak")
-                    }
+                .entrance(0, reduceMotion: rm)
+            // R8 (founder rule 5): Endless, the Daily and Zen are always one tap away.
+            HStack(alignment: .top, spacing: c ? 8 : 14) {
+                PadButton(title: "Endless", detail: store.data.bestFeed > 0
+                          ? "Best " + AppRules.formatted(store.data.bestFeed) : "Until the night",
+                          size: pad, tint: SnapTheme.mossLight, action: { controller.playEndless() }) {
+                    Image(systemName: "infinity")
+                        .font(.system(size: pad * 0.36, weight: .black))
+                        .foregroundStyle(SnapTheme.limeLight)
+                        .snapLegible()
+                }
+                PadButton(title: "Daily", detail: dailyStatus(today), size: pad, tint: Color(snapHex: 0x5C7A2E),
+                          badge: Self.streakBadge(store.streak(today: today)), action: { controller.show(.daily) }) {
+                    Image(systemName: "sun.max.fill")
+                        .font(.system(size: pad * 0.36, weight: .black))
+                        .foregroundStyle(SnapTheme.gold)
+                        .snapLegible()
+                }
+                PadButton(title: "Zen", detail: Self.zenDetail, size: pad, tint: Color(snapHex: 0x2F6E5C),
+                          action: { controller.playZen() }) {
+                    Image(systemName: "leaf.fill")
+                        .font(.system(size: pad * 0.34, weight: .black))
+                        .foregroundStyle(Color(snapHex: 0xBFF0D8))
+                        .snapLegible()
                 }
             }
             .homeButtonFrame()
-            // R6: the Zen Bog and the Garden.
-            HStack(spacing: c ? 8 : 12) {
-                SnapButton(kind: .secondary, height: c ? 52 : 60, compact: c, action: { controller.playZen() }) {
-                    VStack(spacing: 0) {
-                        Text("Zen Bog")
-                        Text(Self.zenDetail)
-                            .font(SnapType.caption(true))
-                            .foregroundStyle(SnapTheme.mist)
-                    }
-                }
-                .accessibilityHint("A calm bog that never ends")
-                SnapButton(kind: .secondary, height: c ? 52 : 60, compact: c, action: { controller.show(.garden) }) {
-                    VStack(spacing: 0) {
-                        Text("Garden")
-                        HStack(spacing: 4) {
-                            Text(Self.gardenCount(store.data))
-                                .font(SnapType.caption(true).monospacedDigit())
-                                .foregroundStyle(SnapTheme.mist)
-                            if Self.gardenHasNew(store.data) {
-                                Text("New")
-                                    .font(.system(size: 10, weight: .heavy, design: .rounded))
-                                    .foregroundStyle(SnapTheme.ink)
-                                    .padding(.horizontal, 5)
-                                    .background(Capsule().fill(SnapTheme.gold))
-                            }
-                        }
-                    }
-                }
-                .accessibilityHint("Choose your trap")
+            .entrance(1, reduceMotion: rm)
+            // The quiet row.
+            HStack(spacing: c ? 6 : 10) {
+                QuietIcon(systemImage: "map.fill", label: "Levels", compact: c) { controller.show(.levels) }
+                QuietIcon(systemImage: "book.fill", label: "\(store.data.speciesFound)/\(BugSpecies.allCases.count)",
+                          compact: c, accessibility: "Bug Book") { controller.show(.book) }
+                QuietIcon(systemImage: "camera.macro", label: Self.gardenCount(store.data), compact: c,
+                          dot: Self.gardenHasNew(store.data), accessibility: "Garden") { controller.show(.garden) }
+                QuietIcon(systemImage: "gearshape.fill", label: "Settings", compact: c) { controller.show(.settings) }
             }
             .homeButtonFrame()
-            HStack(spacing: c ? 8 : 12) {
-                SnapButton(kind: .secondary, height: c ? 52 : 60, compact: c, action: { controller.show(.book) }) {
-                    VStack(spacing: 0) {
-                        Text("Bug Book")
-                        Text("\(found)/\(BugSpecies.allCases.count)")
-                            .font(SnapType.caption(true).monospacedDigit())
-                            .foregroundStyle(SnapTheme.mist)
-                    }
-                }
-                SnapButton(kind: .secondary, height: c ? 52 : 60, compact: c, action: { controller.show(.settings) }) {
-                    Image(systemName: "gearshape.fill")
-                        .font(.system(size: c ? 20 : 24, weight: .bold))
-                }
-                .frame(width: c ? 64 : 76)
-                .accessibilityLabel("Settings")
-            }
-            .homeButtonFrame()
+            .entrance(2, reduceMotion: rm)
         }
     }
 
-    /// R6: under "Zen Bog".
+    /// R6: under "Zen".
     static let zenDetail = "No rush, no end"
 
     private func dailyStatus(_ today: Int) -> String {
-        if store.canPlayScoredDaily(today: today) { return "Today's bog is ready" }
-        if let r = store.data.dailyRecord(day: today) { return "Today " + AppRules.formatted(r.score) + " · practise" }
-        return "Practise today's bog"
+        if store.canPlayScoredDaily(today: today) { return "Ready" }
+        if let r = store.data.dailyRecord(day: today) { return AppRules.formatted(r.score) }
+        return "Practise"
+    }
+}
+
+/// R8: Home's focal action: a big inked gold button, "Play" in display type and the level it goes to under it.
+struct PlayButton: View {
+    let line: String
+    let compact: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: compact ? 0 : 2) {
+                HStack(spacing: 10) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: compact ? 26 : 34, weight: .black))
+                    Text("Play")
+                        .font(.system(size: compact ? 36 : 48, weight: .black, design: .rounded))
+                }
+                Text(line)
+                    .font(.system(size: compact ? 13 : 15, weight: .heavy, design: .rounded))
+                    .opacity(0.8)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .padding(.horizontal, 16)
+            }
+            .foregroundStyle(SnapTheme.ink)
+            .frame(maxWidth: .infinity, minHeight: compact ? 78 : 104)
+        }
+        .buttonStyle(PlayButtonStyle())
+        .accessibilityLabel("Play, " + line)
+    }
+}
+
+/// The Play button's paint: the primary button's, bigger, pressing down into its lip.
+struct PlayButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(SnapButtonBackground(kind: .primary, pressed: configuration.isPressed))
+            .contentShape(Rectangle())
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.spring(response: 0.18, dampingFraction: 0.7), value: configuration.isPressed)
+    }
+}
+
+/// R8: a quiet round icon with a word under it (Home's map, Bug Book, Garden, Settings).
+struct QuietIcon: View {
+    let systemImage: String
+    let label: String
+    var compact = false
+    var dot = false
+    var accessibility: String?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                ZStack(alignment: .topTrailing) {
+                    Circle().fill(SnapTheme.night.opacity(0.8)).offset(y: 3)
+                    Circle().fill(LinearGradient(colors: [Color(snapHex: 0x24573A), SnapTheme.surface],
+                                                 startPoint: .top, endPoint: .bottom))
+                    Circle().stroke(SnapTheme.night, lineWidth: 2.5)
+                    Image(systemName: systemImage)
+                        .font(.system(size: compact ? 17 : 21, weight: .heavy))
+                        .foregroundStyle(SnapTheme.cream)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if dot {
+                        Circle().fill(SnapTheme.gold).frame(width: 12, height: 12)
+                            .overlay(Circle().stroke(SnapTheme.night, lineWidth: 2))
+                    }
+                }
+                .frame(width: compact ? 42 : 52, height: compact ? 42 : 52)
+                Text(label)
+                    .font(.system(size: compact ? 10 : 12, weight: .heavy, design: .rounded).monospacedDigit())
+                    .foregroundStyle(SnapTheme.mist)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .snapLegible()
+            }
+            .frame(minWidth: SnapTheme.minTap, minHeight: SnapTheme.minTap)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(accessibility ?? label)
     }
 }
 
@@ -295,13 +315,9 @@ struct HomeTrapLayer: View {
         ZStack {
             Color.clear
             if chompShown {
-                Text("CHOMP!")
-                    .font(.system(size: info.isCompact ? 54 : 76, weight: .black, design: .rounded))
-                    .foregroundStyle(SnapTheme.gold)
-                    .shadow(color: SnapTheme.crimsonDeep, radius: 0, x: 0, y: 5)
-                    .snapLegible()
-                    .rotationEffect(.degrees(-6))
-                    .position(x: other.midX, y: info.size.height * 0.16)
+                DisplayText(text: "CHOMP!", size: info.isCompact ? 54 : 76, fill: [SnapTheme.goldLight, SnapTheme.gold],
+                            tilt: -6)
+                    .position(x: other.midX, y: info.size.height * 0.14)
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
                     .allowsHitTesting(false)
             }

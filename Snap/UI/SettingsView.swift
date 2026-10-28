@@ -51,9 +51,10 @@ struct SettingsView: View {
 
     private func toggles(_ c: Bool) -> some View {
         VStack(alignment: .leading, spacing: c ? 8 : 12) {
-            Text("Settings")
-                .font(SnapType.title(c))
-                .foregroundStyle(SnapTheme.cream)
+            // R8: the display type.
+            DisplayText(text: "Settings", size: c ? 34 : 46, tilt: -2)
+                .fixedSize()
+                .padding(.bottom, c ? 2 : 6)
             VStack(spacing: 0) {
                 row("Sound", detail: "The CHOMP, the buzz, the bog", isOn: $settings.soundOn, c)
                 divider
@@ -100,9 +101,10 @@ struct SettingsView: View {
 
     private func about(_ c: Bool) -> some View {
         VStack(alignment: .leading, spacing: c ? 8 : 12) {
+            // R8: the First Bite is retired: Levels 1–5 teach, any time, from the map.
             SnapButton(kind: .secondary, height: SnapTheme.secondaryHeight, compact: c,
-                       action: { controller.replayLesson() }) {
-                Label("Replay First Bite", systemImage: "graduationcap.fill")
+                       action: { controller.show(.levels) }) {
+                Label("Levels", systemImage: "map.fill")
             }
             SnapButton(kind: .secondary, height: SnapTheme.secondaryHeight, compact: c,
                        action: { controller.showGameCenter() }) {
@@ -113,7 +115,7 @@ struct SettingsView: View {
                 Text("\(AppBrand.name) \(BuildChannel.versionLine)")
                     .font(SnapType.headline(c))
                     .foregroundStyle(SnapTheme.cream)
-                Text(AppBrand.tagline + " Made for iPhone Duo: hold it like a book, snap it a little shut. "
+                Text(AppBrand.tagline + " Made for iPhone Duo: the phone is the trap. Close it to bite. "
                      + "No ads, no purchases, no data collected.")
                     .font(SnapType.caption(c))
                     .foregroundStyle(SnapTheme.mist)

@@ -62,6 +62,9 @@ final class BogBugNode {
     var feastGulp = false
     var gulpDelay: Double = 0
     var gulped = false
+    /// R8: how hard it panics now (0 … 1: a sitter in the closing trap), and the visual-only jitter it is drawn with.
+    var panic: CGFloat = 0
+    var jitter: CGPoint = .zero
 
     /// Every sprite under `root` (the streak test checks each one's frame).
     var parts: [SKSpriteNode] { [halo, ring, body, wings, blur, glow, flash] }
@@ -182,6 +185,8 @@ final class BogBugNode {
         feastGulp = false
         gulpDelay = 0
         gulped = false
+        panic = 0
+        jitter = .zero
         root.isHidden = false
         shadow.isHidden = false
         mark.isHidden = true
@@ -294,6 +299,14 @@ final class BogBugLayer {
     /// R5 (#15, tests): bug `id`'s airborne cue (0 … 1) and its shadow's offset from its ground point.
     func creaseCue(_ id: Int) -> CGFloat? { live[id].map { $0.creaseCue } }
     func shadowOffset(_ id: Int) -> CGPoint? { live[id].map { $0.shadowOffset } }
+    /// R8 (tests): bug `id`'s panic now (0 … 1) and its visual-only jitter.
+    func panicOf(_ id: Int) -> CGFloat? { live[id].map { $0.panic } }
+    func jitterOf(_ id: Int) -> CGPoint? { live[id].map { $0.jitter } }
+    /// R8 (tests): whether bug `id` is drawn at all now (root shown and not faded out).
+    func isDrawn(_ id: Int) -> Bool { live[id].map { !$0.root.isHidden && $0.root.alpha > 0.01 } ?? false }
+
+    /// R8: a panicking sitter's jitter at full panic, × its radius (visual only: Core keeps its position).
+    static let panicJitter: CGFloat = 0.14
 
     /// R5 (#15): the airborne cue. Nothing ever rests on the hinge: a bug over the crease (its centre within
     /// `creaseHalfWidth` + 0.6 r of the midrib) is drawn lifted, `creaseScale` × bigger with its shadow pushed out by
@@ -494,17 +507,21 @@ final class BogBugLayer {
     }
 
     /// One frame. `time`/`dt` are wall clock (flaps, bobs). `squeeze` is the lobes' x scale (caught bugs ride with
-    /// the bite). `hold` is the bite's hit-stop: nothing moves, only the white flash runs.
+    /// the bite). `hold` is the bite's hit-stop: nothing moves, only the white flash runs. R8: `panic` (0 … 1,
+    /// `TrapArt.panicLevel`) makes the sitters in the trap buzz and jitter as the phone closes; `hideCaught` (hinge
+    /// input) draws no caught bug at all (they were eaten as the phone shut, out of sight).
     func update(_ bugs: [BugState], time: Double, dt: Double, geometry g: TrapGeometry, night: CGFloat,
-                tint: UIColor, tintAmount: CGFloat, reduceMotion: Bool, squeeze: CGFloat = 1, hold: Bool = false) {
+                tint: UIColor, tintAmount: CGFloat, reduceMotion: Bool, squeeze: CGFloat = 1, hold: Bool = false,
+                panic: CGFloat = 0, hideCaught: Bool = false) {
         frame &+= 1
         gulps.removeAll(keepingCapacity: true)
+        let fear = panic.isFinite ? min(max(panic, 0), 1) : 0
         if hold {
             // R4 (#6): the hit-stop freezes the crowd, but the caught bugs keep sinking into the seam (60 ms).
             for b in bugs {
                 guard case .caught(_) = b.activity, let n = live[b.id] else { continue }
                 draw(n, b, t: CGFloat(time), dt: 0, geometry: g, night: night, reduceMotion: reduceMotion,
-                     squeeze: squeeze)
+                     squeeze: squeeze, panic: fear, hideCaught: hideCaught)
             }
             for n in live.values { applyFlash(n, tint: tint, tintAmount: tintAmount, night: night) }
             return
@@ -514,7 +531,8 @@ final class BogBugLayer {
         for b in bugs {
             let n = node(for: b)
             n.seen = frame
-            draw(n, b, t: t, dt: fdt, geometry: g, night: night, reduceMotion: reduceMotion, squeeze: squeeze)
+            draw(n, b, t: t, dt: fdt, geometry: g, night: night, reduceMotion: reduceMotion, squeeze: squeeze,
+                 panic: fear, hideCaught: hideCaught)
             applyFlash(n, tint: tint, tintAmount: tintAmount, night: night)
         }
         // Bugs gone from the snapshot leave the screen.
@@ -549,7 +567,7 @@ final class BogBugLayer {
     }
 
     private func draw(_ n: BogBugNode, _ b: BugState, t: CGFloat, dt: CGFloat, geometry g: TrapGeometry,
-                      night: CGFloat, reduceMotion: Bool, squeeze: CGFloat) {
+                      night: CGFloat, reduceMotion: Bool, squeeze: CGFloat, panic: CGFloat, hideCaught: Bool) {
         let r = n.radius
         let st = n.style
         let ph = n.phase
@@ -654,6 +672,10 @@ final class BogBugLayer {
                 alpha = 1 - BogMath.smoothstep(0.1, 0.22, CGFloat(caughtAge))
                 h = n.catchHeight * (1 - sunk)
             }
+            // R8 (hinge): eaten as the phone shut; the reopen shows only the digest, never the bug.
+            if hideCaught { alpha = 0 }
+            n.panic = 0
+            n.jitter = .zero
         } else {
             // R7 (#4, the founder's follow-up): Core decides where bugs rest (`TrapSession.keepOut`, which the Scene
             // feeds: `BogScene.coreKeepOut`), so the drawing is truthful. A catchable bug (in the trap and a bite
@@ -680,6 +702,19 @@ final class BogBugLayer {
                 }
             }
             pos = CGPoint(x: pos.x + n.nudge.x, y: pos.y + n.nudge.y)
+            // R8: a sitter in the closing trap panics: it jitters on the spot and twitches (visual only, a few
+            // points; Core keeps its position and decides when it flees).
+            let fear: CGFloat = b.inTrap && resting ? panic : 0
+            n.panic = fear
+            if fear > 0.001 {
+                let amp = BogBugLayer.panicJitter * r * fear * motion
+                let j = CGPoint(x: amp * sin(t * 47 + ph * 3.1), y: amp * sin(t * 59 + ph * 1.7 + 0.8))
+                n.jitter = j
+                pos = CGPoint(x: pos.x + j.x, y: pos.y + j.y)
+                rot += 0.22 * fear * sin(t * 37 + ph) * motion
+            } else {
+                n.jitter = .zero
+            }
             // (A walker still coming in from off the screen is not sitting yet.)
             let p0 = b.position
             n.sitting = resting && p0.x >= 0 && p0.x <= canvas.width && p0.y >= 0 && p0.y <= canvas.height
@@ -714,6 +749,12 @@ final class BogBugLayer {
             let flick = max(0, sin(t * 23 + ph))
             let f2 = flick * flick
             spread += 0.3 * restless * f2 * f2 * f2 * f2
+        }
+        if caughtT < 0 && !flying && n.panic > 0.01 && st.flapHz > 0 {
+            // R8: panicking, the wings buzz half open (blurred on the fast fliers), ready to go.
+            let buzz = 0.5 + 0.5 * sin(t * 88 + ph)
+            spread = max(spread, st.restSpread + (0.25 + 0.45 * buzz) * n.panic)
+            if st.flapHz >= 20 { blurA = max(blurA, 0.3 * n.panic) }
         }
         if caughtT >= 0 { spread = st.restSpread * (1 - caughtT) }
         spread = min(max(spread.isFinite ? spread : 0, 0), 1.2)

@@ -47,7 +47,7 @@ P06-goals|screen=home;progress=late|8|Three *goals* every run / And a Daily Bog 
 P07-bug-book|screen=book;progress=late|6|Fill the *Bug Book* / 16 species, each with a joke.|SNAP-T screen book
 P08-zen|screen=play;mode=zen;pilot=casual;progress=late;freezeOn=crowd;freezeAfter=25|60|Or just *relax* / Zen Bog: no rush, no end.|SNAP-T freeze crowd
 P09-results|screen=results;pilot=casual;progress=late|240|One more *go*? / Goals, growth and a best to beat.|SNAP-T results goals [1-3] growth=
-P10-first-bite|screen=lesson;lessonStep=6|8|Learn it in one *First Bite* / A short lesson on your first go.|SNAP-T lesson step 6
+P10-first-bite|screen=levelIntro;level=3|8|30 *levels* to master / Then the endless bog.|SNAP-T level intro 3
 
 # reserves (phone): not captured by default; run them with a filter like '^(P[0-9]|R[0-9])'.
 # R2: the expect insists on a wasp, because the sub-line names one (a bumblebee sting is cost 1, not 2).

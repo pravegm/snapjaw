@@ -44,6 +44,9 @@ struct SessionOptions: Equatable {
     /// Tuning.sproutTaperRuns plays standard). See SproutPerks.forFeedRun. Feed only, like `firstRun`: a session of any
     /// other mode ignores it. Build it with `SessionOptions.sprout(feedRun:)`.
     var sproutRun: Int = 0
+    /// R8 (ROUND-8 §4): false: no snap refunds (no Feast, scarab or ladybird snaps back): a level's bite limit is
+    /// literal.
+    var refunds: Bool = true
 
     init(snapsRunOut: Bool = true, waves: Bool = true, stingCosts: Bool = true) {
         self.snapsRunOut = snapsRunOut
@@ -64,7 +67,7 @@ struct SessionOptions: Equatable {
     func sproutPerks(for mode: RunMode) -> SproutPerks? {
         switch mode {
         case .feed: return SproutPerks.forFeedRun(sproutRun)
-        case .daily, .attract, .lesson, .zen: return nil
+        case .daily, .attract, .lesson, .zen, .level: return nil
         }
     }
 
@@ -82,6 +85,14 @@ struct SessionOptions: Equatable {
             var o = SessionOptions(snapsRunOut: false, waves: true, stingCosts: false)
             o.hunger = false
             return o
+        case .level(let id):
+            // R8 (ROUND-8 §4): LevelBook.options (no waves, hunger or refunds; the bite limit). An unknown id plays as
+            // a scripted session with no bugs and no limits.
+            if let l = LevelBook.level(id) { return LevelBook.options(l) }
+            var o = SessionOptions(snapsRunOut: false, waves: false, stingCosts: false)
+            o.hunger = false
+            o.refunds = false
+            return o
         }
     }
 
@@ -90,7 +101,7 @@ struct SessionOptions: Equatable {
         guard firstRun else { return false }
         switch mode {
         case .feed: return true
-        case .daily, .attract, .lesson, .zen: return false
+        case .daily, .attract, .lesson, .zen, .level: return false
         }
     }
 }
@@ -157,6 +168,11 @@ struct SproutPerks: Equatable {
 // protected bug's halo touches the trap.
 // R7 (design/notes/core-R7.md): one scoring function, TrapRules.bitePoints, with the FEAST multiplier (×2) inside a
 // clean bite of ≥ Tuning.bigFeastCount.
+// R8 (design/notes/core-R8.md, ROUND-8 §1–§2): the lid is the jaw. `step` reads the input's continuous closure first
+// (fear: a close starts at Tuning.closeStart; each catchable bug in the trap startles at its nerve and flees after its
+// reaction time), then the bite at the shut (exposure = max(real, TrapRules.modelExposure)), then the reopen (`rearmed`).
+// Shut (from the bite until the input is armed again) and a round waiting for its first close freeze the clock: only
+// bugs already caught, escaping, released or leaving move. BiteReport.catchRatio; any miss breaks the chain.
 // Mirrored by Session in tools/balance-sim.js (minus events, hints, telemetry and results).
 
 final class TrapSession {
@@ -170,6 +186,10 @@ final class TrapSession {
     let firstRunPerks: Bool
     /// R5 (REVIEW-4 #8): the Sprout taper this session plays (SessionOptions.sproutPerks(for:); nil = standard).
     let sproutPerks: SproutPerks?
+    /// R8 (ROUND-8 §4): the level this session plays (mode .level(id) with a known id), else nil.
+    let levelSpec: LevelSpec?
+    /// R8: why the level ended (nil until it has, and outside levels).
+    private(set) var levelEnd: LevelEnd? = nil
 
     fileprivate enum Mode: Equatable {
         case approach, hover, sip, pause, dash, hop, cross, leave, escape, release, caught
@@ -216,6 +236,8 @@ final class TrapSession {
         var restless: Double = 0
         var sip: Double = 0
         var gone: Bool = false
+        /// R8: the session time it startled in the current close (closure passed its nerve), if it has.
+        var startledAt: Double? = nil
 
         init(id: Int, spec: SpawnSpec, seed: UInt64) {
             self.id = id
@@ -275,8 +297,22 @@ final class TrapSession {
     private var score: Int = 0
     private var chain: Int = 0
     private var lastInput: TrapInput = TrapInput()
-    private var prevArmed: Bool = true
     private var prevClosure: Double = 0
+    /// R8: the session time of the previous step's input (for the closure crossings).
+    private var prevTime: Double = 0
+    /// R8 (ROUND-8 §1): a close is under way (closure passed Tuning.closeStart while armed, or a bite arrived).
+    private var closing: Bool = false
+    private var closeStartAt: Double = 0
+    /// R8: the catchable bugs in the trap at any moment of the current close (the catch ratio's denominator).
+    private var closeBugs: Set<Int> = []
+    /// R8: bugs that fled the current close before the shut (they count as escaped in its bite).
+    private var fled: Int = 0
+    /// R8: shut = digesting, from a bite until the input is armed again (TrapSnapshot.shut). The clock is frozen.
+    private var shut: Bool = false
+    /// R8: wall seconds stepped while shut (the "Open it again" hint).
+    private var shutElapsed: Double = 0
+    /// R8 (founder rule 3): every round starts closed (TrapSnapshot.waitingForClose).
+    private var waitingForClose: Bool = true
     private var lastBite: BiteReport? = nil
     private var lastBiteTime: Double = 0
     private var newBestSent: Bool = false
@@ -295,6 +331,10 @@ final class TrapSession {
     private var feasts: Int = 0
     private var drySnaps: Int = 0
     private var fastestSnap: Double = 0
+    /// R8: bugs that escaped a bite or fled a close (RunResult.escapes).
+    private var escapesTotal: Int = 0
+    /// R8: seconds a level has had nothing left to catch.
+    private var levelIdle: Double = 0
 
     private(set) var result: RunResult? = nil
 
@@ -322,8 +362,19 @@ final class TrapSession {
         self.nectarBlock = (first - 1) / Tuning.nectarReseedWaves
         let start: Int = perks?.startSnaps ?? (options.startSnaps ?? Tuning.startSnaps)
         self.snapsLeft = min(max(start, 1), Tuning.maxSnaps)
+        // R8 (ROUND-8 §4): a level: its pace wave and scripted bugs (session time 0 is the round's opening).
+        var spec: LevelSpec? = nil
+        if case .level(let id) = mode { spec = LevelBook.level(id) }
+        self.levelSpec = spec
         installNectar(block: nectarBlock)
         bugs.reserveCapacity(Tuning.maxBugsOnScreen)
+        if let l = spec {
+            wave = l.paceWave
+            dayPhase = WaveFactory.phase(forWave: l.paceWave)
+            for b in l.bugs {
+                pending.append(PendingSpawn(at: b.at, spec: LevelBook.spawnSpec(b, geometry: geometry, nectar: nectar)))
+            }
+        }
     }
 
     // MARK: Public state
@@ -399,7 +450,8 @@ final class TrapSession {
                             snapsLeft: snapsLeft, snapsMax: Tuning.maxSnaps, score: score, best: best, chain: chain,
                             chainMultiplier: TrapRules.chainMultiplier(chain), wave: wave, dayPhase: dayPhase,
                             dayClock: dayClock, lastBite: lastBite, hint: currentHint(), bugsCaught: bugsCaught,
-                            beesSpared: beesSpared, hunger: wilts ? hunger : 0)
+                            beesSpared: beesSpared, hunger: wilts ? hunger : 0, shut: shut,
+                            waitingForClose: waitingForClose)
     }
 
     /// The continuous feedback state for this frame.
@@ -457,18 +509,23 @@ final class TrapSession {
         var inp: TrapInput = input
         if !inp.closure.isFinite { inp.closure = 0 }
         inp.closure = max(0, inp.closure)
+        inp.tooFlat = false
         lastInput = inp
         if isPlaying {
-            if prevArmed && prevClosure < Tuning.snapStartDepth
-                && (inp.closure >= Tuning.snapStartDepth || inp.snap != nil) {
-                out.append(.snapStarted)
-            }
-            if let s = inp.snap { bite(s, hinge: inp.angle != nil) }
-            if inp.creeping && isPlaying { creep(inp.closure) }
-            if inp.armed && !prevArmed { out.append(.rearmed) }
+            // R8 (founder rule 3): the round starts once the input is first armed (a bite counts too).
+            if waitingForClose && (inp.armed || inp.snap != nil) { waitingForClose = false }
+            fear(inp)
         }
-        prevArmed = inp.armed
+        if isPlaying, let s = inp.snap {
+            bite(s, hinge: inp.angle != nil, armedAfter: inp.armed)
+        } else if shut && inp.armed {
+            // R8: reopened: the shut is over and the clock runs again.
+            shut = false
+            shutElapsed = 0
+            out.append(.rearmed)
+        }
         prevClosure = inp.closure
+        prevTime = time
         let n: Int = max(1, Int((d / Tuning.maxSubstep - 1e-9).rounded(.up)))
         let h: Double = d / Double(n)
         var i: Int = 0
@@ -494,6 +551,19 @@ final class TrapSession {
     }
 
     private func tick(_ h: Double) {
+        if isPlaying && (shut || waitingForClose) {
+            // R8: shut = digesting, and a round waiting for its first close: the clock is frozen (no waves, spawns,
+            // lingers or hunger). Bugs already caught, escaping, released or leaving finish their moves.
+            if shut { shutElapsed += h }
+            for b in bugs {
+                switch b.mode {
+                case .caught, .leave, .escape, .release: updateBug(b, h)
+                case .approach, .hover, .sip, .pause, .dash, .hop, .cross: break
+                }
+            }
+            bugs.removeAll { (b: Bug) -> Bool in b.gone }
+            return
+        }
         time += h
         if isPlaying && options.waves {
             while time >= nextWaveAt { startWave() }
@@ -511,6 +581,7 @@ final class TrapSession {
         // light it ticks whatever is in the trap, so a patient hand's run ends too.
         hungerLive = isPlaying && wilts && (inLastLight || hungerTicks())
         if hungerLive { tickHunger(h) }
+        if levelSpec != nil && isPlaying { checkLevel(h) }
         if case .tired(let e) = phase {
             let ne: Double = e + h
             if ne >= Tuning.tiredSeconds {
@@ -570,6 +641,7 @@ final class TrapSession {
 
     /// Snaps reached 0: "Your trap is tired." Every bug still about takes off.
     private func becomeTired() {
+        if levelSpec != nil && levelEnd == nil { levelEnd = .bites }
         out.append(.tired)
         phase = .tired(elapsed: 0)
         tiredAt = time
@@ -587,7 +659,7 @@ final class TrapSession {
         case .attract: return ((idx - 1) % Tuning.attractDayWaves) + 1
         // R6: the Zen Bog's day loops too (morning … night, then morning again).
         case .zen: return ((idx - 1) % Tuning.zenDayWaves) + 1
-        case .feed, .daily, .lesson: return idx
+        case .feed, .daily, .lesson, .level: return idx
         }
     }
 
@@ -1195,35 +1267,77 @@ final class TrapSession {
 
     // MARK: Creep and bite
 
-    private func creep(_ closure: Double) {
+    /// A bug's reaction (flee) time now: its species, activity, the rim and the pace wave.
+    private func reactionNow(_ b: Bug, _ a: BugActivity) -> Double {
+        var sipping: Bool = false
+        if case .sipping = a { sipping = true }
+        return TrapRules.reaction(b.info, sipping: sipping, flying: TrapRules.isFlying(a),
+                                  onRim: TrapRules.onRim(geometry, b.point, radius: b.info.radius),
+                                  wave: TrapRules.paceWave(wave, mode: mode))
+    }
+
+    /// R8 (ROUND-8 §1): bug fear from continuous closure. A close starts when the closure passes Tuning.closeStart
+    /// while the trap is open (armed, not shut, the round started); every catchable bug in the trap feels it: once the
+    /// closure passes its nerve (startle depth) it startles, and after its reaction time it flees (`bugSpooked`, then
+    /// it escapes fast). A close abandoned (closure under Tuning.closeCancel) calms the startled bugs that stayed.
+    private func fear(_ inp: TrapInput) {
+        let now: Double = time
+        let c: Double = inp.closure
+        let open: Bool = inp.armed && !shut && !waitingForClose
+        if !closing {
+            let starts: Bool = open && c >= Tuning.closeStart
+            if starts || inp.snap != nil {
+                closing = true
+                fled = 0
+                closeBugs.removeAll()
+                closeStartAt = starts ? SnapDetector.crossing(prevTime, prevClosure, now, c, Tuning.closeStart) : now
+                out.append(.snapStarted)
+            }
+        } else if c < Tuning.closeCancel && inp.snap == nil {
+            closing = false
+            for b in bugs { b.startledAt = nil }
+            return
+        }
+        if !closing { return }
         for b in bugs {
-            if !inTrap(b) || b.mode == .leave { continue }
-            if b.info.nerve <= closure {
+            if !inTrap(b) { continue }
+            let a: BugActivity = activity(of: b)
+            if !TrapRules.isCandidate(a, height: b.height) { continue }
+            if !b.species.isProtected { closeBugs.insert(b.id) }
+            let nerve: Double = b.info.nerve
+            if b.startledAt == nil && c >= nerve {
+                b.startledAt = prevClosure < nerve ? SnapDetector.crossing(prevTime, prevClosure, now, c, nerve) : now
+            }
+            guard let since = b.startledAt, inp.snap == nil else { continue }
+            if now - since >= reactionNow(b, a) {
+                fled += 1
                 b.restless = 1
-                b.spooked = true
-                takeOff(b, .leave)
+                takeOff(b, .escape)
                 out.append(.bugSpooked(id: b.id, species: b.species))
             }
         }
     }
 
-    private func bite(_ snap: SnapTrigger, hinge: Bool) {
+    /// R8 (ROUND-8 §1): the bite at the shut. A catchable bug still in the trap is caught unless it has been fleeing
+    /// longer than its reaction time: its exposure is the larger of the real time since it startled in this close and
+    /// TrapRules.modelExposure(nerve:duration:). Bugs that fled the close count as escaped.
+    private func bite(_ snap: SnapTrigger, hinge: Bool, armedAfter: Bool) {
         let d: Double = snap.duration.isFinite ? max(0, snap.duration) : 0
+        let now: Double = time
         var caught: [BugSpecies] = []
         var stingers: [BugSpecies] = []
-        var escaped: Int = 0
+        var escaped: Int = fled
         var lost: Int = 0
         var perBug: [TrapEvent] = []
         for b in bugs {
             if !inTrap(b) { continue }
             let a: BugActivity = activity(of: b)
             if !TrapRules.isCandidate(a, height: b.height) { continue }
-            var sipping: Bool = false
-            if case .sipping = a { sipping = true }
-            let r: Double = TrapRules.reaction(b.info, sipping: sipping, flying: TrapRules.isFlying(a),
-                                               onRim: TrapRules.onRim(geometry, b.point, radius: b.info.radius),
-                                               wave: TrapRules.paceWave(wave, mode: mode))
-            if d <= r {
+            if !b.species.isProtected { closeBugs.insert(b.id) }
+            var exposure: Double = TrapRules.modelExposure(nerve: b.info.nerve, duration: d)
+            if let since = b.startledAt { exposure = max(exposure, now - since) }
+            let r: Double = reactionNow(b, a)
+            if exposure <= r {
                 if b.species.isProtected {
                     stingers.append(b.species)
                     let cost: Int = options.stingCosts ? (b.species == .wasp ? Tuning.waspCost : Tuning.beeCost) : 0
@@ -1246,6 +1360,16 @@ final class TrapSession {
                 takeOff(b, .escape)
             }
         }
+        for b in bugs { b.startledAt = nil }
+        // R8 (ROUND-8 §2, the skill readout): caught ÷ the catchable bugs in the trap during the close.
+        let denominator: Int = closeBugs.count
+        let ratio: Double = denominator > 0 ? min(1, Double(caught.count) / Double(denominator)) : 0
+        closing = false
+        fled = 0
+        closeBugs.removeAll()
+        // R8: shut = digesting until the input is armed again (a source that stays armed never shuts).
+        shut = !armedAfter
+        shutElapsed = 0
         snapsMade += 1
         lastBiteTime = time
         let n: Int = caught.count
@@ -1292,7 +1416,14 @@ final class TrapSession {
                 }
             }
         }
+        // R8 (ROUND-8 §4): a level refunds nothing (its bite limit is literal).
+        if !options.refunds {
+            feastBack = 0
+            luckyBack = 0
+            lucky.removeAll()
+        }
         let back: Int = feastBack + luckyBack
+        escapesTotal += escaped
         score += points
         bugsCaught += n
         for s in caught { caughtBySpecies[s.rawValue, default: 0] += 1 }
@@ -1307,7 +1438,7 @@ final class TrapSession {
 
         let report = BiteReport(caught: caught, escaped: escaped, stingers: stingers, points: points,
                                 countMultiplier: n, chainMultiplier: mult, snapsBack: back, snapsLost: lost,
-                                duration: d, time: time)
+                                duration: d, time: time, catchRatio: ratio)
         lastBite = report
         out.append(.snapped(report))
         out.append(contentsOf: perBug)
@@ -1315,19 +1446,23 @@ final class TrapSession {
         for s in lucky { out.append(.luckySnap(species: s)) }
         // R2 chain rule (GAME-DESIGN §5): a clean bite of ≥ 2 adds a step; a clean 1-bug bite holds the chain (no
         // event); a dry snap or a stinger breaks it.
+        // R8 (ROUND-8 §2): any miss (a bug escaped the bite or fled its close) breaks it too.
         let clean: Bool = n >= 1 && stingers.isEmpty
-        if clean && n >= Tuning.chainMinBite {
+        let missed: Bool = Tuning.missBreaksChain && escaped > 0
+        if clean && !missed && n >= Tuning.chainMinBite {
             chain += 1
             longestChain = max(longestChain, chain)
             out.append(.chainUp(count: chain, multiplier: TrapRules.chainMultiplier(chain)))
-        } else if !clean {
+        } else if !clean || missed {
             if chain >= 2 { out.append(.chainBroken(count: chain)) }
             chain = 0
         }
         if n == 0 && stingers.isEmpty { out.append(.drySnap) }
+        // R8 (ROUND-8 §2): a dry bite costs Tuning.dryBiteCost more (0 since the R8 balance pass).
+        let dryCost: Int = (n == 0 && stingers.isEmpty) ? Tuning.dryBiteCost : 0
         if options.snapsRunOut {
             let before: Int = snapsLeft
-            snapsLeft = min(max(snapsLeft - Tuning.snapCost - lost + back, 0), Tuning.maxSnaps)
+            snapsLeft = min(max(snapsLeft - Tuning.snapCost - lost - dryCost + back, 0), Tuning.maxSnaps)
             if snapsLeft == 1 && before != 1 { out.append(.lastSnap) }
             if snapsLeft == 0 { becomeTired() }
         }
@@ -1336,13 +1471,56 @@ final class TrapSession {
             newBestSent = true
             out.append(.newBest)
         }
+        if levelSpec != nil && isPlaying { checkLevel(0) }
+    }
+
+    // MARK: Levels (R8, ROUND-8 §4)
+
+    /// A level ends at once when its goal is met or a bee is bitten in a no-sting level; when its time is up; and when
+    /// nothing is left to catch (nothing pending, no bug that isn't leaving) for Tuning.levelIdleEnd s. Out of bites
+    /// ends it too (becomeTired). Mirrored by Session.checkLevel in tools/balance-sim.js.
+    private func checkLevel(_ h: Double) {
+        guard let l = levelSpec, isPlaying else { return }
+        if l.noSting && stings > 0 {
+            endLevel(.stung)
+            return
+        }
+        if l.goal.met(caught: bugsCaught, bySpecies: caughtBySpecies, biggestBite: biggestBite, spared: beesSpared) {
+            endLevel(.goal)
+            return
+        }
+        if let t = l.timeLimit, time >= t {
+            endLevel(.time)
+            return
+        }
+        var active: Bool = !pending.isEmpty
+        for b in bugs {
+            switch b.mode {
+            case .leave, .escape, .release, .caught, .cross: break
+            case .approach, .hover, .sip, .pause, .dash, .hop: active = true
+            }
+        }
+        if active {
+            levelIdle = 0
+        } else {
+            levelIdle += h
+            if levelIdle >= Tuning.levelIdleEnd { endLevel(.empty) }
+        }
+    }
+
+    private func endLevel(_ why: LevelEnd) {
+        levelEnd = why
+        becomeTired()
     }
 
     // MARK: Hints and results
 
     private func currentHint() -> TrapHint? {
         guard isPlaying else { return nil }
-        if lastInput.tooFlat { return .bendALittle }
+        // R8 (founder rules 2, 3): no pose hint ever; a round waiting for its first close shows the App's own line.
+        if waitingForClose { return nil }
+        // R8: shut (the cover display) for over Tuning.openUpDelay: "Open it again".
+        if shut { return shutElapsed > Tuning.openUpDelay ? .openUp : nil }
         if lastInput.creeping { return .quick }
         // R4: only while the clock is ticking (a paused clock is not about to wilt a snap). R6 (#15, REVIEW-5 P2-1):
         // never while a protected bug's halo touches the trap ("Hungry… bite!" next to a haloed bee reads as "bite it").
@@ -1391,7 +1569,7 @@ final class TrapSession {
                          bugsCaught: bugsCaught, caughtBySpecies: caughtBySpecies, sparedBySpecies: sparedBySpecies,
                          bestBitePoints: bestBitePoints, biggestBite: biggestBite, longestChain: longestChain,
                          beesSpared: beesSpared, stings: stings, feasts: feasts, waves: wave, drySnaps: drySnaps,
-                         fastestSnap: fastestSnap)
+                         fastestSnap: fastestSnap, escapes: escapesTotal)
     }
 }
 
@@ -1456,7 +1634,7 @@ extension TrapRules {
     static func paceWave(_ wave: Int, mode: RunMode) -> Int {
         switch mode {
         case .zen: return ((max(wave, 1) - 1) % Tuning.zenDayWaves) + 1
-        case .feed, .daily, .attract, .lesson: return wave
+        case .feed, .daily, .attract, .lesson, .level: return wave
         }
     }
 
@@ -1465,7 +1643,8 @@ extension TrapRules {
     static func keepsBest(_ mode: RunMode) -> Bool {
         switch mode {
         case .feed, .daily, .attract, .lesson: return true
-        case .zen: return false
+        // R8: a level keeps its stars, not a score best (the App persists them).
+        case .zen, .level: return false
         }
     }
 
@@ -1474,7 +1653,7 @@ extension TrapRules {
     static func lastLightApplies(to mode: RunMode) -> Bool {
         switch mode {
         case .feed, .daily: return true
-        case .attract, .lesson, .zen: return false
+        case .attract, .lesson, .zen, .level: return false
         }
     }
 
@@ -1482,7 +1661,7 @@ extension TrapRules {
     /// lesson; `.lastLight` where the last light applies (Feed and the Daily).
     static func nightCue(wave: Int, mode: RunMode) -> NightCue? {
         switch mode {
-        case .zen, .attract, .lesson: return nil
+        case .zen, .attract, .lesson, .level: return nil
         case .feed, .daily: break
         }
         if wave == Tuning.lateWaveStart + 1 { return .nightGetsFast }

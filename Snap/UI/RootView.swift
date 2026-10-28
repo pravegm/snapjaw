@@ -42,8 +42,8 @@ struct RootView: View {
             .ignoresSafeArea()
         }
         .background(SnapTheme.bogDeep.ignoresSafeArea())
-        .modifier(HingeReader(onUpdate: { angle, time in
-            controller.hingeSample(angle: angle, time: time)
+        .modifier(HingeReader(onSample: { angle, time, status in
+            controller.hingeSample(angle: angle, time: time, status: status)
         }, onUnavailable: {
             controller.hingeUnavailable()
         }))
@@ -68,8 +68,8 @@ struct RootView: View {
         let fold = currentFold(canvas)
         ZStack {
             SnapTheme.bogDeep
-            // The bog is live behind Home too (an attract session the hinge can chomp).
-            gameLayer(canvas, visible: pose == .play && (controller.route.isPlay || controller.route == .home))
+            // The bog is live behind Home too (an attract session the hinge can chomp). R8: and behind every menu.
+            gameLayer(canvas, visible: pose == .play)
             switch pose {
             case .play:
                 let layout = ScreenLayout.make(viewSize: canvas, hasFold: fold, hudOnLeft: controller.hudOnLeft)
@@ -208,20 +208,20 @@ struct RootView: View {
 
     // MARK: - Layers
 
-    /// The scene renders only while a run or Home is on screen (real runs; CI's demo launches always render: they
-    /// wait for `SNAP-T frame 120`), and holds still on a demo event freeze. The closing pause stops it too (a half-shut
-    /// Duo saves its battery); the pause lifts from the hinge reports, not from frames (QA-1 #1).
+    /// The scene renders only while it is on screen (real runs; CI's demo launches always render: they wait for
+    /// `SNAP-T frame 120`), and holds still on a demo event freeze and under the pause menu. R8: no closing pause: a
+    /// shut Duo is on its outer display (not visible), and the hinge's reports step the run there.
     private func sceneIdle(visible: Bool) -> Bool {
         if controller.sceneHeld { return true }
         guard !controller.isDemo else { return false }
-        return !visible || controller.isMenuOpen || controller.isClosingPaused
+        return !visible || controller.isMenuOpen
     }
 
     @ViewBuilder
     private func gameLayer(_ canvas: CGSize, visible: Bool) -> some View {
         if let scene = controller.scene {
             SpriteView(scene: scene, isPaused: sceneIdle(visible: visible),
-                       preferredFramesPerSecond: controller.route == .home ? 60 : 120)
+                       preferredFramesPerSecond: controller.route.isPlay ? 120 : 60)
                 .id(controller.sceneGeneration)
                 .frame(width: canvas.width, height: canvas.height)
                 .opacity(visible ? 1 : 0.001)
@@ -237,14 +237,22 @@ struct RootView: View {
             case .home:
                 HomeView(controller: controller, store: store, info: info)
                     .transition(.opacity)
-            case .playing, .lesson:
+            case .playing:
                 PlayLayer(controller: controller, hud: controller.hud, info: info)
                     .transition(.opacity)
             case .results:
                 if let summary = controller.summary {
-                    ResultsView(controller: controller, store: store, summary: summary, info: info)
-                        .transition(SnapTheme.pageTransition(controller.reduceMotion))
+                    if let level = summary.level {
+                        LevelResultsView(controller: controller, summary: summary, level: level, info: info)
+                            .transition(SnapTheme.pageTransition(controller.reduceMotion))
+                    } else {
+                        ResultsView(controller: controller, store: store, summary: summary, info: info)
+                            .transition(SnapTheme.pageTransition(controller.reduceMotion))
+                    }
                 }
+            case .levels:
+                LevelMapView(controller: controller, store: store, info: info)
+                    .transition(SnapTheme.pageTransition(controller.reduceMotion))
             case .book:
                 BugBookView(controller: controller, store: store, info: info)
                     .transition(SnapTheme.pageTransition(controller.reduceMotion))

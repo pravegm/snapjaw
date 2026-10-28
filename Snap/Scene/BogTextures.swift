@@ -83,6 +83,15 @@ enum BogTextures {
         }
     }
 
+    /// R8: the closing dim, stretched over the scene (white: tint it black): opaque at the edges, a faint veil in the
+    /// middle, so the screen darkens in from its edges as the phone closes.
+    static var closingDim: SKTexture {
+        make("closingDim", width: 256, height: 256, scale: 1) { ctx, s in
+            BogPainter.radial(ctx, [w(0.12), w(0.2), w(0.62), w(1)], [0, 0.42, 0.78, 1],
+                              center: CGPoint(x: s.width / 2, y: s.height / 2), radius: s.width * 0.5, extend: true)
+        }
+    }
+
     /// A vertical ramp, transparent at the bottom, white at the top (the day's haze from the sky).
     static var haze: SKTexture {
         make("haze", width: 4, height: 256, scale: 1) { ctx, s in
@@ -375,6 +384,7 @@ enum BogTextures {
         _ = glow
         _ = sparkle
         _ = vignette
+        _ = closingDim
         _ = haze
         _ = shadow
         _ = ring

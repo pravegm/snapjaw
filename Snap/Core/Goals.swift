@@ -34,6 +34,8 @@ enum GoalScope: String, Codable, CaseIterable, Sendable {
         case .feed: return self == .anyMode || self == .standard
         case .daily: return self == .anyMode || self == .standard || self == .daily
         case .zen: return self == .anyMode || self == .zen
+        // R8: a level counts for "any mode" goals only.
+        case .level: return self == .anyMode
         }
     }
 
@@ -557,7 +559,7 @@ enum GoalBook {
         case .score: return r.score
         case .reach(let p):
             switch r.mode {
-            case .zen, .attract, .lesson: return nil
+            case .zen, .attract, .lesson, .level: return nil
             case .feed, .daily: return WaveFactory.phase(forWave: r.waves) >= p && r.waves > 0 ? 1 : 0
             }
         case .catchSpeciesAt, .catchAt, .catchBeforeSting, .mixedBite, .feastAt, .cleanUntil, .finish:

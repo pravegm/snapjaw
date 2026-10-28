@@ -318,8 +318,10 @@ struct SceneTests {
         #expect(phone.size.width > ScreenLayout.canvasWidth)
     }
 
+    /// Touch input (R8: `usesHinge` false, the default): the tap's sweep draws the lobes closing and the bite slams.
     @Test func closureTracksAndTheBiteSlams() {
         let scene = BogScene(layout: SceneTests.duo)
+        #expect(!scene.usesHinge)
         var s = SceneTests.crowd()
         s.closure = Tuning.snapDepth * 0.5
         scene.show(s, events: [], dt: 1.0 / 120.0)
@@ -510,23 +512,6 @@ struct SceneTests {
             peak = max(peak, scene.lobeScale)
         }
         #expect(peak > CGFloat(1.03) && peak < CGFloat(1.1))
-    }
-
-    @Test func closureTracksTheHandsAndTheApp() {
-        let scene = BogScene(layout: SceneTests.duo)
-        var s = SceneTests.crowd()
-        s.closure = Tuning.snapDepth
-        scene.show(s, events: [], dt: 1.0 / 120.0)
-        // 15 % foreshortening at the snap depth.
-        #expect(abs(scene.lobeScale - CGFloat(0.85)) < CGFloat(0.01))
-        // The App's predicted closure wins over the snapshot's.
-        scene.drawnClosure = Tuning.snapDepth * 0.5
-        scene.show(s, events: [], dt: 1.0 / 120.0)
-        #expect(abs(scene.drawnClosure01 - CGFloat(0.5)) < CGFloat(0.01))
-        scene.drawnClosure = nil
-        s.closure = 0
-        scene.show(s, events: [], dt: 1.0 / 120.0)
-        #expect(scene.drawnClosure01 < CGFloat(0.01))
     }
 
     @Test func ringsFollowTheRules() {
@@ -1341,61 +1326,15 @@ struct SceneTests {
 
     // MARK: R5
 
-    /// REVIEW-4 #3: the release never reads as a plum or a bottom. The face darkens only while closing; from 80 ms
-    /// into the release it is the open-state crimson again, with the cilia out, the closed trap gone and the lobes wide,
-    /// even with the hands still shut (the Duo); once the hands close again, it darkens with them again.
+    /// REVIEW-4 #3: the touch slam's release never reads as a plum or a bottom: the bite's own darkening is gone 80 ms
+    /// into the release and the lobes are well open by then. (R8: the scene half of this test drove the shut with the
+    /// hands on the Duo; with the hinge the lobes never draw shut now, so it was deleted.)
     @Test func theReleaseIsCrimsonWithinEightyMs() {
         #expect(BogJaws.releaseFade <= 0.08 + 1e-9)
         #expect(BogJaws.biteShade(slam: 1, t: 0.1) > CGFloat(0.999))
         #expect(BogJaws.biteShade(slam: 1, t: BogJaws.holdEnd + BogJaws.releaseFade) < CGFloat(0.001))
         #expect(BogJaws.squeezeLevel(t: 0.1) > CGFloat(0.999))
         #expect(BogJaws.squeezeLevel(t: BogJaws.holdEnd + BogJaws.releaseFade) < CGFloat(0.5))
-
-        let scene = BogScene(layout: SceneTests.duo)
-        let g = SceneTests.geometry
-        let fly = CGPoint(x: g.center.x - 220, y: g.center.y + 50)
-        var s = TrapSnapshot(bugs: [SceneTests.bug(1, .housefly, fly, .sipping)])
-        for _ in 0..<4 { scene.show(s, events: [], dt: 1.0 / 120.0) }
-        #expect(scene.faceShade < CGFloat(0.01))
-        // Closing darkens (the hands at the snap depth).
-        s.closure = Tuning.snapDepth
-        scene.show(s, events: [], dt: 1.0 / 120.0)
-        #expect(scene.faceShade > CGFloat(0.5))
-        // The bite; the hands stay at the snap depth through the release.
-        s.bugs[0].activity = .caught(elapsed: 0)
-        let report = BiteReport(caught: [.housefly], escaped: 0, stingers: [], points: 10, countMultiplier: 1,
-                                chainMultiplier: 1, snapsBack: 0, snapsLost: 0, duration: 0.1, time: 1)
-        scene.show(s, events: [.snapped(report), .bugCaught(id: 1, species: .housefly, position: fly)],
-                   dt: 1.0 / 120.0)
-        let face = TrapArt.palette.lobeOuter
-        let dark = RGBA(hex: 0x24030D)
-        var t = 1.0 / 120.0
-        var shutDark = false
-        var checked = 0
-        while t < 0.5 {
-            scene.show(s, events: [], dt: 1.0 / 120.0)
-            t += 1.0 / 120.0
-            if t < BogJaws.holdEnd && scene.biteShade > CGFloat(0.9) { shutDark = true }
-            if t >= BogJaws.holdEnd + BogJaws.releaseFade + 0.001 {
-                checked += 1
-                #expect(scene.faceShade < CGFloat(0.02), "shade \(scene.faceShade) at \(t)")
-                let shown = face.mixed(with: dark, Double(scene.faceShade))
-                #expect(shown.r > 2.5 * shown.g && BogPaint.luminance(shown) > 0.9 * BogPaint.luminance(face))
-                #expect(scene.ciliaAlpha > CGFloat(0.98))
-                #expect(scene.toothReach > CGFloat(0.9))
-                #expect(scene.closedTrapAlpha < CGFloat(0.01))
-                #expect(scene.lobeScale > CGFloat(0.65))
-            }
-        }
-        #expect(shutDark)
-        #expect(checked > 10)
-        // Opening a little more keeps it crimson; closing again darkens it again.
-        s.closure = Tuning.snapDepth * 0.6
-        for _ in 0..<6 { scene.show(s, events: [], dt: 1.0 / 120.0) }
-        #expect(scene.faceShade < CGFloat(0.05))
-        s.closure = Tuning.snapDepth
-        for _ in 0..<40 { scene.show(s, events: [], dt: 1.0 / 120.0) }
-        #expect(scene.faceShade > CGFloat(0.5))
     }
 
     /// REVIEW-4 #12 (18: "DOUBLE ×2 · +32" on a bug): no pop is ever placed over a free bug.
@@ -2188,5 +2127,228 @@ struct SceneTests {
         #expect(scene.visibleFireflies >= 12, "fireflies \(scene.visibleFireflies)")
         #expect(scene.glowingFireflies == scene.visibleFireflies)
         #expect(BogLight.fireflyFloor > CGFloat(0.4) && BogLight.fireflyGlow > CGFloat(70))
+    }
+
+    // MARK: R8 (the phone IS the trap)
+
+    /// R8 §1: with hinge input the inner screen never draws the trap shutting. Whatever the closure (the snapshot's or
+    /// the App's predicted one), and through the bite at the shut, the lobes stay drawn open: no slam, no squeeze, no
+    /// closed trap, no pop (nobody can see the inner screen while the phone is shut).
+    @Test func withTheHingeTheLobesStayOpen() {
+        let scene = BogScene(layout: SceneTests.duo)
+        scene.usesHinge = true
+        var s = SceneTests.crowd()
+        for deg in [0.0, 10, 22, 45, 80, 120, 150, 175] {
+            s.closure = deg
+            for _ in 0..<3 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+            #expect(abs(scene.drawnClosure01) < CGFloat(0.0001), "drawn \(scene.drawnClosure01) at \(deg)°")
+            #expect(abs(scene.lobeScale - CGFloat(1)) < CGFloat(0.001), "lobe scale \(scene.lobeScale) at \(deg)°")
+            #expect(scene.jawSlam < CGFloat(0.001))
+            #expect(scene.closedTrapAlpha < CGFloat(0.001))
+        }
+        // The App's predicted closure is a cue too, never a shut.
+        scene.drawnClosure = 140
+        scene.show(s, events: [], dt: 1.0 / 120.0)
+        #expect(abs(scene.drawnClosure01) < CGFloat(0.0001))
+        #expect(scene.closingCue > CGFloat(0.99))
+        scene.drawnClosure = nil
+        // The bite, as the phone shuts.
+        s.closure = 150
+        s.shut = true
+        s.bugs[0].activity = .caught(elapsed: 0)
+        let sp = s.bugs[0].species
+        let report = BiteReport(caught: [sp], escaped: 0, stingers: [], points: 12, countMultiplier: 1,
+                                chainMultiplier: 1, snapsBack: 0, snapsLost: 0, duration: 0.25, time: 1)
+        scene.show(s, events: [.snapped(report), .bugCaught(id: s.bugs[0].id, species: sp,
+                                                            position: s.bugs[0].position)], dt: 1.0 / 120.0)
+        #expect(!scene.inHitStop)
+        for _ in 0..<60 {
+            scene.show(s, events: [], dt: 1.0 / 120.0)
+            #expect(scene.jawSlam < CGFloat(0.001))
+            #expect(scene.closedTrapAlpha < CGFloat(0.001))
+            #expect(abs(scene.drawnClosure01) < CGFloat(0.0001))
+            #expect(scene.lobeScale > CGFloat(0.999))
+        }
+        #expect(scene.flashingBugs == 0)
+        #expect(!scene.isDrawn(bug: s.bugs[0].id))
+        #expect(scene.popTexts.isEmpty, "\(scene.popTexts)")
+        #expect(scene.digestPending)
+    }
+
+    /// R8 §1: the closing cues follow the closure continuously, subtle at 10°, strong at 80° and the edges near-black
+    /// by 120°: the cilia lean in, the rim shadow deepens, the edges dim and the sitters in the trap panic (buzz and
+    /// jitter). Touch draws none of them.
+    @Test func theClosingCuesFollowTheClosure() {
+        #expect(TrapArt.closingCue(0) < CGFloat(0.0001))
+        #expect(TrapArt.closingCue(.nan) < CGFloat(0.0001))
+        #expect(abs(TrapArt.closingCue(200) - CGFloat(1)) < CGFloat(0.0001))
+        let subtle = TrapArt.closingCue(10)
+        #expect(subtle > CGFloat(0) && subtle < CGFloat(0.15))
+        #expect(TrapArt.closingCue(80) > CGFloat(0.55))
+        #expect(TrapArt.edgeDim(TrapArt.closingCue(120)) > CGFloat(0.9))
+        #expect(TrapArt.edgeDim(CGFloat.nan) < CGFloat(0.0001))
+
+        let scene = BogScene(layout: SceneTests.duo)
+        scene.usesHinge = true
+        var s = SceneTests.crowd()
+        let sitter = s.bugs[0].id
+        #expect(s.bugs[0].inTrap)
+        var last: (cue: CGFloat, rim: CGFloat, dim: CGFloat, reach: CGFloat, panic: CGFloat)?
+        for deg in [0.0, 10, 40, 80, 120] {
+            s.closure = deg
+            var jitter: CGFloat = 0
+            for _ in 0..<12 {
+                scene.show(s, events: [], dt: 1.0 / 120.0)
+                let j = scene.panicJitter(ofBug: sitter) ?? .zero
+                jitter = max(jitter, abs(j.x) + abs(j.y))
+            }
+            let now = (cue: scene.closingCue, rim: scene.rimShadow, dim: scene.edgeDim, reach: scene.toothReach,
+                       panic: scene.panic(ofBug: sitter) ?? 0)
+            if let l = last {
+                #expect(now.cue > l.cue && now.rim > l.rim && now.dim > l.dim, "cues at \(deg)°")
+                #expect(now.reach < l.reach, "cilia reach \(now.reach) at \(deg)°")
+                #expect(now.panic > l.panic - CGFloat(0.0001), "panic \(now.panic) at \(deg)°")
+            }
+            if deg < 1 {
+                // Open: nothing.
+                #expect(now.cue < CGFloat(0.0001) && now.dim < CGFloat(0.0001) && now.rim < CGFloat(0.0001))
+                #expect(now.reach > CGFloat(0.99))
+                #expect(jitter < CGFloat(0.0001))
+                #expect(scene.faceShade < CGFloat(0.01))
+            } else if deg < 11 {
+                // Subtle at 10°.
+                #expect(now.dim < CGFloat(0.15) && now.rim < CGFloat(0.15) && now.reach > CGFloat(0.95))
+                #expect(now.dim > CGFloat(0))
+            } else if deg > 79 && deg < 81 {
+                // Strong at 80°.
+                #expect(now.dim > CGFloat(0.55) && now.rim > CGFloat(0.5) && now.reach < CGFloat(0.6))
+                #expect(now.panic > CGFloat(0.8) && scene.bugPanic > CGFloat(0.8))
+                #expect(jitter > CGFloat(1), "jitter \(jitter)")
+            } else if deg > 119 {
+                // Near-black at the edges by 120°.
+                #expect(now.dim > CGFloat(0.9))
+            }
+            last = now
+        }
+        // The lobes never moved for any of it.
+        #expect(abs(scene.drawnClosure01) < CGFloat(0.0001))
+        #expect(abs(scene.lobeScale - CGFloat(1)) < CGFloat(0.001))
+
+        // Touch: no cues (its sweep draws the lobes closing, as before).
+        let touch = BogScene(layout: SceneTests.duo)
+        var t = SceneTests.crowd()
+        t.closure = Tuning.snapDepth
+        for _ in 0..<3 { touch.show(t, events: [], dt: 1.0 / 120.0) }
+        #expect(touch.closingCue < CGFloat(0.0001) && touch.edgeDim < CGFloat(0.0001))
+        #expect(touch.bugPanic < CGFloat(0.0001))
+        #expect(touch.drawnClosure01 > CGFloat(0.99))
+    }
+
+    /// R8 §1: on the reopen after a hinge bite (`shut` goes false) the digest plays: the caught bugs gone, a gold juice
+    /// stain and remains where each one was, the "+N" pop and the FEAST moment. None of it shows while shut.
+    @Test func theDigestPlaysOnTheReopen() {
+        let scene = BogScene(layout: SceneTests.duo)
+        scene.usesHinge = true
+        let g = SceneTests.geometry
+        let n = 6
+        var bugs: [BugState] = []
+        for i in 0..<n {
+            let sd: CGFloat = i % 2 == 0 ? -1 : 1
+            let p = CGPoint(x: g.center.x + sd * (120 + 26 * CGFloat(i)), y: g.center.y - 130 + 46 * CGFloat(i))
+            bugs.append(SceneTests.bug(i, .housefly, p, .sipping))
+        }
+        var s = TrapSnapshot(time: 1, bugs: bugs, snapsLeft: 6)
+        for _ in 0..<2 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        // The bite as the phone shuts (six: a FEAST).
+        s.closure = 150
+        s.shut = true
+        s.snapsLeft = 8
+        let report = BiteReport(caught: Array(repeating: BugSpecies.housefly, count: n), escaped: 0, stingers: [],
+                                points: 120 * n, countMultiplier: n, chainMultiplier: 1.5, snapsBack: 2,
+                                snapsLost: 0, duration: 0.2, time: 1)
+        var events: [TrapEvent] = [.snapped(report)]
+        for i in 0..<n {
+            s.bugs[i].activity = .caught(elapsed: 0)
+            events.append(.bugCaught(id: i, species: .housefly, position: s.bugs[i].position))
+        }
+        events.append(.feast(count: n, snapsBack: 2))
+        scene.show(s, events: events, dt: 1.0 / 120.0)
+        // Shut: nothing of the bite shows (the phone is closed; iOS shows the outer display).
+        for _ in 0..<30 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        #expect(scene.digestPending)
+        #expect(scene.digestsShown == 0)
+        #expect(scene.popTexts.isEmpty, "\(scene.popTexts)")
+        #expect(scene.banners.isEmpty)
+        #expect(scene.juiceStains == 0)
+        #expect(!scene.lastBiteWasFeastEvent)
+        for i in 0..<n { #expect(!scene.isDrawn(bug: i)) }
+        // The reopen (the re-arm): the digest.
+        s.shut = false
+        s.closure = 50
+        scene.show(s, events: [.rearmed], dt: 1.0 / 120.0)
+        #expect(!scene.digestPending)
+        #expect(scene.digestsShown == 1)
+        #expect(scene.juiceStains == n)
+        #expect(scene.remainsShowing == n * BogEffects.remainsPerBug)
+        #expect(scene.lastBiteWasFeastEvent)
+        #expect(scene.banners.contains(BogScene.feastBanner))
+        let callout = BogScene.bigFeastLabel(count: n, points: 120 * n)
+        #expect(scene.popTexts.contains(callout), "\(scene.popTexts)")
+        // Still never a slam, a hit-stop, a white flash or a gulp: the bugs were eaten out of sight.
+        #expect(!scene.inHitStop)
+        #expect(scene.flashingBugs == 0)
+        #expect(!scene.gulpQueued(ofBug: 0))
+        for _ in 0..<12 { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        #expect(scene.jawSlam < CGFloat(0.001))
+        #expect(scene.closedTrapAlpha < CGFloat(0.001))
+        #expect(abs(scene.drawnClosure01) < CGFloat(0.0001))
+        for i in 0..<n { #expect(!scene.isDrawn(bug: i)) }
+        #expect(scene.juiceStains == n)
+        // The stain and the remains fade in their time.
+        let frames = Int(BogEffects.digestLife * 120) + 12
+        for _ in 0..<frames { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        #expect(scene.juiceStains == 0)
+        #expect(scene.remainsShowing == 0)
+    }
+
+    /// R8: a hinge bite whose snapshot never shows the phone shut (a pilot, a Core without `shut`) still digests after
+    /// `digestFallback`; touch never holds a bite (a tap is an instant bite: the slam and the pop at once).
+    @Test func aBiteNeverWaitsForeverAndTouchNeverWaits() {
+        let scene = BogScene(layout: SceneTests.duo)
+        scene.usesHinge = true
+        var s = SceneTests.crowd()
+        s.shut = false
+        scene.show(s, events: [], dt: 1.0 / 120.0)
+        s.bugs[0].activity = .caught(elapsed: 0)
+        let sp = s.bugs[0].species
+        let id = s.bugs[0].id
+        let report = BiteReport(caught: [sp], escaped: 0, stingers: [], points: 12, countMultiplier: 1,
+                                chainMultiplier: 1, snapsBack: 0, snapsLost: 0, duration: 0.3, time: 1)
+        let events: [TrapEvent] = [.snapped(report), .bugCaught(id: id, species: sp, position: s.bugs[0].position)]
+        scene.show(s, events: events, dt: 1.0 / 120.0)
+        #expect(scene.digestPending)
+        scene.show(s, events: [], dt: 1.0 / 120.0)
+        #expect(scene.digestPending)
+        let wait = Int(BogScene.digestFallback * 120) + 2
+        for _ in 0..<wait { scene.show(s, events: [], dt: 1.0 / 120.0) }
+        #expect(!scene.digestPending)
+        #expect(scene.digestsShown == 1)
+        #expect(scene.juiceStains == 1)
+        let one = BogScene.heroLabel(count: 1, points: 12)
+        #expect(scene.popTexts.contains(one), "\(scene.popTexts)")
+
+        // Touch: the pop and the slam at once, no digest.
+        let touch = BogScene(layout: SceneTests.duo)
+        var t = SceneTests.crowd()
+        touch.show(t, events: [], dt: 1.0 / 120.0)
+        t.closure = Tuning.snapDepth
+        t.bugs[0].activity = .caught(elapsed: 0)
+        touch.show(t, events: events, dt: 1.0 / 120.0)
+        #expect(!touch.digestPending)
+        #expect(touch.popTexts.contains(one), "\(touch.popTexts)")
+        for _ in 0..<9 { touch.show(t, events: [], dt: 1.0 / 120.0) }
+        #expect(touch.jawSlam > CGFloat(0.95))
+        #expect(touch.closedTrapAlpha > CGFloat(0.95))
+        #expect(touch.juiceStains == 0)
     }
 }

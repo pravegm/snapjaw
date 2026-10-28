@@ -1,5 +1,5 @@
 # iPhone Duo frames (ci/duo.sh "store" pass): the Duo simulator in book pose with a real fold, the hinge held at 150°
-# (open, so closing never pauses these). The pilot drives the trap, so the hinge doesn't. These are the candidates for
+# (open). The pilot drives the trap where a frame has one; a hinge round without one waits for the first shut (R8). These are the candidates for
 # the App Store Duo set (truthful frames: nothing here that the app doesn't do).
 # name|demo args (-snapDemo, keys in design/ROUND-1.md)|seconds before capture|caption|expect
 # A freezeOn=<x> line waits for "SNAP-T freeze <x>" (at least 20 s, at least `wait`); freezeAfter= for any "SNAP-T freeze".
@@ -10,7 +10,7 @@
 01-title|screen=home;progress=mid|5|Home on the Duo (R4 02): the title trap across both halves, the buttons on the right half|SNAP-T canvas
 02-landed|screen=play;seed=7;pilot=expert;freezeOn=landed|30|(R4 10) A fly sipping on a nectar drop inside the lobes; flyers over the crease (#15 airborne cue)|SNAP-T freeze landed
 03-crowd|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd|60|A crowd sipping across the fold, "Now!"|SNAP-T freeze crowd
-04-snap|screen=play;seed=7;pilot=perfect;freezeOn=snap|45|The bite: teeth interlocked, juice, the score pop|SNAP-T event snapped
+04-snap|screen=play;seed=7;pilot=perfect;freezeOn=snap|45|The bite: the CHOMP, juice, the score pop|SNAP-T event snapped
 05-feast|screen=play;seed=7;wave=8;pilot=perfect;freezeOn=feast|90|"Feast! +1 snap" and the multiplier callout (the hold, 0.3 s after the bite)|SNAP-T event feast
 06-bee|screen=play;seed=7;wave=15;pilot=perfect;freezeOn=bee|60|A bee in the trap with its protected halo, "Bee! Wait…"|SNAP-T freeze bee
 07-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=sting|90|"Bzzt!": the bee let go, cross|SNAP-T event stung
@@ -20,17 +20,20 @@
 11-daily|screen=play;mode=daily;seed=7;progress=mid;pilot=expert;freezeAfter=10|18|(R4 25) Daily Bog in play: the Daily label under the score, clear of Pause (R3 store-11 collided)|SNAP-T input pilot
 12-results|screen=results;seed=7;progress=mid;pilot=casual|8|(R4 26) Results on the Duo|SNAP-T canvas
 13-book|screen=book;progress=late|5|The Bug Book, all 16|SNAP-T canvas
-14-lesson-2|screen=lesson;lessonStep=2|7|First Bite step 2 with the Duo text ("snap shut!")|SNAP-T canvas
-15-lesson-5-bee|screen=lesson;lessonStep=5|8|First Bite step 5: the bee, "Never eat a bee. Wait…"|SNAP-T canvas
 16-settings|screen=settings|4|Settings on the Duo|SNAP-T canvas
-# R5 (REVIEW-4 #1, #11, #15): the R4 frames still missing at Duo aspect. The real-hinge lesson walk (steps 2 → 3 → 4
-# driven by hinge snaps) is ci/duo.sh's ui pass (duo-ui-lesson-*-hinge-*); these are the direct entries.
-17-pose|screen=pose|5|(R4 31) The pose card at 951 x 669: "Hold it open like a book", the diagram whole, "138°" readable (REVIEW-4 #2)|SNAP-T canvas
-18-cover-card|screen=cover|8|(R4 32) The cover-display card forced on the inner display: the isolated 3/4 trap and the score|SNAP-T canvas
+# R5 (REVIEW-4 #1, #11, #15): the R4 frames still missing at Duo aspect. R8: the lesson frames (14, 15, 22, 23) are
+# gone with the lesson (app-R8.md); Levels 1–5 teach, framed by 26–30.
+17-pose|screen=pose|5|(R4 31) The pose card at 951 x 669 (R8: "Snapjaw plays sideways", no hold instruction)|SNAP-T canvas
+18-cover-card|screen=cover|8|(R4 32) The cover-display card forced on the inner display: the closed trap at rest, "Open to play"|SNAP-T canvas
 19-cover-display|screen=cover;ciHinge=0|8|The cover display itself, the Duo closed: the card at 1398 x 2034 (REVIEW-4 Duo P2-4)|SNAP-T
-20-snap-casual|screen=play;seed=7;pilot=casual;freezeOn=snap|45|(R4 13) 0.12 s after a casual bite: the hold reads as a shut leaf (green backs, crimson seam)|SNAP-T event snapped
+20-snap-casual|screen=play;seed=7;pilot=casual;freezeOn=snap|45|(R4 13) 0.12 s after a casual bite|SNAP-T event snapped
 21-play-casual|screen=play;seed=7;pilot=casual;freezeAfter=8|16|(R4 21) Casual play at 8 s: where the "+1 snap" and chain chips stack (the right thumb band, Duo P1-2)|SNAP-T input pilot
-22-lesson-2-fold1|screen=lesson;lessonStep=2;fold=1|7|First Bite step 2 entered directly with fold=1 on the real hinge (run 40634483657 logged "tap to snap!" this way)|SNAP-T lesson step 2
-23-lesson-3-fold1|screen=lesson;lessonStep=3;fold=1|7|First Bite step 3 entered directly with fold=1 on the real hinge: "Open up to reset the trap." (it may pass at once: the hinge is already open)|SNAP-T lesson step 3
 24-chain5-cap|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=chain5;freezeAfter=50|300|The chain at the cap, x5 (#15: R4 39 froze on the 5th step, x3.5; x5 is the 8th, ~41 s in on the phone, so only a chain step after 50 s counts)|SNAP-T event chainUp count=[0-9]+ multiplier=5
 25-feast-open|screen=play;seed=7;wave=8;pilot=perfect;ciShootOn=feast|90|The trap open again just after a feast bite (not the hold or the release): the pop and "Feast! +1 snap" over open lobes|SNAP-T event feast count=[3-9]
+# R8 (ROUND-8 §1, §4; app-R8.md demo keys): a round starts closed, the outer display's CHOMP card, the levels.
+26-close-to-start|screen=play;mode=attract;seed=7|6|A hinge round launched with the Duo open: "Close the phone to start" (founder rule 3), no bugs yet|SNAP-T canvas
+27-chomp-card|screen=chomp;chomp=catch;ciHinge=0|10|The outer display after a bite, the Duo shut: the closed trap, "CHOMP! n bugs · +points", a bump per bug|SNAP-T chomp card
+28-levels|screen=levels;progress=mid|6|The level map: Morning Bog, Dusk, Night, the stars and the next level|SNAP-T screen levels
+29-level-intro|screen=levelIntro;level=4|6|Level 4's intro card: "Catch 2 flies. Never bite the bee"|SNAP-T level intro 4
+30-level-results|screen=levelResults;level=1;pilot=perfect|40|Level 1 played by the perfect pilot, then its results: 3 stars|SNAP-T level result 1
+31-chomp-sting|screen=chomp;chomp=sting;ciHinge=0|10|The outer display after biting a bee: the sting message|SNAP-T chomp card

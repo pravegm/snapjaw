@@ -7,56 +7,62 @@ import Foundation
 // (same names) and the detector values in its `D` table: KEEP THEM IDENTICAL. R1 tuning (design/notes/core-R1.md)
 // changed some GAME-DESIGN starting values; each change is marked "R1". R2 changes (design/notes/core-R2.md) are
 // marked "R2", R3 changes (design/notes/core-R3.md) "R3", R4 changes (design/notes/core-R4.md) "R4", R5 changes
-// (design/notes/core-R5.md) "R5", R6 changes (design/notes/core-R6.md) "R6", R7 changes (design/notes/core-R7.md) "R7".
+// (design/notes/core-R5.md) "R5", R6 changes (design/notes/core-R6.md) "R6", R7 changes (design/notes/core-R7.md) "R7",
+// R8 changes (design/notes/core-R8.md) "R8".
 // The R6 goal and halo values are not in the sim (it has no goals or hints); lastLightWave and zenDayWaves are. R7's
 // feastMultiplier, night pool weights and late decays are; wellFedScore is not.
 
 enum Tuning {
 
-    // MARK: Hinge and the snap rule (GAME-DESIGN §3)
+    // MARK: Hinge: the lid is the jaw (R8, ROUND-8 §1; SnapDetector)
 
-    /// Closure (degrees from the rest reference) at which the bite fires.
-    static let snapDepth: Double = 22
-    /// Closure that starts the snap timer (`ts`).
-    static let snapStartDepth: Double = 4
-    /// A snap attempt is abandoned when the closure falls back below this (hysteresis below `snapStartDepth`).
-    static let snapCancelDepth: Double = 2
-    /// Creep depth (against the slow creep reference) that counts as creeping …
-    static let creepDepth: Double = 6
-    /// … for longer than this (s).
-    static let creepDwell: Double = 0.45
-    /// Re-arm once θ has risen this far above the lowest point of the last snap …
-    static let rearmRise: Double = 16
-    /// … or θ is at least this (and has risen `rearmMinRise`, so a snap from a near-flat rest can't re-arm at once).
-    static let rearmAngle: Double = 150
-    static let rearmMinRise: Double = 4
-    /// Rest reference: the highest θ over this window (s) …
+    /// R8 (founder rule 1: a shut phone is a closed trap, any opening is open; a phone at 90° is OPEN): the trap is
+    /// armed once θ reaches this, and re-armed here after a bite (the hysteresis above shutAngle).
+    static let armAngle: Double = 35
+    /// R8: the shut zone, where the bite fires: θ at or below this (while armed) …
+    static let shutAngle: Double = 18
+    /// … or the hinge status `.closed` with θ at or below this. Hardware reads `.closed` from about 85° (CLAUDE.md), so
+    /// the status alone would bite an open phone; this guard keeps "partial closes never bite".
+    static let statusShutAngle: Double = 25
+    /// R8: a close starts when the closure passes this (the bite's duration is timed from here) …
+    static let closeStart: Double = 8
+    /// … and is abandoned (a partial close opened again) when the closure falls back under this …
+    static let closeCancel: Double = 4
+    /// … or the phone opens this far (°) above the close's lowest θ ("any opening at all means it is opening").
+    static let reopenCancel: Double = 10
+    /// R8: a shut with no close start seen (a creep slower than the reference's fall) counts as a close this long (s).
+    static let untimedCloseDuration: Double = 2.0
+    /// R8: a close still under way this long (s) after its start is a slow close (TrapInput.creeping, the "quick" hint).
+    static let slowCloseAfter: Double = 0.6
+    /// R8: the degrees of closure from closeStart to the shut on a typical book (the pilot's 150° rest: 150 − 18 − 8).
+    /// TrapRules.modelExposure spreads a bite's duration over it.
+    static let modelCloseSpan: Double = 124
+    /// The open reference: the highest θ over this window (s) …
     static let refWindow: Double = 0.6
-    /// … falling at most this fast (°/s).
+    /// … falling at most this fast (°/s); it holds while a close is under way.
     static let refFallRate: Double = 25
-    /// Founder change (R1): the slow creep reference, the highest θ over this window (s) …
-    static let creepWindow: Double = 3.0
-    /// … falling at most this fast (°/s). Reset to θ on each re-arm.
-    static let creepRefFallRate: Double = 6
-    /// θ at or above this is "too flat" (hint only).
+    /// R8 (founder rule 2: no pose demands; flat, laptop, any angle plays): no Core rule uses this any more
+    /// (TrapInput.tooFlat is always false, Core never hints `.bendALittle`). Kept for App's AppRules.isTooFlat, which
+    /// founder rule 2 removes too.
     static let tooFlatAngle: Double = 174
-    /// R2 (QA-1 #5): after a re-arm, the first sample or a too-flat θ, the creep reference follows θ while it rises
-    /// and for this long after its peak (an overshoot that settles back is not a creep).
-    static let settleWindow: Double = 0.6
-    /// R2 (QA-1 #6): an attempt whose closure rose less than snapStartDepth over this window (s) is not a snap yet,
-    /// so its start time moves up to now (a drift or a hold never makes a later quick snap slow).
-    static let attemptWindow: Double = 0.25
-    /// θ below this for `closingDwell` pauses the game (App/Input).
-    static let closingAngle: Double = 50
-    static let closingDwell: Double = 0.6
-    /// A tap snap counts as this fast (s).
-    static let touchSnapTime: Double = 0.09
-    /// A tap snap re-arms after this (s).
+    /// R8: a tap is an instant bite of this duration (s).
+    static let touchSnapTime: Double = 0.12
+    /// A tap bite re-arms after this (s); the clock is frozen until then.
     static let touchRearmDelay: Double = 0.45
+
+    /// R8 legacy (no longer part of any rule): the drawn-closure scale and thresholds Scene, Feel and App used with the
+    /// R1–R7 partial snap. Kept so their code compiles until they move to the R8 closure (degrees from the open
+    /// reference, up to ~145° at the shut).
+    static let snapDepth: Double = 22
+    static let snapStartDepth: Double = 4
+    static let creepDepth: Double = 6
+    static let creepDwell: Double = 0.45
 
     // MARK: Snaps, score and chain (GAME-DESIGN §5)
 
-    static let startSnaps: Int = 10
+    /// R8 (ROUND-8 §2, balance sim): 12 (was 10). The R8 bite is much harder (a whole close, startled bugs flee), so a
+    /// novice's run needs the two extra snaps to reach 60–100 s; the expert's length is set by the late night.
+    static let startSnaps: Int = 12
     /// R3 (REVIEW-2 #23): two rows of 7, so a Sprout's 12-snap start never caps an early Feast away.
     static let maxSnaps: Int = 14
     /// R4 (REVIEW-3 #11, founder call): a Sprout's first Feed run (SessionOptions.firstRun) starts with the max.
@@ -94,22 +100,30 @@ enum Tuning {
     static let chainMaxMultiplier: Double = 5
     /// R2 chain rule (GAME-DESIGN §5): only a clean bite of at least this many adds a step; a clean 1-bug bite holds.
     static let chainMinBite: Int = 2
+    /// R8 (ROUND-8 §2): any miss breaks the chain: a bite that let a bug escape (or flee its close) breaks it too.
+    static let missBreaksChain: Bool = true
+    /// R8 (ROUND-8 §2 lever "a dry bite costs more"): extra snaps a dry bite costs. 0: with it on (1) the sim's novice
+    /// run fell to 35 s (target 60–100 s); the R8 close already makes dry bites common enough.
+    static let dryBiteCost: Int = 0
 
     // MARK: Hunger (R2, GAME-DESIGN §5 "Hunger")
 
     /// Seconds of hunger before a snap wilts, by day phase. R3 (REVIEW-2 #7): 18/16/14/12 (was 15/14/12/10). R4
     /// (QA-2 #1, REVIEW-3 #12, founder call): night 14, and the clock ticks only while at least one catchable bug has
     /// landed in the trap and no protected bug has, so an empty, bee-only or bee-plus-flies trap never gets hungrier.
-    /// A catch resets it.
+    /// A catch resets it. R8 (ROUND-8 §2 "faster hunger from noon on"): 18/14/12/12 (was 18/16/14/14).
     static let wiltMorning: Double = 18
-    static let wiltNoon: Double = 16
-    static let wiltDusk: Double = 14
-    static let wiltNight: Double = 14
+    static let wiltNoon: Double = 14
+    static let wiltDusk: Double = 12
+    static let wiltNight: Double = 12
     /// `hungry` fires (and the hint shows) this many seconds before a wilt.
     static let hungryWarning: Double = 3
 
     // MARK: The bite rule (GAME-DESIGN §4)
 
+    /// R8: the morning's bugs (waves before noonWave) flee × this slower: a slow hand still catches something while it
+    /// learns (the sim's novice: 32 s without it, 70 s with it).
+    static let morningReactionFactor: Double = 1.3
     static let sipReactionFactor: Double = 1.35
     static let flyingReactionFactor: Double = 0.55
     static let rimReactionFactor: Double = 0.6
@@ -261,6 +275,9 @@ enum Tuning {
     static let haloScale: Double = 1.6
     static let haloPad: Double = 4
 
+    /// R8 (ROUND-8 §4): a level whose script has nothing left to catch (nothing pending, no bug that isn't leaving)
+    /// ends after this long (s).
+    static let levelIdleEnd: Double = 2.5
     static let tiredSeconds: Double = 2.2
     static let caughtSeconds: Double = 0.5
     /// "Open up to reset" after this long unarmed after a snap.
@@ -315,32 +332,26 @@ enum Tuning {
 
     // MARK: TrapPilot (ROUND-1 "TrapPilot")
 
-    static let pilotOvershoot: Double = 6
-    static let pilotHold: Double = 0.15
-    static let pilotReopen: Double = 0.35
-    static let pilotIdleAngle: Double = 160
-    static let noviceCreepChance: Double = 0.25
-    static let noviceCreepDepth: Double = 12
-    static let noviceCreepTime: Double = 1.2
+    /// R8: the pilot holds the book here and closes to pilotShutAngle (its closure is pilotIdleAngle − θ).
+    static let pilotIdleAngle: Double = 150
+    static let pilotShutAngle: Double = 5
+    /// R8: the novice waits for 2 landed bugs, or 1 after this long (s) since its last bite.
+    static let novicePatience: Double = 6
     static let casualPatience: Double = 7
     static let expertPatience: Double = 6
     static let perfectPatience: Double = 7
     static let noviceBeeMiss: Double = 0.6
     static let casualBeeMiss: Double = 0.25
     static let expertBeeMiss: Double = 0.02
-    /// R2: a casual hand fumbles this share of its snaps (a slow casualFumbleMin…Max s close); with the bees, that is
-    /// what breaks its chains.
-    static let casualFumbleChance: Double = 0.3
-    static let casualFumbleMin: Double = 0.3
-    static let casualFumbleMax: Double = 0.45
     /// Perfect waits while a protected bug in the trap is flying below this height.
     static let perfectBeeHeight: Double = 0.85
     /// Others notice a protected arriving bug below this height.
     static let pilotBeeHeight: Double = 0.75
-    /// Expert shoos a bee that has sat in the trap for expertShooAfter s with a slow creep to shooDepth.
-    static let shooDepth: Double = 11
-    static let shooTime: Double = 0.5
-    static let shooHold: Double = 0.1
+    /// Expert shoos a bee that has sat in the trap for expertShooAfter s: R8, a partial close to shooDepth° of closure
+    /// over shooTime, held until the bee has gone (at most shooHoldMax s), then the reopen. It never bites.
+    static let shooDepth: Double = 30
+    static let shooTime: Double = 0.4
+    static let shooHoldMax: Double = 1.6
     static let expertShooAfter: Double = 5
     static let perfectShooAfter: Double = 0
     static let expertValue: Int = 120

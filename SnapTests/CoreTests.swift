@@ -18,6 +18,10 @@ import Testing
 // light, the halo rule for "Hungry… bite!", goals (pool, scopes, tracker, book, draws, rewards) and the Garden's varieties.
 // Round 7: the ×2 FEAST multiplier, one scoring function in every mode, the night pool (fireflies and crickets), the
 // late decays 0.955 / 0.91, goal tiers, and sessions' keep-out rects (Scene's HUD zones).
+// Round 8: the R1–R7 detector (22° partial snaps, the creep), the creep spook and the closing pause are gone, with
+// their tests. The bite rule is the R8 exposure rule (TrapRules.modelExposure); the new hinge, fear, shut, level and
+// economy rules are tested in CoreR8Tests.swift. The quiet sessions here start with 10 snaps (R1–R7's start), so the
+// economy arithmetic below reads as before.
 
 struct CoreTests {
 
@@ -29,7 +33,8 @@ struct CoreTests {
     /// A feed session without waves (bugs only by script).
     private func quiet(seed: UInt64 = 7, snapsRunOut: Bool = true, stingCosts: Bool = true,
                        best: Int = 0) -> TrapSession {
-        let o = SessionOptions(snapsRunOut: snapsRunOut, waves: false, stingCosts: stingCosts)
+        var o = SessionOptions(snapsRunOut: snapsRunOut, waves: false, stingCosts: stingCosts)
+        o.startSnaps = 10
         return TrapSession(mode: .feed, seed: seed, best: best, geometry: geo, options: o)
     }
 
@@ -69,6 +74,14 @@ struct CoreTests {
         return s.step(dt: frame, input: input)
     }
 
+    /// R8: the slowest close (s) that still catches a resting `species` in a quiet session (the morning, wave 0).
+    private func slowest(_ species: BugSpecies, sipping: Bool) -> Double {
+        let info: BugInfo = BugCatalog.info(species)
+        let r: Double = TrapRules.reaction(info, sipping: sipping, flying: false, onRim: false, wave: 0)
+        let frac: Double = min(max((info.nerve - Tuning.closeStart) / Tuning.modelCloseSpan, 0), 1)
+        return r / (1 - frac)
+    }
+
     private func count(_ events: [TrapEvent], _ match: (TrapEvent) -> Bool) -> Int {
         var n: Int = 0
         for e in events where match(e) { n += 1 }
@@ -92,26 +105,6 @@ struct CoreTests {
             return false
         }
         return true
-    }
-
-    /// Feeds a detector `angles` at 30 Hz from `start`; returns the triggers with their sample index.
-    private func feed(_ d: inout SnapDetector, _ angles: [Double], start: Double) -> [(Int, SnapTrigger)] {
-        var out: [(Int, SnapTrigger)] = []
-        var i: Int = 0
-        while i < angles.count {
-            if let t = d.ingest(angle: angles[i], at: start + Double(i) / 30.0) { out.append((i, t)) }
-            i += 1
-        }
-        return out
-    }
-
-    private func rest(_ d: inout SnapDetector, at angle: Double = 160, seconds: Double = 1) {
-        let n: Int = Int(seconds * 30)
-        var i: Int = 0
-        while i <= n {
-            _ = d.ingest(angle: angle, at: Double(i) / 30.0)
-            i += 1
-        }
     }
 
     private func result(mode: RunMode = .feed, score: Int = 0, caught: [String: Int] = [:], biggest: Int = 0,
@@ -161,22 +154,17 @@ struct CoreTests {
     // MARK: Tuning
 
     @Test func tuningMatchesTheDesign() {
-        #expect(Tuning.snapDepth == 22)
-        #expect(Tuning.snapStartDepth == 4)
-        #expect(Tuning.creepDepth == 6)
-        #expect(abs(Tuning.creepDwell - 0.45) < 1e-12)
-        #expect(Tuning.rearmRise == 16)
-        #expect(Tuning.rearmAngle == 150)
+        // R8 (the founder's hinge rules): armed at 35°, the shut zone ≤ 18° (.closed ≤ 25°), a close from 8°.
+        #expect(Tuning.armAngle == 35 && Tuning.shutAngle == 18 && Tuning.statusShutAngle == 25)
+        #expect(Tuning.shutAngle < Tuning.statusShutAngle && Tuning.statusShutAngle < Tuning.armAngle)
+        #expect(Tuning.closeStart == 8 && Tuning.closeCancel == 4 && Tuning.reopenCancel == 10)
+        #expect(abs(Tuning.modelCloseSpan - (Tuning.pilotIdleAngle - Tuning.shutAngle - Tuning.closeStart)) < 1e-12)
         #expect(abs(Tuning.refWindow - 0.6) < 1e-12)
         #expect(Tuning.refFallRate == 25)
-        #expect(Tuning.creepWindow == 3)
-        #expect(Tuning.creepRefFallRate == 6)
-        #expect(Tuning.tooFlatAngle == 174)
-        #expect(Tuning.closingAngle == 50)
-        #expect(abs(Tuning.closingDwell - 0.6) < 1e-12)
-        #expect(abs(Tuning.touchSnapTime - 0.09) < 1e-12)
+        #expect(abs(Tuning.touchSnapTime - 0.12) < 1e-12)
         #expect(abs(Tuning.touchRearmDelay - 0.45) < 1e-12)
-        #expect(Tuning.startSnaps == 10)
+        #expect(Tuning.startSnaps == 12)
+        #expect(Tuning.missBreaksChain && Tuning.dryBiteCost == 0)
         #expect(Tuning.noonWave == 7 && Tuning.duskWave == 15 && Tuning.nightWave == 23)
         // R2
         #expect(Tuning.hungryWarning == 3)
@@ -189,12 +177,12 @@ struct CoreTests {
         #expect(abs(Tuning.chainMaxMultiplier - 5) < 1e-12)
         #expect(TrapRules.chainSteps(toReach: 5) == 8, "×5 at step 8")
         #expect(TrapRules.chainSteps(toReach: 4) == 6)
-        // R4 (founder call): night wilt 14 s (18/16/14/14).
-        #expect(Tuning.wiltMorning == 18 && Tuning.wiltNoon == 16 && Tuning.wiltDusk == 14 && Tuning.wiltNight == 14)
+        // R8 (ROUND-8 §2): faster hunger from noon on: 18/14/12/12.
+        #expect(Tuning.wiltMorning == 18 && Tuning.wiltNoon == 14 && Tuning.wiltDusk == 12 && Tuning.wiltNight == 12)
         #expect(TrapSession.wiltSeconds(.morning) == 18)
-        #expect(TrapSession.wiltSeconds(.noon) == 16)
-        #expect(TrapSession.wiltSeconds(.dusk) == 14)
-        #expect(TrapSession.wiltSeconds(.night) == 14)
+        #expect(TrapSession.wiltSeconds(.noon) == 14)
+        #expect(TrapSession.wiltSeconds(.dusk) == 12)
+        #expect(TrapSession.wiltSeconds(.night) == 12)
         #expect(Tuning.creaseClearance == 16)
         #expect(Tuning.nectarRingMin == 24 && Tuning.nectarRingMax == 30)
         #expect(abs(Tuning.pilotStep - 1.0 / 60.0) < 1e-12)
@@ -220,172 +208,7 @@ struct CoreTests {
         #expect(Tuning.goalsActive == 3 && Tuning.goalRecentMemory == 6 && Tuning.goalMinSnaps == 5)
     }
 
-    // MARK: SnapDetector
-
-    @Test func fastSnapFiresOnceOnTheCrossingSample() {
-        var d = SnapDetector()
-        rest(&d)
-        // 25° in 0.12 s at 30 Hz: 6.9°, 13.9°, 20.8°, 25° …
-        var angles: [Double] = []
-        var i: Int = 1
-        while i <= 8 {
-            angles.append(160 - min(25, 25 * (Double(i) / 30.0) / 0.12))
-            i += 1
-        }
-        let fires: [(Int, SnapTrigger)] = feed(&d, angles, start: 1 + 1.0 / 30.0)
-        #expect(fires.count == 1)
-        if let f = fires.first {
-            #expect(f.0 == 3, "fired on sample \(f.0)")
-            #expect(f.1.duration >= 0.08 && f.1.duration <= 0.16, "duration \(f.1.duration)")
-        }
-        #expect(!d.armed)
-        let inp: TrapInput = d.input(at: 1.3)
-        #expect(inp.snap != nil)
-        let again: TrapInput = d.input(at: 1.31)
-        #expect(again.snap == nil, "the trigger is consumed once")
-        #expect(inp.closure >= 22)
-    }
-
-    @Test func slowCloseCreepsAndNeverSnaps() {
-        // Founder R1: 160 → 128 over 3 s creeps within ~1 s, reports the creep depth, and never snaps.
-        var d = SnapDetector()
-        rest(&d)
-        var creepAt: Double = -1
-        var fires: Int = 0
-        var endClosure: Double = 0
-        var i: Int = 1
-        while i <= 90 {
-            let t: Double = 1 + Double(i) / 30.0
-            if d.ingest(angle: 160 - 32 * Double(i) / 90.0, at: t) != nil { fires += 1 }
-            let inp: TrapInput = d.input(at: t + 0.001)
-            if inp.snap != nil { fires += 1 }
-            if inp.creeping && creepAt < 0 { creepAt = t - 1 }
-            endClosure = inp.closure
-            i += 1
-        }
-        #expect(fires == 0)
-        #expect(creepAt > 0 && creepAt <= 1.2, "creeping at \(creepAt)")
-        #expect(endClosure >= 15, "closure \(endClosure)")
-        #expect(d.armed)
-    }
-
-    @Test func restingJitterNeverSnapsOrCreeps() {
-        var d = SnapDetector()
-        var r = SeededRandom(seed: 5)
-        var bad: Int = 0
-        var i: Int = 0
-        while i < 600 {
-            let t: Double = Double(i) / 30.0
-            if d.ingest(angle: 160 + r.between(-1.5, 1.5), at: t) != nil { bad += 1 }
-            let inp: TrapInput = d.input(at: t)
-            if inp.creeping || inp.snap != nil { bad += 1 }
-            i += 1
-        }
-        #expect(bad == 0)
-    }
-
-    @Test func restReferenceFollowsASlowDrift() {
-        // 1.5 °/s drift for 10 s: the reference follows, no snap, no creep past the dwell.
-        var d = SnapDetector()
-        var fires: Int = 0
-        var i: Int = 0
-        while i <= 300 {
-            let t: Double = Double(i) / 30.0
-            if d.ingest(angle: 165 - 1.5 * t, at: t) != nil { fires += 1 }
-            i += 1
-        }
-        #expect(fires == 0)
-        let inp: TrapInput = d.input(at: 10.0)
-        #expect(inp.closure < Tuning.snapStartDepth, "closure \(inp.closure)")
-        #expect(abs(d.reference - 151) < 2, "reference \(d.reference)")
-        #expect(!inp.creeping, "creep depth ~4.5° stays under 6°")
-    }
-
-    @Test func rearmsSixteenAboveTheLowestPoint() {
-        var d = SnapDetector()
-        rest(&d)
-        let fires: [(Int, SnapTrigger)] = feed(&d, [154, 146, 138, 130, 126, 126, 130, 134, 138], start: 1 + 1.0 / 30.0)
-        #expect(fires.count == 1)
-        #expect(!d.armed, "138 is only 12° above 126")
-        _ = d.ingest(angle: 142, at: 1.4)
-        #expect(d.armed, "142 is 16° above 126")
-        // A new snap is measured from the re-arm point.
-        let second: [(Int, SnapTrigger)] = feed(&d, [136, 128, 119, 115], start: 1.4 + 1.0 / 30.0)
-        #expect(second.count == 1)
-    }
-
-    @Test func rearmsAtOneFiftyAfterAShallowSnap() {
-        var d = SnapDetector()
-        rest(&d, at: 168)
-        let fires: [(Int, SnapTrigger)] = feed(&d, [160, 152, 145, 144], start: 1 + 1.0 / 30.0)
-        #expect(fires.count == 1)
-        _ = d.ingest(angle: 148, at: 1.3)
-        #expect(!d.armed)
-        _ = d.ingest(angle: 150.5, at: 1.35)
-        #expect(d.armed, "θ ≥ 150 and risen ≥ 4°")
-    }
-
-    @Test func overshootThenSettleNeverCreeps() {
-        // QA-1 #5: snap, reopen past the rest (172°) and settle back (165°): never a creep.
-        var d = SnapDetector()
-        rest(&d, at: 165)
-        var t: Double = 1
-        var fires: Int = 0
-        let path: [Double] = [155, 145, 138, 135, 140, 148, 156, 164, 170, 172, 171, 169, 167, 166, 165]
-        for a in path {
-            t += 1.0 / 30.0
-            if d.ingest(angle: a, at: t) != nil { fires += 1 }
-        }
-        var creeping: Int = 0
-        var i: Int = 0
-        while i < 150 {
-            t += 1.0 / 30.0
-            _ = d.ingest(angle: 165 + (i % 2 == 0 ? -0.4 : 0.4), at: t)
-            let inp: TrapInput = d.input(at: t)
-            if inp.creeping { creeping += 1 }
-            i += 1
-        }
-        #expect(fires == 1)
-        #expect(creeping == 0, "creeping on \(creeping) frames")
-        #expect(d.armed)
-        #expect(d.creepDepth < Tuning.creepDepth, "creep depth \(d.creepDepth)")
-    }
-
-    @Test func snapAfterADriftIsTimedFromTheSnap() {
-        // QA-1 #6: an 8 °/s drift keeps an attempt open (c ≈ 4.8°); a quick snap after it is timed from the snap.
-        var d = SnapDetector()
-        rest(&d, at: 165)
-        var t: Double = 1
-        var a: Double = 165
-        var i: Int = 0
-        while i < 60 {
-            t += 1.0 / 30.0
-            a -= 8.0 / 30.0
-            _ = d.ingest(angle: a, at: t)
-            i += 1
-        }
-        var duration: Double = -1
-        i = 0
-        while i < 4 {
-            t += 1.0 / 30.0
-            a -= 25.0 / 3.0
-            if let r = d.ingest(angle: a, at: t), duration < 0 { duration = r.duration }
-            i += 1
-        }
-        #expect(duration >= 0 && duration <= 0.15, "duration \(duration)")
-    }
-
-    @Test func tooFlatAndNoHinge() {
-        var d = SnapDetector()
-        let none: TrapInput = d.input(at: 0)
-        #expect(none.angle == nil && none.closure == 0 && !none.tooFlat && none.armed)
-        _ = d.ingest(angle: 176, at: 0)
-        let flat: TrapInput = d.input(at: 0.01)
-        #expect(flat.tooFlat)
-        _ = d.ingest(angle: 170, at: 0.5)
-        let ok: TrapInput = d.input(at: 0.51)
-        #expect(!ok.tooFlat)
-    }
+    // MARK: SnapDetector: R8's rules are tested in CoreR8Tests.swift (the R1–R7 partial-snap tests are gone).
 
     // MARK: Catalog and bite rule
 
@@ -413,26 +236,32 @@ struct CoreTests {
         let fly: CGFloat = BugCatalog.info(.housefly).radius
         #expect(abs(fly - CGFloat(25.2)) < tolerance, "housefly \(fly)")
         #expect(BugCatalog.info(.goldenScarab).points == 150)
-        #expect(abs(BugCatalog.info(.dragonfly).reaction - 0.12) < 1e-12)
+        #expect(abs(BugCatalog.info(.dragonfly).reaction - 0.22) < 1e-12)
+        // R8: nerve is the startle depth: nervy flies ~12°, ants and beetles ~45°.
+        #expect(BugCatalog.info(.housefly).nerve == 12 && BugCatalog.info(.ant).nerve == 45)
     }
 
     @Test func reactionFactors() {
+        // R8: housefly 0.5 s; noon (wave 7) has no morning factor.
         let fly: BugInfo = BugCatalog.info(.housefly)
-        let base: Double = TrapRules.reaction(fly, sipping: false, flying: false, onRim: false, wave: 1)
-        #expect(abs(base - 0.24) < 1e-12)
-        let sip: Double = TrapRules.reaction(fly, sipping: true, flying: false, onRim: false, wave: 1)
-        #expect(abs(sip - 0.24 * 1.35) < 1e-12)
-        let air: Double = TrapRules.reaction(fly, sipping: false, flying: true, onRim: false, wave: 1)
-        #expect(abs(air - 0.24 * 0.55) < 1e-12)
-        let rim: Double = TrapRules.reaction(fly, sipping: false, flying: false, onRim: true, wave: 1)
-        #expect(abs(rim - 0.24 * 0.6) < 1e-12)
-        let all: Double = TrapRules.reaction(fly, sipping: true, flying: true, onRim: true, wave: 1)
-        #expect(abs(all - 0.24 * 1.35 * 0.55 * 0.6) < 1e-12)
+        let base: Double = TrapRules.reaction(fly, sipping: false, flying: false, onRim: false, wave: 7)
+        #expect(abs(base - 0.5) < 1e-12)
+        let sip: Double = TrapRules.reaction(fly, sipping: true, flying: false, onRim: false, wave: 7)
+        #expect(abs(sip - 0.5 * 1.35) < 1e-12)
+        let air: Double = TrapRules.reaction(fly, sipping: false, flying: true, onRim: false, wave: 7)
+        #expect(abs(air - 0.5 * 0.55) < 1e-12)
+        let rim: Double = TrapRules.reaction(fly, sipping: false, flying: false, onRim: true, wave: 7)
+        #expect(abs(rim - 0.5 * 0.6) < 1e-12)
+        let all: Double = TrapRules.reaction(fly, sipping: true, flying: true, onRim: true, wave: 7)
+        #expect(abs(all - 0.5 * 1.35 * 0.55 * 0.6) < 1e-12)
+        // R8: the sleepy morning (waves before noon) × Tuning.morningReactionFactor.
+        let morning: Double = TrapRules.reaction(fly, sipping: false, flying: false, onRim: false, wave: 1)
+        #expect(abs(morning - 0.5 * Tuning.morningReactionFactor) < 1e-12)
         let late: Double = TrapRules.reaction(fly, sipping: false, flying: false, onRim: false, wave: 32)
         // R3/R4: × lateReactionDecay (R7: 0.955) per wave after 30, to the Tuning floor (0.2 since R4).
-        #expect(abs(late - 0.24 * 0.955 * 0.955) < 1e-9)
+        #expect(abs(late - 0.5 * 0.955 * 0.955) < 1e-9)
         let floor: Double = TrapRules.reaction(fly, sipping: false, flying: false, onRim: false, wave: 400)
-        #expect(abs(floor - 0.24 * Tuning.lateReactionFloor) < 1e-9)
+        #expect(abs(floor - 0.5 * Tuning.lateReactionFloor) < 1e-9)
         #expect(TrapRules.isCandidate(.arriving, height: 0.5))
         #expect(!TrapRules.isCandidate(.arriving, height: 0.6))
         #expect(TrapRules.isCandidate(.hopping, height: 0.8))
@@ -454,7 +283,8 @@ struct CoreTests {
         let s: TrapSession = quiet()
         sippers(s, [.housefly])
         #expect(allSipping(s))
-        let ev: [TrapEvent] = snap(s, 0.30)
+        // R8: caught when the modelled exposure is within the sipping reaction (quiet sessions: the morning).
+        let ev: [TrapEvent] = snap(s, slowest(.housefly, sipping: true) * 0.97)
         let r: BiteReport? = report(ev)
         #expect(r?.caught == [.housefly])
         #expect(r?.points == 10)
@@ -473,7 +303,7 @@ struct CoreTests {
     @Test func sippingBugEscapesASlowSnap() {
         let s: TrapSession = quiet()
         sippers(s, [.housefly])
-        let ev: [TrapEvent] = snap(s, 0.33)
+        let ev: [TrapEvent] = snap(s, slowest(.housefly, sipping: true) * 1.03)
         let r: BiteReport? = report(ev)
         #expect(r?.caught.isEmpty == true)
         #expect(r?.escaped == 1)
@@ -496,13 +326,14 @@ struct CoreTests {
             if case .walking = a {} else { Issue.record("expected walking, got \(a)") }
         }
         #expect(b?.onRim == false)
-        let ev: [TrapEvent] = snap(s, 0.25)
-        #expect(report(ev)?.escaped == 1, "0.25 > 0.24")
+        let limit: Double = slowest(.housefly, sipping: false)
+        let ev: [TrapEvent] = snap(s, limit * 1.03)
+        #expect(report(ev)?.escaped == 1, "past \(limit)")
         let s2: TrapSession = quiet()
         _ = s2.spawnScripted(.housefly, entry: CGPoint(x: -30, y: 300), target: CGPoint(x: 300, y: 300),
                              linger: .infinity)
         run(s2, 5)
-        let ev2: [TrapEvent] = snap(s2, 0.23)
+        let ev2: [TrapEvent] = snap(s2, limit * 0.97)
         #expect(report(ev2)?.caught.count == 1)
     }
 
@@ -615,7 +446,7 @@ struct CoreTests {
         sippers(s, [.bee])
         let ev: [TrapEvent] = snap(s, 0.1)
         #expect(report(ev)?.snapsLost == 0)
-        #expect(s.snapshot.snapsLeft == Tuning.startSnaps)
+        #expect(s.snapshot.snapsLeft == 10, "the quiet session's 10")
     }
 
     @Test func chainGrowsOnBitesOfTwoHoldsOnOneAndBreaksOnADrySnap() {
@@ -788,23 +619,6 @@ struct CoreTests {
 
     // MARK: Creep, spared, spacing
 
-    @Test func creepSpooksTheTwitchyOnly() {
-        let s: TrapSession = quiet()
-        sippers(s, [.housefly, .bumblebee])
-        let ev: [TrapEvent] = s.step(dt: frame, input: TrapInput(closure: 8, armed: true, creeping: true))
-        let n13: Int = count(ev) { (e: TrapEvent) -> Bool in
-            if case .bugSpooked(_, let sp) = e { return sp == .housefly }
-            return false
-        }
-        #expect(n13 == 1)
-        let n14: Int = count(ev) { (e: TrapEvent) -> Bool in
-            if case .bugSpooked(_, let sp) = e { return sp == .bumblebee }
-            return false
-        }
-        #expect(n14 == 0)
-        #expect(s.snapshot.hint == .quick)
-    }
-
     @Test func aBeeThatLeavesIsSpared() {
         let s: TrapSession = quiet()
         let d: NectarDrop = s.snapshot.nectar[0]
@@ -898,7 +712,7 @@ struct CoreTests {
         let b: [TrapEvent] = run(s, 30)
         #expect(wiltCount(b) == 0, "a bee alone is not food")
         #expect(s.snapshot.hunger == 0)
-        #expect(s.snapshot.snapsLeft == Tuning.startSnaps)
+        #expect(s.snapshot.snapsLeft == 10)
     }
 
     @Test func aSnapWiltsEighteenSecondsAfterTheFirstLandingInTheMorning() {
@@ -1012,7 +826,7 @@ struct CoreTests {
         #expect(wiltCount(ev) == 0, "only the bee is left: never hungrier")
         let hungry: Int = count(ev) { (e: TrapEvent) -> Bool in if case .hungry = e { return true }; return false }
         #expect(hungry == 0)
-        #expect(q.snapshot.snapsLeft == Tuning.startSnaps)
+        #expect(q.snapshot.snapsLeft == 10)
     }
 
     @Test func aBeeOnItsFinalApproachPausesTheClock() {
@@ -1337,7 +1151,9 @@ struct CoreTests {
 
     @Test func startSnapsOption() {
         #expect(SessionOptions().startSnaps == nil)
-        #expect(quiet().snapshot.snapsLeft == Tuning.startSnaps)
+        #expect(quiet().snapshot.snapsLeft == 10, "the tests' quiet session")
+        let standard = TrapSession(mode: .feed, seed: 2, best: 0, geometry: geo, options: SessionOptions())
+        #expect(standard.snapshot.snapsLeft == Tuning.startSnaps)
         // R3: clamped to 1…14 (Tuning.maxSnaps).
         let cases: [(Int, Int)] = [(12, 12), (14, 14), (20, 14), (0, 1), (5, 5)]
         for c in cases {
@@ -1571,8 +1387,9 @@ struct CoreTests {
         sippers(s, [.housefly, .housefly, .housefly])
         _ = s.step(dt: frame, input: TrapInput())
         #expect(s.snapshot.hint == .crowd)
+        // R8 (founder rule 2): never a pose hint; a slow close says "quick".
         _ = s.step(dt: frame, input: TrapInput(closure: 0, armed: true, creeping: true, tooFlat: true))
-        #expect(s.snapshot.hint == .bendALittle)
+        #expect(s.snapshot.hint == .quick)
         _ = s.step(dt: frame, input: TrapInput(closure: 0, armed: true, creeping: true))
         #expect(s.snapshot.hint == .quick)
 
@@ -1583,7 +1400,9 @@ struct CoreTests {
 
         let o: TrapSession = quiet()
         _ = snap(o, 0.1)
+        // R8: shut (after the bite, unarmed) for over Tuning.openUpDelay: "Open it again".
         run(o, 1.2, TrapInput(closure: 20, armed: false))
+        #expect(o.snapshot.shut)
         #expect(o.snapshot.hint == .openUp)
         _ = o.step(dt: frame, input: TrapInput())
         #expect(o.snapshot.hint == nil)
@@ -1954,18 +1773,14 @@ struct CoreTests {
         #expect(!s.isFinished)
         #expect(bites >= 5, "bites \(bites)")
         #expect(s.snapshot.snapsLeft == Tuning.startSnaps)
-        // Casual snaps take 0.14–0.24 s, or 0.3–0.45 s when it fumbles (R2).
-        var fumbles: Int = 0
+        // R8 (ROUND-8 §2): a casual close takes 0.35–0.65 s from the close start to the shut.
+        #expect(!durations.isEmpty)
         for d in durations {
-            let normal: Bool = d >= 0.13 && d <= 0.25
-            let fumble: Bool = d >= 0.29 && d <= 0.46
-            if fumble { fumbles += 1 }
-            #expect(normal || fumble, "casual duration \(d)")
+            #expect(d >= 0.35 - 0.02 && d <= 0.65 + 0.02, "casual close \(d)")
         }
-        #expect(fumbles < durations.count, "most casual snaps are not fumbles")
     }
 
-    @Test func perfectPilotSnapsAtEightyMilliseconds() {
+    @Test func perfectPilotClosesInEighteenHundredths() {
         var p = TrapPilot(skill: .perfect, seed: 1)
         let s: TrapSession = quiet()
         sippers(s, [.housefly, .housefly, .housefly])
@@ -1980,7 +1795,8 @@ struct CoreTests {
             f += 1
         }
         #expect(fired != nil)
-        if let d = fired?.duration { #expect(abs(d - 0.08) < 1e-6, "duration \(d)") }
+        // R8: the perfect close is 0.18 s from the close start to the shut.
+        if let d = fired?.duration { #expect(abs(d - 0.18) < 1e-6, "duration \(d)") }
     }
 
     @Test func thePilotIgnoresTheCallersClock() {
@@ -2226,8 +2042,12 @@ struct CoreTests {
         let fly: BugInfo = BugCatalog.info(.housefly)
         let late: Double = TrapRules.reaction(fly, sipping: true, flying: false, onRim: false,
                                               wave: TrapRules.paceWave(150, mode: .zen))
-        let fresh: Double = TrapRules.reaction(fly, sipping: true, flying: false, onRim: false, wave: 1)
+        // R8: the recipe wave (10 here, a noon) reacts like a first day's noon: never the late night's speed.
+        let fresh: Double = TrapRules.reaction(fly, sipping: true, flying: false, onRim: false,
+                                               wave: ((150 - 1) % Tuning.zenDayWaves) + 1)
         #expect(abs(late - fresh) < 1e-12, "Zen's night never outruns the hand")
+        let noon: Double = TrapRules.reaction(fly, sipping: true, flying: false, onRim: false, wave: Tuning.noonWave)
+        #expect(late >= noon - 1e-12)
         let s = TrapSession(mode: .zen, seed: 11, best: 0, geometry: geo, options: SessionOptions.for(.zen))
         let ev: [TrapEvent] = run(s, 130)
         var phases: [DayPhase] = []
@@ -2307,7 +2127,8 @@ struct CoreTests {
         o.firstWave = Tuning.lastLightWave + 1
         let s = TrapSession(mode: .feed, seed: 7, best: 0, geometry: geo, options: o)
         #expect(s.inLastLight)
-        let a: [TrapEvent] = run(s, 12)
+        // R8: night wilt 12 s, hungry 3 s before.
+        let a: [TrapEvent] = run(s, 10)
         #expect(wiltCount(a) == 0)
         #expect(s.snapshot.hint == .hungry, "the empty trap is hungry in the last light")
         let b: [TrapEvent] = run(s, 2.5)
@@ -2321,7 +2142,7 @@ struct CoreTests {
         #expect(wiltCount(run(e, 20)) == 0)
         let d = TrapSession(mode: .daily(day: 2, scored: true), seed: 7, best: 0, geometry: geo, options: o)
         #expect(d.inLastLight)
-        #expect(wiltCount(run(d, 14.5)) == 1)
+        #expect(wiltCount(run(d, 12.5)) == 1)
         var fed = o
         fed.hunger = false
         let h = TrapSession(mode: .feed, seed: 7, best: 0, geometry: geo, options: fed)

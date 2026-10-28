@@ -59,6 +59,13 @@ enum SceneHooks {
         if scene.homeButtonFrames != rects { scene.homeButtonFrames = rects }
     }
 
+    /// R8 (design/notes/scene-R8.md): with the hinge the inner screen never draws the lobes shut (`BogScene.usesHinge`;
+    /// false: touch, the Scene plays its own shut).
+    static func setUsesHinge(_ scene: BogScene?, _ on: Bool) {
+        guard let scene else { return }
+        if scene.usesHinge != on { scene.usesHinge = on }
+    }
+
     /// R6 Garden: the play trap, Home's trap and the snap glyphs in the chosen variety (`BogScene.variety`).
     static func setVariety(_ scene: BogScene?, _ v: TrapVariety) {
         guard let scene else { return }

@@ -4,7 +4,8 @@ import SwiftUI
 
 /// Reads the iPhone Duo hinge (iOS 27.1+) and reports `(angleDegrees, time)`: 180 = flat, time = `CACurrentMediaTime()`
 /// on receipt (samples carry no timestamp of their own). On devices without a hinge (or below iOS 27.1) it calls
-/// `onUnavailable` instead. Never use the hinge's `status` for play (it reads `.closed` at ~85° on hardware).
+/// `onUnavailable` instead. R8: it also passes the hinge status through (`onSample`, `TrapHingeStatus`); Core trusts
+/// `.closed` only at a low angle (it reads `.closed` at ~85° on hardware). The old two-argument `onUpdate` still works.
 /// Copied from Hush/Swoop (`Input/HingeReader.swift`, itself from Brim), battle-tested on a real Duo.
 ///
 /// Lifecycle trap (Squish, real Duo): back from the background with the phone open and still, iOS may send no hinge
@@ -12,17 +13,25 @@ import SwiftUI
 /// state. After a hinge has been seen, a transient nil (display handover) must not demote the app to touch; that
 /// policy belongs to the caller (`HingeTrapSource.hasHinge` never goes back to false).
 ///
-/// Usage: `view.modifier(HingeReader(onUpdate: { angle, time in … }, onUnavailable: { … }))`
+/// Usage: `view.modifier(HingeReader(onSample: { angle, time, status in … }, onUnavailable: { … }))`
 struct HingeReader: ViewModifier {
-    let onUpdate: (Double, TimeInterval) -> Void
+    let onSample: (Double, TimeInterval, TrapHingeStatus) -> Void
     let onUnavailable: () -> Void
 
     @Environment(\.scenePhase) private var scenePhase
     @State private var enabled = true
     @State private var refresh = 0
 
+    /// R8: each sample with the hinge status.
+    init(onSample: @escaping (Double, TimeInterval, TrapHingeStatus) -> Void,
+         onUnavailable: @escaping () -> Void = {}) {
+        self.onSample = onSample
+        self.onUnavailable = onUnavailable
+    }
+
+    /// The R1–R7 form (no status: `.unknown`).
     init(onUpdate: @escaping (Double, TimeInterval) -> Void, onUnavailable: @escaping () -> Void = {}) {
-        self.onUpdate = onUpdate
+        self.onSample = { angle, time, _ in onUpdate(angle, time) }
         self.onUnavailable = onUnavailable
     }
 
@@ -34,8 +43,13 @@ struct HingeReader: ViewModifier {
                     if let hinge = newContext.hinge {
                         let time = CACurrentMediaTime()
                         let degrees = hinge.angle.degrees
+                        // `DeviceHinge.Status` is a struct with .closed / .partiallyOpen / .fullyOpen
+                        // (Squish design/research/APPLE-DUO-GUIDE.md); anything else is .unknown.
+                        let raw = hinge.status
+                        let status: TrapHingeStatus = raw == .closed ? .closed
+                            : (raw == .partiallyOpen ? .partiallyOpen : (raw == .fullyOpen ? .fullyOpen : .unknown))
                         FeelHingeLog.record(angle: degrees, at: time)
-                        onUpdate(degrees, time)
+                        onSample(degrees, time, status)
                     } else {
                         onUnavailable()
                     }

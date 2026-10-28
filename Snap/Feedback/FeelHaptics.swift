@@ -101,12 +101,12 @@ enum FeelHapticBook {
 
     // MARK: The creep texture (the leaf stretching under your fingers)
 
-    /// Creep intensity (0…1): 0 unless creeping; 0.15 at the creep line rising to 0.65 at the snap depth
-    /// (GAME-DESIGN §10: "intensity ∝ closure while creeping").
+    /// Creep intensity (0…1): 0 unless closing slowly; 0.15 at the close's start rising to 0.65 near the shut
+    /// (GAME-DESIGN §10: "intensity ∝ closure while creeping"; R8: over the whole close, `FeelSoundBook.closeFull`).
     static func creepLevel(closure: Double, creeping: Bool) -> Float {
         guard creeping, closure.isFinite else { return 0 }
-        let span = max(Tuning.snapDepth - Tuning.creepDepth, 1)
-        let u = FeelMath.clamp01((closure - Tuning.creepDepth) / span)
+        let span = FeelSoundBook.closeFull - FeelSoundBook.closeFrom
+        let u = FeelMath.clamp01((closure - FeelSoundBook.closeFrom) / span)
         return Float(0.15 + 0.5 * u)
     }
 

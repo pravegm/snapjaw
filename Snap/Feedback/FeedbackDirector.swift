@@ -765,7 +765,7 @@ struct FeelStretchMeter {
         speed += (raw - speed) * (1 - exp(-min(elapsed, 0.1) / Self.tau))
         last = (closure: c, time: time)
         let moving = FeelMath.smoothstep((speed - Self.quietSpeed) / (Self.fullSpeed - Self.quietSpeed))
-        level = moving * (0.4 + 0.6 * FeelMath.clamp01(c / Tuning.snapDepth))
+        level = moving * (0.4 + 0.6 * FeelMath.clamp01(c / FeelSoundBook.closeFull))
         return level
     }
 

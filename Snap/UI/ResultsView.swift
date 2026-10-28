@@ -28,8 +28,8 @@ struct ResultsView: View {
             let colW = min(page.width, 400)
             let innerW = max(colW - 16, 1)
             VStack(spacing: c ? 8 : 12) {
+                // R8 ("fewer words"): the grid first (the list and the separate "next" cards are gone from the top).
                 ViewThatFits(in: .vertical) {
-                    column(c, fit: .full, width: innerW)
                     column(c, fit: .grid, width: innerW)
                     column(c, fit: .strip, width: innerW)
                     column(c, fit: .tight, width: innerW)
@@ -56,13 +56,15 @@ struct ResultsView: View {
         let r = summary.result
         let o = summary.outcome
         return VStack(spacing: c ? 8 : 10) {
+            // R8: one focal action (Again, big); Home beside it.
             HStack(spacing: c ? 8 : 12) {
-                SnapButton(kind: .secondary, height: c ? 56 : 60, compact: c, action: { controller.goHome() }) {
-                    Text("Home")
+                SnapButton(kind: .secondary, height: c ? 56 : 64, compact: c, action: { controller.goHome() }) {
+                    Image(systemName: "house.fill")
                 }
-                .frame(width: c ? 110 : 130)
-                SnapButton(kind: .primary, height: c ? 56 : 64, compact: c, action: { controller.again() }) {
-                    Text(summary.againLabel)
+                .frame(width: c ? 72 : 84)
+                .accessibilityLabel("Home")
+                SnapButton(kind: .primary, height: c ? 64 : 80, compact: c, action: { controller.again() }) {
+                    Label(summary.againLabel, systemImage: "arrow.counterclockwise")
                 }
             }
             if let share = Self.shareText(r, streak: o.streak) {
@@ -102,15 +104,19 @@ struct ResultsView: View {
                     .frame(width: c ? 162 : 252, height: c ? 118 : 182)
                     .shadow(color: Color.black.opacity(0.5), radius: 12, y: 4)
             }
-            SnapOverline(text: summary.title, compact: c, color: SnapTheme.limeLight)
+            // R8: the title in the display type, tilted like a sticker.
+            DisplayText(text: summary.title, size: c ? 30 : 42, tilt: -2, minScale: 0.4)
+                .entrance(0, reduceMotion: controller.reduceMotion)
             // R7 (#10, SCORE-R6: Zen play showed a score and Zen Results none): the score, as the HUD showed it, in
             // every mode; the Zen Bog adds its bugs and its time, and keeps no best.
-            CountingNumber(value: r.score, font: SnapType.hero(c),
-                           instant: controller.reduceMotion || AppTrace.enabled)
-                .foregroundStyle(LinearGradient(colors: [SnapTheme.goldLight, SnapTheme.gold], startPoint: .top,
-                                                endPoint: .bottom))
-                .shadow(color: SnapTheme.crimsonDeep, radius: 0, x: 0, y: 4)
+            CountingNumber(value: r.score, font: .system(size: c ? 64 : 96, weight: .black, design: .rounded)
+                .monospacedDigit(), instant: controller.reduceMotion || AppTrace.enabled)
+                .foregroundStyle(LinearGradient(colors: [SnapTheme.goldLight, SnapTheme.gold, SnapTheme.goldDeep],
+                                                startPoint: .top, endPoint: .bottom))
+                .shadow(color: SnapTheme.night, radius: 0, x: 0, y: 2)
+                .shadow(color: SnapTheme.crimsonDeep, radius: 0, x: 0, y: 6)
                 .snapLegible()
+                .entrance(1, reduceMotion: controller.reduceMotion)
             // R5 (REVIEW-4 #13, founder call): "score", not "protein".
             Text(Self.heroWord(zen: o.zen))
                 .font(SnapType.headline(c))

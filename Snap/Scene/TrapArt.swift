@@ -172,6 +172,48 @@ enum TrapArt {
         return k
     }
 
+    // MARK: R8 closing cues (hinge input: the phone IS the trap)
+
+    /// R8: with the hinge the lobes are always drawn open; the closing shows as cues that follow the closure
+    /// (degrees from the open reference, 0 … about 150 at the shut). They start at `cueStart` (under the hinge's
+    /// noise) and are full at `cueFull`: subtle at 10°, strong at 80°, the edges near-black by 120°.
+    static let cueStart: Double = 3
+    static let cueFull: Double = 120
+    /// R8: the cilia's lean at a full cue (degrees: just past pointing at you, so they read as leaning in).
+    static let cueLean: Double = 100
+    /// R8: the rim shadow's alpha and the edge dim's alpha at a full cue.
+    static let rimShadowMax: CGFloat = 0.9
+    static let edgeDimMax: CGFloat = 0.96
+    /// R8: how fast the bugs' panic rises with the cue (full by a cue of 1 / `panicGain`, about 87°).
+    static let panicGain: CGFloat = 1.4
+
+    /// R8: the closing cue (0 open … 1 at `cueFull`), linear in the closure.
+    static func closingCue(_ closure: Double) -> CGFloat {
+        guard closure.isFinite, cueFull > cueStart else { return 0 }
+        return CGFloat(min(max((closure - cueStart) / (cueFull - cueStart), 0), 1))
+    }
+
+    /// R8: the cilia's lean (radians) at closing cue `cue`.
+    static func cueLeanAngle(_ cue: CGFloat) -> CGFloat {
+        let c = cue.isFinite ? min(max(cue, 0), 1) : 0
+        return c * CGFloat(cueLean) * .pi / 180
+    }
+
+    /// R8: the rim shadow on the lobes at closing cue `cue`.
+    static func rimShadow(_ cue: CGFloat) -> CGFloat {
+        rimShadowMax * (cue.isFinite ? min(max(cue, 0), 1) : 0)
+    }
+
+    /// R8: the edge dim's alpha at closing cue `cue` (its texture is opaque at the edges).
+    static func edgeDim(_ cue: CGFloat) -> CGFloat {
+        edgeDimMax * (cue.isFinite ? min(max(cue, 0), 1) : 0)
+    }
+
+    /// R8: how hard the bugs in the trap panic (buzz and jitter) at closing cue `cue` (0 calm … 1).
+    static func panicLevel(_ cue: CGFloat) -> CGFloat {
+        cue.isFinite ? min(max(cue * panicGain, 0), 1) : 0
+    }
+
     // MARK: The lobes
 
     /// A point on the zone's ellipse at angle `t`, radius fraction `r`, foreshortened towards the midrib by `k`.

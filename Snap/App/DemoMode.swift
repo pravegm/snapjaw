@@ -85,14 +85,33 @@ import UIKit
 //   Daily + share     `screen=results;mode=daily;pilot=casual;progress=mid` (🔥 3 days, Share)
 //   a variety in play `mode=feed;pilot=casual;progress=late;variety=b52;freezeAfter=20`
 // (`SNAP-H <t> <angle>` hinge samples come from Feel's HingeReader.)
+//
+// R8 (design/notes/app-R8.md): the First Bite lesson is retired (`screen=lesson`, `lessonStep=` are gone: Levels 1–5
+// teach). New:
+// - `screen=levels`        the level map (3 worlds × 10 levels, stars, locks).
+// - `screen=levelIntro`    a level's intro card (`level=`, default 3), held (no pilot: the phone sim waits for Go).
+// - `screen=levelResults`  a level really played by the pilot (default perfect) to its goal, then its Results.
+//                          `screen=results;mode=level;level=<n>` does the same.
+// - `screen=chomp`         the outer display's CHOMP card: a run played by the pilot until a bite of `chomp=`
+//                          (`catch` 3+ bugs, default; `sting`; `dry`), then shown shut on it.
+// - `screen=shut`          a run just started, shut before its first bite: the outer display's "Open to start".
+// - `screen=cover`         R8: the outer display off a run (the closed trap at rest, "Open to play").
+// - `mode=level;level=<n>` play level n (with `pilot=`, straight past its intro).
+// Log lines: `SNAP-T verdict '<words>' ratio=<r>`, `SNAP-T hinge step shut=<0|1> angle=<deg>`,
+// `SNAP-T level intro|go|passed|time up|result …`, `SNAP-T chomp card <kind> …`, `SNAP-T level demo <id> played=<s>`.
 
 struct DemoMode: Equatable {
     enum Screen: String, Equatable, CaseIterable {
-        case home, play, results, book, settings, lesson, pose, cover, icon, daily, badges
+        case home, play, results, book, settings, pose, cover, icon, daily, badges
         /// R6: the Garden.
         case garden
+        /// R8: the level map, a level's intro, a level's Results, the outer display's CHOMP card, the shut state.
+        case levels, levelIntro, levelResults, chomp, shut
     }
-    enum ModeKey: String, Equatable { case feed, daily, attract, zen }
+    enum ModeKey: String, Equatable { case feed, daily, attract, zen, level }
+
+    /// R8: the level a demo plays without `level=`.
+    static let defaultLevel = 3
     enum Freeze: String, Equatable, CaseIterable {
         case landed, crowd, bee, snap, feast, sting, dusk, night, lastSnap, hungry, wilted, tired, results
         /// R4 (REVIEW-3 #2, #9, #10, #20): the opening's fold line on its plate; the chain's fifth step; a sting that
@@ -169,7 +188,10 @@ struct DemoMode: Equatable {
     var holdAfter: Double?
     var closure: Double?
     var wave: Int?
-    var lessonStep: Int?
+    /// R8: `level=`: the level a demo plays (1…30).
+    var level: Int?
+    /// R8: `chomp=catch|sting|dry`: the CHOMP card's bite.
+    var chomp: ChompInfo.Kind?
     var hudLeft: Bool?
     var fold = false
     var sound = true
@@ -197,6 +219,17 @@ struct DemoMode: Equatable {
         case .daily: return .daily(day: today, scored: true)
         case .attract: return .attract
         case .zen: return .zen
+        case .level: return .level(level ?? Self.defaultLevel)
+        }
+    }
+
+    /// R8: `chomp=` (pure; tested).
+    static func chompKind(_ value: String) -> ChompInfo.Kind? {
+        switch value.lowercased() {
+        case "catch", "chomp": return .catchBite
+        case "sting", "bee": return .sting
+        case "dry", "empty": return .dry
+        default: return nil
         }
     }
 
@@ -219,7 +252,7 @@ struct DemoMode: Equatable {
             guard let key = pieces.first, !key.isEmpty else { continue }
             let value = pieces.count > 1 ? pieces[1] : ""
             switch key {
-            case "screen": config.screen = Screen(rawValue: value.lowercased())
+            case "screen": config.screen = Screen.allCases.first { $0.rawValue.lowercased() == value.lowercased() }
             case "mode": config.mode = ModeKey(rawValue: value.lowercased())
             case "seed": config.seed = UInt64(value)
             case "pilot": config.pilot = PilotSkill(rawValue: value.lowercased())
@@ -232,8 +265,9 @@ struct DemoMode: Equatable {
                 if let c = number(value) { config.closure = min(max(c, 0), 60) }
             case "wave":
                 if let n = Int(value) { config.wave = min(max(n, 1), 200) }
-            case "lessonStep":
-                if let n = Int(value) { config.lessonStep = min(max(n, 1), LessonScript.Step.done.rawValue) }
+            case "level":
+                if let n = Int(value) { config.level = min(max(n, 1), 30) }
+            case "chomp": config.chomp = chompKind(value)
             case "hudLeft": config.hudLeft = flag(value)
             case "fold": config.fold = flag(value)
             case "sound": config.sound = flag(value)
@@ -281,20 +315,26 @@ enum DemoPresets {
         var dailies: [Int]
         /// R6: goal ids done so far (Core's pool; `late` has done two of the Garden's goals).
         var goalsDone: [String]
+        /// R8: stars per level, Level 1 first (the levels after the list never played).
+        var levels: [Int] = []
     }
 
+    /// R8: mid has played into the Morning Bog (Level 7 next); late has opened the Night; story stands at Dusk's door.
     static let mid = Profile(runs: 14, rank: 4, species: 9, best: 3_200, biggestBite: 4, longestChain: 3,
-                             dailies: [2_640, 1_980], goalsDone: ["bite3", "spare3", "catch20", "feast2"])
+                             dailies: [2_640, 1_980], goalsDone: ["bite3", "spare3", "catch20", "feast2"],
+                             levels: [3, 3, 2, 3, 1, 2])
     static let late = Profile(runs: 90, rank: 10, species: 16, best: 14_800, biggestBite: 6, longestChain: 7,
                               dailies: [11_200, 9_350, 12_900, 8_740],
                               goalsDone: ["bite4", "chain3", GoalBook.sawtoothGoal, "dragonfly3",
-                                          GoalBook.sharkToothGoal, "scarab"])
+                                          GoalBook.sharkToothGoal, "scarab"],
+                              levels: [3, 3, 3, 3, 3, 2, 3, 3, 2, 3, 3, 2, 3, 3, 2, 3, 2, 3, 3, 2, 2, 3, 1])
 
     /// R7: rank 7, 13 species, best 9,400; Sawtooth and Shark Tooth grown by goal, so the Garden is 5 of 8 (Classic,
     /// Red Dragon and B52 by rank).
     static let story = Profile(runs: 48, rank: 7, species: 13, best: 9_400, biggestBite: 6, longestChain: 5,
                                dailies: [7_300, 6_120, 8_050], goalsDone: ["bite4", GoalBook.sawtoothGoal, "chain3",
-                                                                          GoalBook.sharkToothGoal])
+                                                                          GoalBook.sharkToothGoal],
+                               levels: [3, 3, 3, 2, 3, 2, 3, 2, 2, 3, 2, 1])
 
     static func progress(_ preset: DemoMode.Preset?, today: Int) -> ProgressData {
         switch preset ?? .fresh {
@@ -388,6 +428,8 @@ enum DemoPresets {
         book.completedCount = done.count
         data.goalBook = GoalBook.normalized(book, rank: data.rank)
         data.varietiesSeen = Set(data.unlockedVarieties.map(\.rawValue))
+        // R8: the levels played so far.
+        for (i, s) in p.levels.enumerated() where s > 0 { data.levelStars[i + 1] = min(s, 3) }
         return data
     }
 }

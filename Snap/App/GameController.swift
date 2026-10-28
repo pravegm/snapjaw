@@ -6,15 +6,19 @@ import UIKit
 
 /// The hub of the frame loop (ARCHITECTURE "The frame loop"): BogScene.update → advance(dt:now:) → trap source (hinge,
 /// touch, pilot, fixed) → TrapSession.step → FeedbackDirector → HUD. Owns the session, the scene, the sources, the
-/// app's route, the First Bite lesson and the Duo states (pose card, closing pause, shut).
+/// app's route, the levels and the Duo states (pose card, shut).
 ///
-/// Pauses (no stepping): the phone closing (θ < `Tuning.closingAngle` for `Tuning.closingDwell`, Feel's
-/// `HingeTrapSource.isClosing`), the app inactive or in the background, the pause menu, and a pose card (portrait, the
-/// cover display). The closing pause lifts once the hinge is open again past `AppRules.resumeAngle` (never near 90°).
-/// The "tired" ending plays out under a closing or pose pause, so a finished run always reaches Results.
+/// R8 (ROUND-8 §1: the phone IS the trap): closed is not a pause. Shutting the Duo is the bite (Core's `snapped`, at
+/// the shut) and the clock stands still while it is shut (`TrapSnapshot.shut`). iOS moves the app to the outer display
+/// then, so the scene stops drawing: the hinge's own reports step the session (`stepFromHinge`), so the bite, its CHOMP
+/// and its haptic land at the shut, and the outer display shows the CHOMP card (`coverChomp`).
+///
+/// Pauses (no stepping): the app inactive or in the background, the pause menu (the pause button only), a pose card
+/// (portrait) and a touch level's intro card. The "tired" ending plays out under a pose pause, so a finished run
+/// always reaches Results.
 @MainActor
 final class GameController: ObservableObject, SceneDriver {
-    private enum PauseReason: String, Hashable { case menu, closing, background, pose }
+    private enum PauseReason: String, Hashable { case menu, background, pose, intro }
 
     // MARK: Tuning (named so they're easy to find)
 
@@ -54,10 +58,11 @@ final class GameController: ObservableObject, SceneDriver {
     @Published private(set) var isShut = false
     @Published private(set) var input: AppInputKind = .touch
     @Published private(set) var isMenuOpen = false
-    /// "Open it a little to carry on".
-    @Published private(set) var isClosingPaused = false
     @Published private(set) var summary: ResultSummary?
-    @Published private(set) var lessonDisplay: LessonDisplay?
+    /// R8: the last bite of this run, for the outer display's CHOMP card (nil before the first bite).
+    @Published private(set) var coverChomp: ChompInfo?
+    /// R8: a level's intro card (its goal in one line, a picture), up at the level's start.
+    @Published private(set) var levelIntro: LevelIntro?
     @Published private(set) var pose: AppPose = .play
     /// Demo `screen=pose|cover` forces a pose.
     @Published private(set) var forcedPose: AppPose?
@@ -97,12 +102,18 @@ final class GameController: ObservableObject, SceneDriver {
     private var snapsRow: CGRect?
     /// The demo pilot, in fixed steps (Core R3 `PilotRun`, REVIEW-2 #21).
     private var pilotRun: PilotRun?
-    private var lessonScript: LessonScript?
-    private var lessonReplay = false
-    /// The lesson's bugs still in play → the nectar drop each was sent to (so two never share one).
-    private var lessonClaims: [Int: Int] = [:]
-    /// The lesson started on the pose step (its numbering keeps counting it).
-    private var lessonHasPose = false
+    /// R8: when the scene last called `advance` and when the session last stepped (CACurrentMediaTime): a hinge
+    /// report with no scene frame for `AppRules.sceneFrameGap` steps the session itself (the Duo is shut).
+    private var lastSceneFrame: CFTimeInterval = -Double.infinity
+    private var lastStepAt: CFTimeInterval = -Double.infinity
+    /// R8: the level being played (nil outside a level), its goal met (the level ends a beat later), and that beat.
+    private var levelSpec: LevelSpec?
+    private var levelPassed = false
+    private var levelEndTask: Task<Void, Never>?
+    /// R8: the intro card shows at least until this (wall clock), and was dismissed.
+    private var introUntil: CFTimeInterval = 0
+    /// R8: bites made this run (the cover says "Open to start" before the first).
+    private(set) var bitesThisRun = 0
     private var layout: ScreenLayout?
     private var lastCanvasSize: CGSize = .zero
     private var lastCanvasFold = false
@@ -179,9 +190,6 @@ final class GameController: ObservableObject, SceneDriver {
     var demoFold: Bool { demo?.fold ?? false }
     /// No hinge drives the trap: the copy says "tap".
     var touchWording: Bool { input == .touch }
-    /// The lesson's wording. R4 (REVIEW-3 #8, #19): demo `fold=1` plays the Duo lesson (the clap on step 2, the
-    /// re-arm step) on a phone sim, so CI can capture it.
-    var lessonTouch: Bool { touchWording && !(isDemo && demoFold) }
     /// R3: the hint plate's wording. The fold is the input on a hinge, and for a pilot or held demo on a Duo layout
     /// (CI's fold=1 frames); a pilot on a phone layout reads as a phone ("Tap to snap").
     var hintTouch: Bool { !(input == .hinge || (input != .touch && sessionLayout.hasFold)) }
@@ -199,7 +207,23 @@ final class GameController: ObservableObject, SceneDriver {
     }
     var today: Int { DailySeed.dayNumber(for: Date()) }
     var dailyScoredAvailable: Bool { store.canPlayScoredDaily(today: today) }
-    var lessonReplaying: Bool { lessonReplay }
+
+    /// R8: the level being played (nil outside one).
+    var levelID: Int? {
+        if case let .level(id) = mode { return id }
+        return nil
+    }
+    /// R8: the level's goal for the cover ("Level 3 · Catch 3 flies").
+    var levelGoalLine: String? {
+        guard isLiveRun, let spec = levelSpec else { return nil }
+        return LevelWords.levelName(LevelBridge.id(spec)) + " · " + LevelBridge.goal(spec)
+    }
+    /// R8: Home's and the cover's next level ("Next: Level 4"), nil when every level is done.
+    var nextLevelLine: String? {
+        LevelRules.next(store.data).map { "Next: " + LevelWords.levelName($0) }
+    }
+    /// R8: a run started and no bite yet (the cover says "Open to start").
+    var awaitingFirstBite: Bool { isLiveRun && bitesThisRun == 0 }
     /// "Daily Bog · 27 Oct" for the run's day (nil outside a Daily).
     var dailyMarker: String? {
         guard case let .daily(day, scored) = mode else { return nil }
@@ -212,17 +236,43 @@ final class GameController: ObservableObject, SceneDriver {
     func advance(dt: TimeInterval, now: TimeInterval) -> (TrapSnapshot, [TrapEvent]) {
         frames += 1
         if frames == 120 { AppTrace.t("SNAP-T frame 120") }
-        if route == .home { return advanceHome(dt: dt, now: now) }
+        lastSceneFrame = CACurrentMediaTime()
+        // R8: every menu sits on Home's live bog.
+        if route.showsLiveBog { return advanceHome(dt: dt, now: now) }
+        return runStep(dt: dt, now: now, headless: false)
+    }
+
+    /// R8: the Duo is shut (the scene isn't drawing): a hinge report steps the session, so the bite at the shut, its
+    /// CHOMP and its haptic land now, and the cover shows the CHOMP card. Logs `SNAP-T hinge step` once per shut.
+    private func stepFromHinge() {
+        let now = CACurrentMediaTime()
+        let live = route.isPlay && input == .hinge && isLiveRun && !frozen
+        guard AppRules.stepsFromHinge(sinceSceneFrame: now - lastSceneFrame, liveHingeRun: live,
+                                      menuOpen: isMenuOpen) else { return }
+        let dt = lastStepAt.isFinite ? now - lastStepAt : AppRules.maxStep
+        let before = session?.snapshot.shut ?? false
+        _ = runStep(dt: dt, now: now, headless: true)
+        if let s = session?.snapshot, s.shut != before {
+            AppTrace.t("SNAP-T hinge step shut=\(s.shut ? 1 : 0) angle=" + AppTrace.fixed(hinge.angle ?? -1, 0))
+        }
+    }
+
+    /// One step of the run: from the scene's frame, or (`headless`, R8) from a hinge report while the Duo is shut. A
+    /// headless step ignores the pose and background pauses (the shut moves the app to the outer display), never the
+    /// menu.
+    private func runStep(dt: TimeInterval, now: TimeInterval, headless: Bool) -> (TrapSnapshot, [TrapEvent]) {
         guard let session else { return (homeSession?.snapshot ?? TrapSnapshot(), []) }
         guard route.isPlay, !session.isFinished else { return (session.snapshot, []) }
-        checkClosing(now: now, phase: session.snapshot.phase)
-        applyDrawnClosure(now: now)
+        if !headless { applyDrawnClosure(now: now) }
         let width = sessionLayout.size.width
         if frozen {
             feedback.handle([], telemetry: AppRules.telemetry(session.snapshot, sceneWidth: width, playing: false))
             return (session.snapshot, [])
         }
-        if isPaused && !stepsThroughPause(session.snapshot.phase) {
+        refreshIntro(session.snapshot)
+        let blocked = headless ? (isMenuOpen || pauseReasons.contains(.intro))
+                               : (isPaused && !stepsThroughPause(session.snapshot.phase))
+        if blocked {
             // No stepping. The hinge keeps its own state; a snap made while paused is dropped, never played later.
             if input == .hinge { _ = hinge.input(at: now) }
             let s = session.snapshot
@@ -233,6 +283,7 @@ final class GameController: ObservableObject, SceneDriver {
         // A frame-sized step (clamped at 1/30 s), never the time the game was paused or not drawn.
         let step = AppRules.clampStep(dt)
         guard step > 0 else { return (session.snapshot, []) }
+        lastStepAt = CACurrentMediaTime()
 
         let trap: TrapInput
         let events: [TrapEvent]
@@ -250,29 +301,6 @@ final class GameController: ObservableObject, SceneDriver {
             playTime += step
         }
 
-        if var script = lessonScript {
-            let actions = script.update(lessonInput(session.snapshot, events: events))
-            lessonScript = script
-            // Each scripted bug lands ON a real nectar drop, so it sips (QA-1 #3): one drop per bug still in play.
-            if !actions.isEmpty {
-                lessonClaims = AppRules.liveClaims(lessonClaims, snapshot: session.snapshot)
-                var taken = Set(lessonClaims.values)
-                for action in actions {
-                    switch action {
-                    case let .spawn(species, slot, linger):
-                        let spot = AppRules.lessonSpot(slot: slot, geometry: sessionLayout.geometry,
-                                                       nectar: session.snapshot.nectar, taken: taken)
-                        let id = session.spawnScripted(species, entry: spot.entry, target: spot.target, linger: linger)
-                        if let drop = spot.drop {
-                            taken.insert(drop)
-                            if id >= 0 { lessonClaims[id] = drop }
-                        }
-                    }
-                }
-            }
-            publishLesson(script)
-        }
-
         let snapshot = session.snapshot
         let live = AppRules.isLive(snapshot.phase)
         feedback.handle(events, telemetry: AppRules.telemetry(snapshot, sceneWidth: width, playing: live))
@@ -285,8 +313,16 @@ final class GameController: ObservableObject, SceneDriver {
             case let .snapped(report):
                 snapped = true
                 bite = report
+                bitesThisRun += 1
                 // QA-2 #10: only a bite that eats something feeds the trap (a dry snap or a bee bite doesn't).
                 if !report.caught.isEmpty { hungryOn = false }
+                // R8: the outer display's CHOMP card, and the bite's verdict in plain words for the reopen (session
+                // time stands still while shut, so it shows in full once the phone opens).
+                coverChomp = ChompInfo(report, score: snapshot.score)
+                let verdict = AppRules.biteVerdict(report, touch: input == .touch)
+                messages.post(.plate(.verdict(verdict.text, good: verdict.good)), seconds: Self.toastSeconds,
+                              now: snapshot.time, interrupt: true)
+                AppTrace.t("SNAP-T verdict '" + verdict.text + "' ratio=" + AppTrace.fixed(report.catchRatio, 2))
             case .tired: watchTheEnd()
             case .newBest: passedBest = true
             case .wilted:
@@ -312,7 +348,7 @@ final class GameController: ObservableObject, SceneDriver {
                 snapped = true
             case let .chainUp(_, multiplier):
                 // REVIEW-3 #10, R6 (#14): the chain chip is explained once ever, at a player's first chain step.
-                if chainTagEligible && session.mode != .lesson {
+                if chainTagEligible && levelSpec == nil {
                     chainTagEligible = false
                     store.markChainTipSeen()
                     messages.post(.plate(.chainTag(multiplier)), seconds: Self.toastSeconds, now: snapshot.time)
@@ -326,7 +362,7 @@ final class GameController: ObservableObject, SceneDriver {
         // The bite's refund, one tag at the row (R7 #3, #5): a lucky bug names itself ("Golden scarab! +2 snaps"), a
         // FEAST event shows its refill ("FEAST! +2 snaps"), a refund the full row can't hold says so ("+1 snap (row
         // full)"; ROUND-4: the numeral never dips), and the first Feast ever is labelled once (REVIEW-2 #12).
-        if let bite, bite.snapsBack > 0, session.mode != .lesson, session.mode != .zen {
+        if let bite, bite.snapsBack > 0, session.mode != .zen {
             let full = AppRules.refundHitTheCap(before: lastCoreSnaps, after: snapshot.snapsLeft, back: bite.snapsBack,
                                                 max: snapshot.snapsMax)
             let feasted = events.contains { e in
@@ -346,7 +382,7 @@ final class GameController: ObservableObject, SceneDriver {
             chainHeldUntil = snapshot.time + Self.chainHeldSeconds
             snapped = true
         }
-        if stingCost > 0 && session.mode != .lesson && session.mode != .zen {
+        if stingCost > 0 && session.mode != .zen {
             // R5 (REVIEW-4 #7): "−1 snap" / "−2 snaps" at the row (one tag for the bite's whole cost).
             messages.post(.tag(.loss(AppRules.snapLossText(stingCost))), seconds: Self.snapGainSeconds,
                           now: snapshot.time, interrupt: true)
@@ -377,12 +413,21 @@ final class GameController: ObservableObject, SceneDriver {
         publishHUD(snapshot, now: now, force: snapped, hold: AppRules.movesSnaps(events))
         lastCoreSnaps = snapshot.snapsLeft
         demoAfterStep(snapshot, events: events)
-        if session.isFinished { handleFinished(immediate: false) }
+        if session.isFinished {
+            handleFinished(immediate: headless)
+        } else if levelSpec != nil {
+            checkLevel(session, snapshot: snapshot)
+        }
         return (snapshot, events)
     }
 
     /// A tap anywhere on the scene: snaps when there is no hinge (ignored otherwise).
     func sceneTapped(at point: CGPoint, time: TimeInterval) {
+        // R8 (founder rule 6: nothing is ever stuck on a phone): a tap anywhere starts a level from its intro card.
+        if route.isPlay, input == .touch, levelIntro != nil, !isMenuOpen {
+            beginLevel()
+            return
+        }
         guard route.isPlay, input == .touch, !isPaused, !frozen, let session, !session.isFinished else { return }
         guard AppRules.isLive(session.snapshot.phase) else { return }
         touch.tap(at: time)
@@ -419,6 +464,8 @@ final class GameController: ObservableObject, SceneDriver {
         let changed = input != kind
         if changed { input = kind }
         if changed || force { AppTrace.t("SNAP-T input \(kind.rawValue)") }
+        // R8 (design/notes/scene-R8.md): with the hinge the lobes never draw shut on the inner screen.
+        SceneHooks.setUsesHinge(scene, kind == .hinge)
     }
 
     /// The first hinge sample of a launch re-chooses the input; a live touch run moves onto the hinge.
@@ -428,12 +475,6 @@ final class GameController: ObservableObject, SceneDriver {
         setInput(kind)
         // QA-1 #8: a run that moved onto the hinge times its snaps from now on.
         if kind == .hinge { tally.hingeTiming = true }
-        // R6 (#13, REVIEW-5 P1-4): the lesson's words follow the first hinge sample at once (the Duo's lines, never a
-        // frame of "tap").
-        if let script = lessonScript {
-            if lessonHingeLike() { lessonHasPose = true }
-            publishLesson(script)
-        }
         refreshIdleTimer()
     }
 
@@ -448,12 +489,9 @@ final class GameController: ObservableObject, SceneDriver {
         if let recovered = store.recoverPendingRun(today: today) {
             GameCenterManager.shared.report(result: recovered.0, outcome: recovered.1, progress: store.data)
         }
-        if store.data.lessonDone {
-            goHome()
-        } else {
-            // First launch: the First Bite (GAME-DESIGN §8).
-            startLesson(replay: false)
-        }
+        // R8 (founder rule 5: no forced tutorial gate): every launch opens on Home. Its Play is Level 1 on a first
+        // launch (Levels 1–5 teach), and Endless is one tap away.
+        goHome()
     }
 
     /// The play canvas changed (fold, size, HUD side). The scene is built once and then re-laid out.
@@ -498,6 +536,7 @@ final class GameController: ObservableObject, SceneDriver {
         newScene.reduceMotion = reduceMotion
         newScene.driver = self
         scene = newScene
+        SceneHooks.setUsesHinge(newScene, input == .hinge)
         sceneGeneration += 1
         drawnVariety = nil
         applyVariety()
@@ -562,9 +601,9 @@ final class GameController: ObservableObject, SceneDriver {
 
     // MARK: - Hinge
 
-    func hingeSample(angle: Double, time: TimeInterval) {
+    func hingeSample(angle: Double, time: TimeInterval, status: TrapHingeStatus = .unknown) {
         guard angle.isFinite else { return }
-        hinge.ingest(angleDegrees: angle, at: time)
+        hinge.ingest(angleDegrees: angle, at: time, status: status)
         if !hingeSeen {
             hingeSeen = true
             if !isDemo { UserDefaults.standard.set(true, forKey: OrientationLock.hingeKey) }
@@ -577,42 +616,13 @@ final class GameController: ObservableObject, SceneDriver {
             isShut = true
         }
         refreshInput()
-        // QA-1 #1 (P0): the closing pause pauses the scene, so `advance()` (and its `checkClosing`) stops. Hinge
-        // reports keep arriving while the Duo is opened again, so the pause is lifted from here.
-        if isClosingPaused, let s = session { checkClosing(now: time, phase: s.snapshot.phase) }
+        // R8: the Duo shut moves the app to the outer display and the scene stops drawing; the hinge's reports step
+        // the session from here (the bite at the shut, the reopen's re-arm).
+        stepFromHinge()
     }
 
     /// After a hinge has been seen, a nil is a display handover, never "no hinge" (Brim research).
     func hingeUnavailable() {}
-
-    /// The closing pause: Feel's gate (θ < `Tuning.closingAngle` for `Tuning.closingDwell`) pauses; it lifts once the
-    /// hinge is open past `AppRules.resumeAngle` and not shut. Only while the trap is in play (the tired moment plays
-    /// out).
-    private func checkClosing(now: TimeInterval, phase: RunPhase) {
-        guard input == .hinge, route.isPlay, session != nil else {
-            if isClosingPaused { setClosing(false) }
-            return
-        }
-        if isClosingPaused {
-            if AppRules.mayResume(angle: hinge.angle, isClosing: hinge.isClosing, isShut: isShut) {
-                setClosing(false)
-            }
-        } else if hinge.isClosing && AppRules.isLive(phase) {
-            setClosing(true)
-            #if DEBUG
-            // A literal of its own, DEBUG only: a TestFlight guard may grep the Release binary for it.
-            if AppTrace.enabled {
-                print("SNAP-T paused closing")
-                fflush(stdout)
-            }
-            #endif
-        }
-    }
-
-    private func setClosing(_ on: Bool) {
-        if isClosingPaused != on { isClosingPaused = on }
-        setPause(.closing, on)
-    }
 
     // MARK: - Values the scene draws from (Scene R2: closure tracking, the economy glyph flights)
 
@@ -704,7 +714,7 @@ final class GameController: ObservableObject, SceneDriver {
         let events = home.step(dt: step, input: trap)
         let chomped = trap.snap != nil
         feedback.homeTrap(closure: trap.closure, snapped: chomped)
-        let c01 = trap.closure.isFinite ? trap.closure / max(Tuning.snapDepth, 1) : 0
+        let c01 = trap.closure.isFinite ? trap.closure / AppRules.homeClosureSpan : 0
         homeTrap.update(closure01: min(max(c01, 0), 1), chomped: chomped)
         applyDrawnClosure(now: now)
         return (home.snapshot, events)
@@ -777,7 +787,7 @@ final class GameController: ObservableObject, SceneDriver {
         }
         let chomped = trap.snap != nil
         feedback.homeTrap(closure: trap.closure, snapped: chomped)
-        let c01 = trap.closure.isFinite ? trap.closure / max(Tuning.snapDepth, 1) : 0
+        let c01 = trap.closure.isFinite ? trap.closure / AppRules.homeClosureSpan : 0
         homeTrap.update(closure01: min(max(c01, 0), 1), chomped: chomped)
     }
 
@@ -793,9 +803,51 @@ final class GameController: ObservableObject, SceneDriver {
         setRoute(newRoute)
     }
 
+    /// R8: a small tap sound for in-page choices (the map's worlds).
+    func feedbackTap() { feedback.uiTap() }
+
+    /// R8: a level's star lands on its Results (`index` 0…2): a rising confirm, the third a celebration.
+    func starLanded(_ index: Int) {
+        if index >= 2 { feedback.celebrate() } else { feedback.uiConfirm() }
+    }
+
+    /// R8: Home's Play: the next level (Level 1 on a first launch), or Endless once every level is done.
     func play() {
         feedback.uiConfirm()
+        if let next = LevelRules.next(store.data) {
+            start(.level(next))
+        } else {
+            start(.feed)
+        }
+    }
+
+    /// R8: Endless (the arcade run: Feed).
+    func playEndless() {
+        feedback.uiConfirm()
         start(.feed)
+    }
+
+    /// R8: a level from the map (a locked one is ignored).
+    func playLevel(_ id: Int) {
+        guard LevelRules.isOpen(store.data, id) else { return }
+        feedback.uiConfirm()
+        start(.level(id))
+    }
+
+    /// R8: the level results' Next.
+    func playNextLevel() {
+        guard let next = summary?.level?.next else {
+            show(.levels)
+            return
+        }
+        playLevel(next)
+    }
+
+    /// R8: the intro card's Go (touch: the clock waits for it).
+    func beginLevel() {
+        guard levelIntro != nil else { return }
+        feedback.uiTap()
+        dismissIntro()
     }
 
     func playDaily() {
@@ -827,13 +879,8 @@ final class GameController: ObservableObject, SceneDriver {
         feedback.uiConfirm()
         clearRunPauses()
         let result = tally.result(mode: .zen, seed: session.seed, snapshot: session.snapshot)
-        recorded = true
-        checkpointSaved = false
-        endWatchTask?.cancel()
-        let outcome = store.record(result, today: today, goals: goalRun.report)
-        GameCenterManager.shared.report(result: result, outcome: outcome, progress: store.data)
         AppTrace.t("SNAP-T zen end bugs=\(result.bugsCaught) seconds=\(Int(result.seconds.isFinite ? result.seconds : 0))")
-        summary = makeSummary(result, outcome: outcome)
+        file(result)
         refreshIdleTimer()
         showResults()
     }
@@ -881,12 +928,12 @@ final class GameController: ObservableObject, SceneDriver {
     func restart() {
         feedback.uiTap()
         switch mode {
-        case .lesson:
-            startLesson(replay: lessonReplay)
         case let .daily(day, _):
             start(.daily(day: day, scored: false))
-        case .feed, .attract, .zen:
+        case .feed, .attract, .zen, .level:
             start(mode)
+        case .lesson:
+            start(.feed)
         }
     }
 
@@ -898,9 +945,12 @@ final class GameController: ObservableObject, SceneDriver {
         let freshBog = homeSession == nil || session != nil
         session = nil
         pilotRun = nil
-        lessonScript = nil
-        lessonDisplay = nil
-        lessonClaims = [:]
+        levelSpec = nil
+        levelIntro = nil
+        levelPassed = false
+        levelEndTask?.cancel()
+        coverChomp = nil
+        bitesThisRun = 0
         clearRunPauses()
         frozen = false
         sceneHeld = false
@@ -952,73 +1002,97 @@ final class GameController: ObservableObject, SceneDriver {
         feedback.idle = !newRoute.isPlay
     }
 
-    // MARK: - The First Bite lesson
+    // MARK: - R8: levels (Levels 1–5 teach; the First Bite lesson is retired)
 
-    func startLesson(replay: Bool, at step: LessonScript.Step = .pose) {
-        lessonReplay = replay
-        start(.lesson)
-        lessonClaims = [:]
-        lessonHasPose = lessonHingeLike()
-        let script = LessonScript(start: step, replay: replay)
-        lessonScript = script
-        publishLesson(script)
+    /// The intro card's least time on screen (wall s) on a hinge, where it waits for the phone to close.
+    static let introSeconds: Double = 2.5
+    /// Core ends a level itself (goal met, a bee bitten, time or bites out: the tired ending, then finished). If it
+    /// hasn't this long (wall s) after the goal was met, the App ends it (a belt-and-braces fallback).
+    static let levelEndBeat: Double = 4.0
+
+    /// The level's intro card. Touch (and a held demo frame): the clock waits for Go. The hinge: it stays while Core
+    /// waits for the phone to close (`waitingForClose`), at least `introSeconds`.
+    private func showIntro(_ spec: LevelSpec) {
+        let id = LevelBridge.id(spec)
+        levelIntro = LevelIntro(id: id, world: LevelRules.world(of: id), title: LevelBridge.title(spec),
+                                goal: LevelBridge.goal(spec), touch: input != .hinge)
+        introUntil = CACurrentMediaTime() + Self.introSeconds
+        if input == .touch || input == .fixed { setPause(.intro, true) }
+        AppTrace.t("SNAP-T level intro \(id)")
     }
 
-    func replayLesson() {
-        feedback.uiConfirm()
-        startLesson(replay: true)
+    private func dismissIntro() {
+        guard levelIntro != nil else { return }
+        levelIntro = nil
+        setPause(.intro, false)
+        AppTrace.t("SNAP-T level go")
     }
 
-    /// A Duo's first hinge report can lag the first frame: a fold layout keeps the pose step (real runs). Demo
-    /// `lessonStep=1` on a phone sim keeps it on screen too (a frame of it).
-    private func lessonHingeLike() -> Bool {
-        let foldLayout = (layout?.hasFold ?? false) && !isDemo
-        return input == .hinge || foldLayout || demo?.lessonStep == 1 || (isDemo && demoFold)
+    /// The hinge's intro goes once the phone has closed (Core no longer waits) and its least time is up.
+    private func refreshIntro(_ s: TrapSnapshot) {
+        guard levelIntro != nil, input != .touch, input != .fixed else { return }
+        if !s.waitingForClose && CACurrentMediaTime() >= introUntil { dismissIntro() }
     }
 
-    /// Skip (offered on every step): the lesson counts as done.
-    func skipLesson() {
-        store.markLessonDone()
-        goHome()
-    }
-
-    /// The final card's "Start feeding": the first run.
-    func finishLesson() {
-        store.markLessonDone()
-        feedback.uiConfirm()
-        start(.feed)
-    }
-
-    func finishLessonHome() {
-        store.markLessonDone()
-        goHome()
-    }
-
-    private func lessonInput(_ s: TrapSnapshot, events: [TrapEvent]) -> LessonScript.Input {
-        var flies = 0
-        var bees = 0
-        var inTrap = 0
-        for b in s.bugs where AppRules.inPlay(b.activity) {
-            if b.species.isProtected {
-                bees += 1
-            } else {
-                flies += 1
-                if b.inTrap && b.activity != .arriving { inTrap += 1 }
+    /// Each step of a level: the goal met (Core's own judge on the run so far) ticks the goal line; Core ends the level
+    /// (`levelEndBeat` is only the fallback).
+    private func checkLevel(_ session: TrapSession, snapshot s: TrapSnapshot) {
+        guard let spec = levelSpec, !recorded, !levelPassed else { return }
+        let partial = tally.result(mode: session.mode, seed: session.seed, snapshot: s)
+        if LevelBridge.evaluate(partial, spec).passed {
+            levelPassed = true
+            AppTrace.t("SNAP-T level passed \(LevelBridge.id(spec)) t=" + AppTrace.fixed(s.time, 1))
+            levelEndTask?.cancel()
+            levelEndTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(GameController.levelEndBeat * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                self?.finishLevelNow()
             }
+            return
         }
-        return LessonScript.Input(time: s.time, angle: input == .hinge ? hinge.angle : nil,
-                                  hasHinge: lessonHingeLike(), armed: s.armed, events: events, liveFlies: flies,
-                                  liveBees: bees, fliesInTrap: inTrap, touch: lessonTouch)
     }
 
-    private func publishLesson(_ script: LessonScript) {
-        let display = script.display(touch: lessonTouch, hasPose: lessonHasPose)
-        guard display != lessonDisplay else { return }
-        if display.step != lessonDisplay?.step || display.praise != lessonDisplay?.praise
-            || display.warning != lessonDisplay?.warning {
-            AppTrace.t("SNAP-T lesson step \(display.step) '\(display.praise ?? display.warning ?? display.line)'")
-        }
-        lessonDisplay = display
+    /// Ends the level here (its goal met, or its time up) and shows its Results.
+    private func finishLevelNow() {
+        guard levelSpec != nil, let session, !recorded, route.isPlay, !frozen else { return }
+        clearRunPauses()
+        let result = session.result ?? tally.result(mode: session.mode, seed: session.seed, snapshot: session.snapshot)
+        file(result)
+        refreshIdleTimer()
+        showResults()
+    }
+
+    /// Core judges the level; the stars are kept (the best ever) and the next level and world open by them.
+    private func fileLevel(_ id: Int, _ result: RunResult) -> LevelResult {
+        let spec = LevelBridge.spec(id)
+        let judged = spec.map { LevelBridge.evaluate(result, $0) } ?? LevelJudgement(stars: 0, passed: false, line: "")
+        let stars = judged.passed ? min(max(judged.stars, 1), 3) : 0
+        let kept = store.recordLevel(id, stars: stars)
+        let next = LevelRules.nextAfter(id, in: store.data)
+        AppTrace.t("SNAP-T level result \(id) stars=\(stars) passed=\(judged.passed ? 1 : 0) best=\(kept.after)"
+                   + (kept.opened.map { " world=\($0)" } ?? ""))
+        return LevelResult(id: id, world: LevelRules.world(of: id), title: spec.map { LevelBridge.title($0) } ?? "",
+                           goal: spec.map { LevelBridge.goal($0) } ?? "", stars: stars, bestStars: kept.after,
+                           passed: judged.passed, line: judged.line, next: next, worldOpened: kept.opened)
+    }
+
+    /// Files a run once (the store, Game Center, the level's stars) and builds its summary.
+    @discardableResult
+    private func file(_ result: RunResult) -> ResultSummary {
+        recorded = true
+        checkpointSaved = false
+        endWatchTask?.cancel()
+        levelEndTask?.cancel()
+        let outcome = store.record(result, today: today, goals: goalRun.report)
+        var level: LevelResult?
+        if case let .level(id) = result.mode { level = fileLevel(id, result) }
+        GameCenterManager.shared.report(result: result, outcome: outcome, progress: store.data)
+        AppTrace.t("SNAP-T run score=\(result.score) bugs=\(result.bugsCaught) snaps=\(result.snaps) "
+                   + "seconds=\(Int(result.seconds.isFinite ? result.seconds : 0))")
+        var made = makeSummary(result, outcome: outcome)
+        made.level = level
+        summary = made
+        return made
     }
 
     // MARK: - Runs
@@ -1051,11 +1125,12 @@ final class GameController: ObservableObject, SceneDriver {
         }
         sessionLayout = layout ?? ScreenLayout(hasFold: false, hudOnLeft: hudOnLeft)
         let runSeed = seed(for: m)
-        var options: SessionOptions = m == .lesson
-            ? SessionOptions(snapsRunOut: false, waves: false, stingCosts: false)
-            : SessionOptions.`for`(m)
-        // Demo `wave=`: Core starts the run at that wave (its nectar block and day follow).
-        if m != .lesson, let wave = demo?.wave, wave > 1 { options.firstWave = wave }
+        // R8: a level's scripted bog, limits and judge are Core's (`SessionOptions.for(.level(id))`).
+        var options: SessionOptions = SessionOptions.`for`(m)
+        levelSpec = nil
+        if case let .level(id) = m { levelSpec = LevelBridge.spec(id) }
+        // Demo `wave=`: Core starts the run at that wave (its nectar block and day follow). Never in a level.
+        if levelSpec == nil, let wave = demo?.wave, wave > 1 { options.firstWave = wave }
         let rules = runRules(for: m)
         // First runs (GAME-DESIGN §5): 12 snaps while the plant rank is Sprout.
         options.startSnaps = rules.startSnaps
@@ -1065,8 +1140,6 @@ final class GameController: ObservableObject, SceneDriver {
         if let run = rules.sproutRun {
             AppTrace.t(run == 1 ? "SNAP-T first run options" : "SNAP-T sprout run \(run) options")
         }
-        // REVIEW-3 #19: the lesson shows the row the next run will really start with.
-        if m == .lesson { options.startSnaps = lessonSnaps() }
         let newSession = TrapSession(mode: m, seed: runSeed, best: store.best(for: m), geometry: sessionLayout.geometry,
                                      options: options)
         session = newSession
@@ -1083,17 +1156,24 @@ final class GameController: ObservableObject, SceneDriver {
         lastCoreSnaps = newSession.snapshot.snapsLeft
         freeFlashUntil = -1
         // R6 (#14): the chain explainer shows once ever (a persisted flag, so a seeded demo profile can show it too).
-        chainTagEligible = !store.data.chainTipSeen && m != .lesson && m != .attract
+        chainTagEligible = !store.data.chainTipSeen && levelSpec == nil && m != .attract
         chainHeldUntil = -1
         messages.clear()
         plateHeld = false
         tooFlatShown = false
-        // R6: the run plays the goals Home showed (written now); Feel's Zen bed for the Zen Bog only.
+        coverChomp = nil
+        bitesThisRun = 0
+        levelPassed = false
+        levelEndTask?.cancel()
+        levelIntro = nil
+        pauseReasons.remove(.intro)
+        // R6: the run plays the goals Home showed (written now); Feel's Zen bed for the Zen Bog only. R8: a level has
+        // its own goal, so the three goals wait for Endless, the Daily and Zen.
         switch m {
         case .feed, .daily, .zen:
             goalRun = GoalRun(book: store.prepareGoals(), mode: m,
                               startPhase: WaveFactory.phase(forWave: max(options.firstWave, 1)))
-        case .attract, .lesson:
+        case .attract, .lesson, .level:
             goalRun = GoalRun()
         }
         feedback.zen = FeedbackDirector.wantsZen(m)
@@ -1101,13 +1181,10 @@ final class GameController: ObservableObject, SceneDriver {
         touch = TouchTrapSource()
         fixedSource.closure = demo?.closure ?? 0
         pilotRun = demo?.pilot.map { PilotRun(skill: $0, seed: runSeed &+ 101) }
-        if m != .lesson {
-            lessonScript = nil
-            lessonDisplay = nil
-        }
         setInput(chooseInput(), force: true)
         // QA-1 #2: a snap made on Results, a menu or the pause menu must never fire at t = 0 of this run.
-        if input == .hinge && hinge.hasHinge { hinge.reset(at: CACurrentMediaTime()) }
+        // R8 (founder rule 3, Core): every hinge round starts closed (shut once, then open).
+        if input == .hinge && hinge.hasHinge { hinge.startRound(at: CACurrentMediaTime()) }
         tally = RunTally(hingeTiming: input == .hinge || input == .pilot)
         recorded = false
         playTime = 0
@@ -1118,7 +1195,9 @@ final class GameController: ObservableObject, SceneDriver {
         scene?.reset()
         // R6 Zen: no snaps row, so no economy glyphs either.
         SceneHooks.setShowsEconomy(scene, m != .zen)
-        setRoute(m == .lesson ? .lesson : .playing)
+        setRoute(.playing)
+        // R8: a level opens on its intro card (a pilot demo plays straight through, unless it is the intro's frame).
+        if let spec = levelSpec, demo?.pilot == nil || demo?.effectiveScreen == .levelIntro { showIntro(spec) }
         publishHUD(newSession.snapshot, now: CACurrentMediaTime(), force: true)
         refreshIdleTimer()
     }
@@ -1157,18 +1236,6 @@ final class GameController: ObservableObject, SceneDriver {
         return (demo.progress == nil ? nil : sprout, nil)
     }
 
-    /// The snaps the lesson's row shows: what the next Feed run will start with.
-    private func lessonSnaps() -> Int {
-        // A demo lesson is a first launch unless `firstRun=0`.
-        if let demo, demo.firstRun == nil, demo.effectiveScreen == .lesson { return AppRules.firstRunSnaps }
-        let next = runRules(for: .feed)
-        if let run = next.sproutRun {
-            if run == 1 { return AppRules.firstRunSnaps }
-            if let perks = SproutPerks.forFeedRun(run) { return min(max(perks.startSnaps, 1), Tuning.maxSnaps) }
-        }
-        return next.startSnaps ?? Tuning.startSnaps
-    }
-
     private func seed(for mode: RunMode) -> UInt64 {
         switch mode {
         case .feed, .zen:
@@ -1183,6 +1250,9 @@ final class GameController: ObservableObject, SceneDriver {
             return demo?.seed ?? DemoMode.defaultSeed
         case .lesson:
             return 1
+        case let .level(id):
+            // R8: a level is hand-made: the same bog every try (Core's seed, as the balance sim plays it).
+            return LevelBridge.seed(id)
         }
     }
 
@@ -1242,16 +1312,7 @@ final class GameController: ObservableObject, SceneDriver {
     @discardableResult
     private func recordFinished() -> ResultSummary? {
         guard !recorded, let session, let result = session.result else { return nil }
-        recorded = true
-        checkpointSaved = false
-        endWatchTask?.cancel()
-        let outcome = store.record(result, today: today, goals: goalRun.report)
-        GameCenterManager.shared.report(result: result, outcome: outcome, progress: store.data)
-        AppTrace.t("SNAP-T run score=\(result.score) bugs=\(result.bugsCaught) snaps=\(result.snaps) "
-                   + "seconds=\(Int(result.seconds.isFinite ? result.seconds : 0))")
-        let made = makeSummary(result, outcome: outcome)
-        summary = made
-        return made
+        return file(result)
     }
 
     private func handleFinished(immediate: Bool) {
@@ -1273,6 +1334,11 @@ final class GameController: ObservableObject, SceneDriver {
         guard let summary else { return }
         clearRunPauses()
         feedback.silence()
+        levelIntro = nil
+        // R8: Results sit on the live bog too (Home's attract session behind the card).
+        makeHomeSession()
+        SceneHooks.setShowsEconomy(scene, false)
+        SceneHooks.setHUDKeepOut(scene, nil)
         setRoute(.results)
         let o = summary.outcome
         let celebrated = o.rankedUp || !o.newSpecies.isEmpty || o.showsNewBest
@@ -1306,6 +1372,9 @@ final class GameController: ObservableObject, SceneDriver {
         case .lesson:
             title = "First Bite"
             again = "Feed"
+        case let .level(id):
+            title = LevelWords.levelName(id)
+            again = "Retry"
         case .zen:
             title = "Zen Bog"
             again = "Back to the bog"
@@ -1327,24 +1396,27 @@ final class GameController: ObservableObject, SceneDriver {
         // R5 (REVIEW-4 #5, belt and braces): never "Hungry… bite!" while a bee's halo is inside the trap zone.
         let haloInTrap = AppRules.protectedHaloInTrap(s, geometry: sessionLayout.geometry)
         let live = AppRules.isLive(s.phase)
-        // R7 (#12, duo-ui-too-flat-178 showed "Now!"): a Duo held too flat says "Fold it a little" over
-        // every hint but a warning, from the hinge's own angle (whatever Core's input saw), and logs it for CI.
-        let flat = route == .playing && input == .hinge && live && !isPaused
-            && AppRules.isTooFlat(angle: hinge.angle ?? hinge.lastRawAngle)
-        if flat != tooFlatShown {
-            tooFlatShown = flat
-            let a = hinge.angle ?? hinge.lastRawAngle ?? -1
-            AppTrace.t("SNAP-T too-flat " + (flat ? "on" : "off") + String(format: " angle=%.0f", a))
-        }
-        var core = AppRules.flatGuardedHint(AppRules.guardedHint(s.hint, haloInTrap: haloInTrap), tooFlat: flat)
-        // The lesson shows only the hints it teaches with ("Bee! Wait…", "Now!" once all three sip).
-        if route == .lesson, let h = core, !AppRules.lessonShowsHint(h) { core = nil }
+        // R8 (founder rule 2: no pose demands): flat, laptop, any angle plays, so there is no too-flat prompt.
+        var core = AppRules.guardedHint(s.hint, haloInTrap: haloInTrap)
         if let h = core, AppRules.hintText(h, touch: touchWording) == nil { core = nil }
-        // R6 (#6): one message at a time. The queue's toast or tag, else the state hint (Core's, or the opening's
-        // fold line); a warning keeps a waiting toast's clock still.
+        // R8 (founder rule 3): the round starts with the phone closed; while Core waits for it, the big calm card
+        // says so and the plate is quiet.
+        let waiting = s.waitingForClose && live
+        if waiting { core = nil }
+        // R6 (#6): one message at a time. The queue's toast or tag, else the state hint (Core's, a teaching level's
+        // coach, or the opening's fold line); a warning keeps a waiting toast's clock still.
         var state: HUDHint? = core.map { HUDHint.trap($0) }
-        if state == nil && AppRules.showsFoldHint(mode: s.mode, wave: s.wave, snapsMade: tally.snaps, time: s.time,
-                                                  after: Self.bannerSeconds, coreHint: core) {
+        let teaching = levelSpec.flatMap { AppRules.teachNeed(level: LevelBridge.id($0)) } != nil
+        if state == nil, !waiting, let id = levelID {
+            let counts = AppRules.trapCounts(s)
+            if let line = AppRules.coachLine(level: id, sipping: counts.sipping, beeInTrap: counts.beeInTrap,
+                                             armed: s.armed, touch: hintTouch) {
+                state = .coach(line)
+            }
+        }
+        if state == nil && !waiting && AppRules.showsFoldHint(mode: s.mode, wave: s.wave, snapsMade: tally.snaps,
+                                                              time: s.time, after: Self.bannerSeconds,
+                                                              coreHint: core) {
             state = .foldInput
         }
         let warning = core.map { AppRules.hintIsWarning($0) } ?? false
@@ -1371,7 +1443,12 @@ final class GameController: ObservableObject, SceneDriver {
         values.banner = message == nil && s.time < Self.bannerSeconds && !isPaused ? bannerText : nil
         values.passedBest = passedBest
         values.dayPhase = s.dayPhase
-        values.lesson = route == .lesson
+        values.waitingForClose = waiting && levelIntro == nil
+        if let spec = levelSpec {
+            let left = LevelBridge.timeLimit(spec).map { max(Int(($0 - s.time).rounded(.up)), 0) }
+            values.level = LevelHUD(id: LevelBridge.id(spec), goal: LevelBridge.goal(spec), done: levelPassed,
+                                    secondsLeft: left)
+        }
         values.hunger = AppRules.hudHunger(s.hunger, live: AppRules.isLive(s.phase))
         values.wilts = wilts
         values.stings = stings
@@ -1400,16 +1477,14 @@ final class GameController: ObservableObject, SceneDriver {
             // R6 (#6, frame 43): and the bugs in the trap (a plate never covers its subject).
             values.subjectRects = AppRules.subjectRects(s)
         }
-        if route == .lesson {
-            values.lessonSnaps = lessonDisplay?.showsSnaps ?? false
-            values.ringSnaps = lessonDisplay?.isFinal ?? false
-        }
-        if route == .lesson && !isPaused {
+        // R8: the teaching levels ring the bugs (the First Bite's pointer), until the level's goal is met.
+        if teaching && !isPaused && !waiting && !levelPassed {
             values.lessonTargets = AppRules.lessonTargets(s)
             values.lessonAvoid = AppRules.lessonAvoidPoints(s)
         }
         // A glyph landing or the row flash shows on its frame, not up to 1/15 s later.
         let urgent = force || hint != lastHint || values.tired != hud.values.tired
+            || values.waitingForClose != hud.values.waitingForClose || values.level != hud.values.level
             || values.snapsLeft != hud.values.snapsLeft || values.rowFlashing != hud.values.rowFlashing
             || values.freeFlash != hud.values.freeFlash || values.chainHeld != hud.values.chainHeld
             || values.tag != hud.values.tag || values.plateMayCover != hud.values.plateMayCover
@@ -1425,7 +1500,7 @@ final class GameController: ObservableObject, SceneDriver {
         let was = isPaused
         if on {
             let inserted = pauseReasons.insert(reason).inserted
-            if inserted && route.isPlay && reason != .closing { AppTrace.t("SNAP-T paused \(reason.rawValue)") }
+            if inserted && route.isPlay { AppTrace.t("SNAP-T paused \(reason.rawValue)") }
         } else {
             pauseReasons.remove(reason)
         }
@@ -1434,8 +1509,9 @@ final class GameController: ObservableObject, SceneDriver {
             // QA-1 #7: a tap made just before the pause never bites on the first frame after it.
             touch.reset()
         } else if !isPaused && was && route.isPlay {
-            // Every resume: a fresh detector, so the reopening stroke never reads as a snap or a creep.
-            if input == .hinge && hinge.hasHinge { hinge.reset(at: CACurrentMediaTime()) }
+            // Every resume: a fresh detector, so a stroke made in the menu never reads as a bite. R8: not after the
+            // shut's own pose change (the outer display and back): the reopen IS the re-arm, Core must see it whole.
+            if input == .hinge && hinge.hasHinge && reason != .pose { hinge.reset(at: CACurrentMediaTime()) }
             AppTrace.t("SNAP-T resumed")
         }
         if isPaused != was { refreshIdleTimer() }
@@ -1443,9 +1519,8 @@ final class GameController: ObservableObject, SceneDriver {
 
     private func clearRunPauses() {
         pauseReasons.remove(.menu)
-        pauseReasons.remove(.closing)
+        pauseReasons.remove(.intro)
         if isMenuOpen { isMenuOpen = false }
-        if isClosingPaused { isClosingPaused = false }
     }
 
     /// The screen may sleep while paused (a Duo left half-closed), never mid-run.
@@ -1467,6 +1542,8 @@ final class GameController: ObservableObject, SceneDriver {
         case .play:
             start(d.runMode(today: day))
             if let wave = d.wave, wave > 1 { AppTrace.t("SNAP-T start wave \(wave)") }
+        case .results where d.mode == .level:
+            demoLevelResults(d)
         case .results:
             start(d.runMode(today: day))
             if let session {
@@ -1500,23 +1577,26 @@ final class GameController: ObservableObject, SceneDriver {
         case .garden:
             goHome()
             setRoute(.garden)
-        case .lesson:
-            let step = LessonScript.Step(rawValue: d.lessonStep ?? 1) ?? .pose
-            startLesson(replay: false, at: step)
+        case .levels:
+            goHome()
+            setRoute(.levels)
+        case .levelIntro:
+            // The intro card held (no pilot: a phone sim's touch run waits for Go).
+            start(.level(d.level ?? DemoMode.defaultLevel))
+        case .levelResults:
+            demoLevelResults(d)
+        case .chomp:
+            demoChomp(d)
+        case .shut:
+            // R8: a run just started, the phone shut before its first bite: the outer display's "Open to start".
+            start(d.mode != nil ? d.runMode(today: day) : .feed)
+            forcedPose = .cover
         case .pose:
             forcedPose = .pose
             if d.mode != nil { start(d.runMode(today: day)) } else { goHome() }
         case .cover:
-            // R3 (REVIEW-2 #24): the cover shows a run in progress ("Open it up to carry on" and its score), so a
-            // run is really played for a few seconds first (the casual pilot, headless).
-            start(d.mode != nil ? d.runMode(today: day) : .feed)
-            if let session {
-                var t = tally
-                DemoRunner.play(session, skill: d.pilot ?? .casual, seed: session.seed, seconds: Self.coverPlaySeconds,
-                                onEvent: { e in t.note(e) })
-                tally = t
-                publishHUD(session.snapshot, now: CACurrentMediaTime(), force: true)
-            }
+            // R8: the outer display off a run: the closed trap at rest, "Open to play" and the next level.
+            goHome()
             forcedPose = .cover
         case .icon:
             showsIcon = true
@@ -1530,8 +1610,67 @@ final class GameController: ObservableObject, SceneDriver {
         }
     }
 
-    /// Demo `screen=cover`: session seconds played before the cover card shows.
-    static let coverPlaySeconds: Double = 24
+    /// R8 demo `screen=chomp`: the longest the pilot plays (session s) looking for the bite the card shows.
+    static let chompSearchSeconds: Double = 300
+    /// R8 demo `screen=levelResults`: the longest the pilot plays a level (session s).
+    static let levelSearchSeconds: Double = 300
+
+    /// R8 demo `screen=chomp[;chomp=catch|sting|dry]`: a run really played by the pilot (default casual, `expert` for
+    /// a catch) until a bite of that kind (a catch of 3+ bugs for `catch`), then the Duo shown shut on that bite: the
+    /// outer display's CHOMP card. If the pilot never makes one, a bite of that kind is made up (logged).
+    private func demoChomp(_ d: DemoMode) {
+        let want = d.chomp ?? .catchBite
+        start(d.mode != nil ? d.runMode(today: today) : .feed)
+        guard let session else { return }
+        var found: BiteReport?
+        var t = tally
+        var played = 0.0
+        let skill = d.pilot ?? (want == .catchBite ? .expert : .novice)
+        while found == nil && played < Self.chompSearchSeconds && !session.isFinished {
+            played += DemoRunner.play(session, skill: skill, seed: session.seed &+ UInt64(played * 10), seconds: 0.5,
+                                      onEvent: { e in
+                                          t.note(e)
+                                          guard case let .snapped(r) = e else { return }
+                                          if AppRules.demoChompMatches(r, want: want) { found = r }
+                                      })
+        }
+        tally = t
+        if session.isFinished {
+            // Over before the bite came: a fresh run, so the card is mid-run.
+            start(d.mode != nil ? d.runMode(today: today) : .feed)
+        }
+        let score = self.session?.snapshot.score ?? 0
+        if let r = found {
+            coverChomp = ChompInfo(r, score: score)
+            bitesThisRun = max(bitesThisRun, 1)
+            AppTrace.t("SNAP-T chomp card \(want) caught=\(r.caught.count) t=" + AppTrace.fixed(played, 1))
+        } else {
+            coverChomp = AppRules.demoChomp(want, score: score)
+            bitesThisRun = 1
+            AppTrace.t("SNAP-T chomp card \(want) made up")
+        }
+        if let s = self.session { publishHUD(s.snapshot, now: CACurrentMediaTime(), force: true) }
+        forcedPose = .cover
+    }
+
+    /// R8 demo `screen=levelResults[;level=n]` (and `screen=results;mode=level`): the level really played by the
+    /// pilot (default perfect) until its goal is met or it ends, then its Results: the stars as Core judged them.
+    private func demoLevelResults(_ d: DemoMode) {
+        let id = d.level ?? DemoMode.defaultLevel
+        start(.level(id))
+        guard let session, levelSpec != nil else { return }
+        dismissIntro()
+        var t = tally
+        var played = 0.0
+        // Core ends a level itself (its goal met, or its bites or time out).
+        while played < Self.levelSearchSeconds && !session.isFinished {
+            played += DemoRunner.play(session, skill: d.pilot ?? .perfect, seed: session.seed &+ UInt64(played * 10),
+                                      seconds: 0.5, onEvent: { e in t.note(e) })
+        }
+        tally = t
+        AppTrace.t("SNAP-T level demo \(id) played=" + AppTrace.fixed(played, 1))
+        finishLevelNow()
+    }
     /// R6 demo `screen=results;mode=zen`: session seconds of the Zen Bog played before End.
     static let zenResultsSeconds: Double = 150
 

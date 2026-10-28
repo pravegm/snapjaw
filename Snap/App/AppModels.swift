@@ -4,12 +4,16 @@ import SwiftUI
 
 /// Where the app is.
 enum AppRoute: String, Equatable {
-    case home, playing, lesson, results, book, settings, daily
+    case home, playing, results, book, settings, daily
     /// R6: the Garden (trap varieties).
     case garden
+    /// R8: the level map (3 worlds × 10 levels). The First Bite lesson's route is gone: Levels 1–5 teach.
+    case levels
 
     /// The bog is live (a session steps).
-    var isPlay: Bool { self == .playing || self == .lesson }
+    var isPlay: Bool { self == .playing }
+    /// R8 ("the living bog as the backdrop"): every menu sits on Home's live attract bog, not a still.
+    var showsLiveBog: Bool { self != .playing }
 }
 
 /// What the display should show, from the canvas shape, the hinge and the shut latch (AppRules.pose).
@@ -41,6 +45,21 @@ enum HUDHint: Equatable {
     case goalDone(String)
     /// R6 (Core #19): the late night's telegraph, once each ("The night gets fast…", "Last light…").
     case nightCue(NightCue)
+    /// R8 (ROUND-8 §3 clarity): what the last bite did, in plain words ("3 bugs! Fast close", "Too slow, they flew",
+    /// "Bee! −1 snap"). `good`: the cream plate; otherwise the crimson one.
+    case verdict(String, good: Bool)
+    /// R8: a teaching level's one line at the right moment ("Now shut it, fast!").
+    case coach(String)
+}
+
+/// R8: the level's goal as the HUD shows it (one line, big, on the other page's top outer corner).
+struct LevelHUD: Equatable {
+    var id: Int
+    var goal: String
+    /// The goal is met (it ticks; the level ends a beat later).
+    var done = false
+    /// Seconds left on a timed level (nil: no clock).
+    var secondsLeft: Int?
 }
 
 /// The HUD values (one value, published only when it changes).
@@ -59,22 +78,21 @@ struct HUDValues: Equatable {
     /// The score passed the personal best this run.
     var passedBest = false
     var dayPhase: DayPhase = .morning
-    /// Lesson runs hide the score and snaps.
-    var lesson = false
+    /// R8: a level's goal line (nil outside a level).
+    var level: LevelHUD?
+    /// R8 (founder rule 3): the round waits for the phone to close ("Close the phone to start").
+    var waitingForClose = false
     /// R2 hunger: 0 just fed … 1 a snap wilts (the next snap glyph drains with it). Rounded to 1/40.
     var hunger = 0.0
     /// Snaps wilted this run (the scene pops "wilted −1" and droops a glyph at the snaps anchor).
     var wilts = 0
     /// Stings this run (the snaps row flashes crimson when it rises).
     var stings = 0
-    /// The lesson's pointer rings (scene space).
+    /// The teaching levels' pointer rings (scene space; R8: Levels 1–5, where the lesson used them).
     var lessonTargets: [LessonTarget] = []
     /// R3: 3 s before a snap wilts (Core's `hungry` until the next bite or wilt): the draining glyph pulses crimson and
     /// the numeral ticks red.
     var hungry = false
-    /// R3 (REVIEW-2 #12): the lesson shows the snaps row from step 3, and rings it on its last card.
-    var lessonSnaps = false
-    var ringSnaps = false
     /// R3 (REVIEW-2 #12): the first Feast's flying glyph is labelled once ("+1 snap"); R5 (REVIEW-4 #7): a costly
     /// sting's cost ("−2 snaps"). R6 (#6): one tag at a time, from the message queue, and never with a plate up.
     var tag: HUDTag?
@@ -95,7 +113,7 @@ struct HUDValues: Equatable {
     /// R4 (REVIEW-3 #3): the Scene's live score/word pops (scene space, rounded), while a hint is up: the plate keeps
     /// off them.
     var popRects: [CGRect] = []
-    /// R4 (REVIEW-3 #19): the other bugs in play while the lesson points at a bee (its arrow steers round them).
+    /// R4 (REVIEW-3 #19): the other bugs in play while the pointer is on a bee (its arrow steers round them).
     var lessonAvoid: [CGPoint] = []
 }
 
@@ -147,6 +165,65 @@ struct ResultSummary: Equatable {
     var againLabel: String
     /// "312 short of your best" (nil on a new best, a first score or an empty run).
     var nearMiss: String?
+    /// R8: a level's own result (nil for Endless, the Daily and Zen): Results shows `LevelResultsView` instead.
+    var level: LevelResult?
+}
+
+/// R8: how a level went, as its Results card shows it.
+struct LevelResult: Equatable {
+    var id: Int
+    var world: Int
+    var title: String
+    var goal: String
+    /// 0…3 this try, and the best ever after it.
+    var stars: Int
+    var bestStars: Int
+    var passed: Bool
+    /// Core's line ("Clean! No bee bitten.").
+    var line: String
+    /// The level to play next (nil: the last level, or the next world is still shut).
+    var next: Int?
+    /// This try opened a world (its number).
+    var worldOpened: Int?
+}
+
+/// R8: the bite the outer display shows while the Duo is shut (the CHOMP card).
+struct ChompInfo: Equatable {
+    var caught: [BugSpecies]
+    var stingers: [BugSpecies]
+    var escaped: Int
+    var points: Int
+    /// The snaps the bite cost beyond its own one (a sting).
+    var snapsLost: Int
+    var snapsBack: Int
+    /// The run's score after the bite.
+    var score: Int
+    /// The plain words ("3 bugs! Fast close").
+    var verdict: String
+
+    enum Kind: Equatable { case catchBite, sting, dry }
+
+    var kind: Kind {
+        if !stingers.isEmpty { return .sting }
+        return caught.isEmpty ? .dry : .catchBite
+    }
+
+    init(caught: [BugSpecies], stingers: [BugSpecies] = [], escaped: Int = 0, points: Int, snapsLost: Int = 0,
+         snapsBack: Int = 0, score: Int, verdict: String) {
+        self.caught = caught
+        self.stingers = stingers
+        self.escaped = escaped
+        self.points = points
+        self.snapsLost = snapsLost
+        self.snapsBack = snapsBack
+        self.score = score
+        self.verdict = verdict
+    }
+
+    init(_ r: BiteReport, score: Int) {
+        self.init(caught: r.caught, stingers: r.stingers, escaped: r.escaped, points: r.points, snapsLost: r.snapsLost,
+                  snapsBack: r.snapsBack, score: score, verdict: AppRules.biteVerdict(r).text)
+    }
 }
 
 /// Demo `closure=`: the drawn closure held at a number of degrees (no hinge, no pilot): static frames of the jaws.
@@ -156,8 +233,8 @@ final class FixedTrapSource: TrapSource {
 
     func input(at time: TimeInterval) -> TrapInput {
         let c = closure.isFinite ? max(closure, 0) : 0
-        return TrapInput(closure: c, armed: c < Tuning.snapStartDepth, creeping: false, snap: nil, tooFlat: false,
-                         angle: nil)
+        return TrapInput(closure: c, armed: c < AppRules.heldClosureArmedBelow, creeping: false, snap: nil,
+                         tooFlat: false, angle: nil)
     }
 }
 

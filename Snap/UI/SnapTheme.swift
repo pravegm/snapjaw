@@ -97,7 +97,16 @@ struct BogBackdrop: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                if let still = controller.bogStill {
+                if controller.scene != nil && controller.route.showsLiveBog {
+                    // R8 ("the living bog as the backdrop"): Home's attract bog is live under the page; a soft dark
+                    // veil and a vignette keep the words on top legible, the bugs still visible.
+                    Color.black.opacity(0.42)
+                    RadialGradient(colors: [Color.black.opacity(0), Color.black.opacity(0.55)], center: .center,
+                                   startRadius: min(geo.size.width, geo.size.height) * 0.25,
+                                   endRadius: max(geo.size.width, geo.size.height) * 0.75)
+                    RadialGradient(colors: [glow.opacity(0.16), glow.opacity(0)], center: UnitPoint(x: 0.5, y: 0.04),
+                                   startRadius: 10, endRadius: 520)
+                } else if let still = controller.bogStill {
                     Image(uiImage: still)
                         .resizable()
                         .scaledToFill()
@@ -207,29 +216,37 @@ struct SnapButtonBackground: View {
     let kind: SnapButtonStyle.Kind
     let pressed: Bool
 
+    /// R8: inked like the display type (a dark outline, a deep lip), cut like a leaf (`LeafShape`).
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: SnapTheme.buttonRadius, style: .continuous)
+        let shape = LeafShape(big: SnapTheme.buttonRadius + 4, small: 8)
         ZStack {
             switch kind {
             case .primary:
-                // A 5 pt lip that presses to 1 pt: a chunky, juicy button.
+                // A 6 pt lip that presses to 1 pt: a chunky, juicy, inked button.
+                shape.fill(SnapTheme.night).offset(y: pressed ? 2 : 7)
                 shape.fill(SnapTheme.goldDeep).offset(y: pressed ? 1 : 5)
-                shape.fill(LinearGradient(colors: [SnapTheme.goldLight, SnapTheme.gold], startPoint: .top,
-                                          endPoint: .bottom))
-                    .overlay(shape.inset(by: 3).stroke(Color.white.opacity(0.35), lineWidth: 2)
+                shape.fill(LinearGradient(colors: [SnapTheme.goldLight, SnapTheme.gold, SnapTheme.goldDeep],
+                                          startPoint: .top, endPoint: .bottom))
+                    .overlay(shape.inset(by: 4).stroke(Color.white.opacity(0.45), lineWidth: 2)
                         .mask(LinearGradient(colors: [.white, .clear], startPoint: .top, endPoint: .center)))
+                    .overlay(shape.stroke(SnapTheme.night, lineWidth: 3))
                     .offset(y: pressed ? 4 : 0)
-                    .shadow(color: SnapTheme.gold.opacity(0.30), radius: 14, y: 4)
+                    .shadow(color: SnapTheme.gold.opacity(0.35), radius: 16, y: 4)
             case .crimson:
+                shape.fill(SnapTheme.night).offset(y: pressed ? 2 : 7)
                 shape.fill(SnapTheme.crimsonDeep).offset(y: pressed ? 1 : 5)
                 shape.fill(LinearGradient(colors: [SnapTheme.pink, SnapTheme.crimson], startPoint: .top,
                                           endPoint: .bottom))
-                    .overlay(shape.stroke(SnapTheme.lime, lineWidth: 3))
+                    .overlay(shape.stroke(SnapTheme.night, lineWidth: 3))
                     .offset(y: pressed ? 4 : 0)
                     .shadow(color: SnapTheme.crimson.opacity(0.35), radius: 14, y: 4)
             case .secondary:
-                shape.fill(pressed ? SnapTheme.surfacePressed : SnapTheme.surfaceRaised)
-                    .overlay(shape.stroke(SnapTheme.lime.opacity(0.28), lineWidth: 1.5))
+                shape.fill(SnapTheme.night.opacity(0.85)).offset(y: pressed ? 1 : 4)
+                shape.fill(LinearGradient(colors: [pressed ? SnapTheme.surfacePressed : Color(snapHex: 0x24573A),
+                                                   SnapTheme.surface], startPoint: .top, endPoint: .bottom))
+                    .overlay(shape.stroke(SnapTheme.night, lineWidth: 2.5))
+                    .overlay(shape.inset(by: 3).stroke(SnapTheme.limeLight.opacity(0.18), lineWidth: 1))
+                    .offset(y: pressed ? 3 : 0)
             case .quiet:
                 Color.clear
             }
@@ -282,16 +299,11 @@ struct SnapCardModifier: ViewModifier {
     var padding: CGFloat = 18
     var radius: CGFloat = SnapTheme.cardRadius
 
+    /// R8 ("Menus feel cheap"): every card is a leaf-cut panel (`LeafPanel`), not a stacked rounded rectangle.
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        return content
+        content
             .padding(padding)
-            .background(
-                shape.fill(LinearGradient(colors: [SnapTheme.surfaceRaised.opacity(0.96), SnapTheme.surface.opacity(0.96)],
-                                          startPoint: .top, endPoint: .bottom))
-                    .overlay(shape.stroke(SnapTheme.lime.opacity(0.22), lineWidth: 1.5))
-                    .shadow(color: SnapTheme.shadow.opacity(0.5), radius: 16, y: 6)
-            )
+            .background(LeafPanel(big: radius + 4, small: max(radius * 0.36, 6)))
     }
 }
 

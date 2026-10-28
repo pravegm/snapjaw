@@ -19,31 +19,38 @@
 #    timed check window.
 #  - The app prints one line per event (print + fflush), so line numbers order events in time.
 #
-# Hinge checks (design/ROUND-1.md "CI engineer"), each a "<CHECK> PASS|FAIL|INCONCLUSIVE|INFO (detail)" line in
-# logs/run.txt, a row in checks.tsv and in the job summary:
-#  1. SNAP: launch `screen=play;mode=attract;seed=7` at 160°, wait for `SNAP-T event bugSipping`, sweep 160 → 128 in
-#     0.15 s. PASS: `SNAP-T event snapped` within 1 s (lines logged since the sweep began, read 1 s after it returns).
-#  2. CREEP: re-open to 160, then sweep 160 → 128 over 3 s. PASS: no `snapped` before the closure reached 22° (the
-#     logged closure around any snapped line, 2° tolerance for the 10 Hz trap lines) and a `SNAP-T trap … creep 1`.
-#  3. REARM: after the snap, sweep back to 160. PASS: `SNAP-T event rearmed` after the snapped line.
-#  4. CLOSE-PAUSE: sweep to 40 → `SNAP-T paused closing`; sweep back to 150 → `SNAP-T resumed` (on to 165° if the
-#     cover display is still lit and nothing resumed).
-#  5. Frames: open 165, half closed 150, snapped 130, the cover display shut, reopened 165, and the pose card.
-# INFO rows (evidence, never a verdict): CANVAS, CREEP-FAST (the same close over 1.5 s), NO-PAUSE-95 (a hard snap that
-# reaches 95° must never pause: Never put a pause near 90°, CLAUDE.md).
+# Hinge checks (R8: design/ROUND-8.md "Owners", design/notes/core-R8.md: the lid is the jaw), each a
+# "<CHECK> PASS|FAIL|INCONCLUSIVE|INFO (detail)" line in logs/run.txt, a row in checks.tsv and in the job summary. Every
+# hinge launch starts with round_open (founder rule 3: a round starts closed: shut the Duo, no bite, open it again; the
+# ROUND INFO row says whether "SNAP-T round open" came and the starting shut bit nothing).
+#  1. BITE: launch `screen=play;mode=attract;seed=7` at 150°, round_open, wait for `SNAP-T event bugSipping`, sweep
+#     150 → 5 in 0.3 s. PASS: `SNAP-T event snapped caught=<n>` with n ≥ 1 after the sweep began.
+#  2. COVER: on that shut, the cover panel is shot (`duo-h1-cover-shut`). PASS: the cover panel is lit.
+#  3. REOPEN: then back to 150. PASS: `SNAP-T event rearmed` after the bite and no `SNAP-T event waveStarted|bugArrived`
+#     between the bite and the re-arm (the clock is frozen while shut; the cover shot makes the shut ~15 s long).
+#  4. SLOW-CLOSE: a fresh launch (the same seed), 150 → 5 over 2.5 s. PASS: its bite caught fewer than BITE's, or
+#     escaped ≥ 1.
+#  5. NO-BITE-DEEP: a fresh launch, 150 → 60 → 150. PASS: no snapped line in the window (INCONCLUSIVE when the app
+#     never logged an angle under 100°).
+# Log lines read: `SNAP-T event …` (App), `SNAP-T trap closure … armed … creep … angle … ref …` (App, 10 Hz),
+# `SNAP-T hinge closure …` (Input, 2 Hz), and R8's Input lines `SNAP-T shut d=<s> angle <θ> status <s>`,
+# `SNAP-T reopened angle <θ>` and `SNAP-T round open angle <θ>` (Snap/Input/HingeTrapSource.swift).
+# Frames: open 165, half closed 150 (`closure=11`), the bite's shut (cover), the shut cover display, reopened 165, and
+# the pose card. R8: the R1–R7 SNAP / CREEP / REARM / CLOSE-PAUSE checks and the NO-PAUSE-95 / CREEP-FAST rows are gone
+# (no partial snap, no creep, no closing pause).
 # Rig rows (design/notes/duo-ci-R3.md): SIMULATOR FAIL when the Duo shut down mid-run (then rebooted before the next
 # launch; that launch's checks are INCONCLUSIVE), HINGE-TOOL FAIL when the hinge CLI keeps failing on a booted Duo, and
 # RIG INFO (failed hinge calls, simulator deaths).
 #
 # R5 rig (design/notes/ci-R5.md; Duo runs 40626586037 and 40634483657):
 #  - The passes always run in the order hinge, frames, ui, store: the hinge checks get the youngest simulator.
-#  - Each hinge-driven check launch (FRESH_FOR: hinge, close-pause, frames-snap, ui-lesson-hinge) runs on a FRESH Duo:
+#  - Each hinge-driven check launch (FRESH_FOR: bite, slow-close, no-bite-deep, frames-snap, ui-close-to-start) runs on a FRESH Duo:
 #    `simctl create` (same device type and runtime), boot, `bootstatus -b`, a pause until SpringBoard is settled (the
 #    same PID for 3 polls, at least SETTLE_MIN s), install, then a warm-up `hinge get`. The old Duo is shut down first
 #    (one booted Duo at a time), and deleted when this script made it.
 #  - No hinge call runs long: a set times out after HINGE_SET_TO (10) s, a sweep after its length + HINGE_PAD (10) s,
-#    and a repositioning sweep longer than SWEEP_CHUNK (1.5) s is sent as chunks. The measured sweeps (CREEP's 3 s)
-#    stay whole. A timed-out call is retried once (HINGE_TRIES=2) while the device is still booted.
+#    and a repositioning sweep longer than SWEEP_CHUNK (1.5) s is sent as chunks. The measured sweeps (SLOW-CLOSE's
+#    2.5 s) stay whole. A timed-out call is retried once (HINGE_TRIES=2) while the device is still booted.
 #  - "Booted" is asked twice (simctl list, then `simctl getenv`), because a slow `simctl list` made a live Duo look
 #    dead in run 40634483657 (sim-death-1.txt lists it as Booted).
 #  - If a check's launch dies (a SIMULATOR / HINGE-TOOL row, or any INCONCLUSIVE verdict), the WHOLE check is run again
@@ -77,7 +84,7 @@ CHECKS="$OUT_ABS/checks.tsv"
 : > "$CHECKS"
 SINK="$CHECKS"    # where result() writes: checks.tsv, or the current check attempt's buffer (run_check)
 CHECK_RETRIES="${CHECK_RETRIES:-2}"
-FRESH_FOR="${FRESH_FOR:-hinge close-pause frames-snap ui-lesson-hinge}"
+FRESH_FOR="${FRESH_FOR:-bite slow-close no-bite-deep frames-snap ui-close-to-start}"
 SETTLE_MIN="${SETTLE_MIN:-25}"
 SWEEP_CHUNK="${SWEEP_CHUNK:-1.5}"
 HINGE_PAD="${HINGE_PAD:-10}"
@@ -572,12 +579,25 @@ launch() {
   sleep 2
 }
 
-# snap_once <file> <to angle>: wiggle at $CUR, then a 0.15 s sweep to <to>; sets S0 (the line count before the sweep).
-snap_once() {
+# bite_once <file> <to angle> <seconds>: wiggle at $CUR, then a sweep to <to>; sets S0 (the line count before the sweep).
+bite_once() {
   local from="$CUR"
   hinge_wiggle "$from" 2
   S0=$(nlines "$1")
-  hinge_sweep "$2" 0.15
+  hinge_sweep "$2" "$3"
+}
+
+# round_open <file> <angle>: R8 (founder rule 3) a round starts closed: shut the Duo (that shut is no bite) and open it
+# to <angle>, where the round opens (`SNAP-T round open`) and the bugs come. Sets ROUND_DETAIL.
+ROUND_DETAIL=""
+round_open() {
+  local r0 rl bites
+  r0=$(nlines "$1")
+  hinge_sweep 5 0.5; sleep 1.5
+  hinge_sweep "$2" 0.8; sleep 1.5
+  rl=$(first_line "$1" "SNAP-T round open" "$r0")
+  bites=$(after "$1" "$r0" | grep -c "SNAP-T event snapped")
+  ROUND_DETAIL="shut, then opened to $2°: round open line@${rl:-none}; bites on the starting shut: $bites (want 0)"
 }
 
 # attempt_bad <rows file>: 0 when an attempt's rows show the rig failed (a SIMULATOR / HINGE-TOOL row, an INCONCLUSIVE
@@ -643,117 +663,124 @@ sim_settle 0 || true
 install_app || { result INSTALL FAIL "simctl install failed twice"; write_summary; exit 1; }
 probe_displays
 
-# ---- pass: the hinge checks (design/ROUND-1.md, CI engineer) ---------------------------------------------------
+# ---- pass: the hinge checks (R8, design/ROUND-8.md "Owners", design/notes/core-R8.md) ------------------------------
 # Run first (R5): the hinge checks get the youngest simulator, each launch on its own freshly booted Duo.
-check_hinge() {
-  hinge_set 160
-  launch hinge "screen=play;mode=attract;seed=7"
-  HL="$OUT_ABS/logs/hinge.txt"
-  result CANVAS INFO "$(canvas_line "$HL"); input $(input_of "$HL"); hinge lines $(count '^SNAP-H' "$HL"); trap lines $(count 'SNAP-T trap closure' "$HL"), hinge closure lines $(count 'SNAP-T hinge closure' "$HL")$(simnote)"
+# R8 (founder rule 3) every hinge round starts closed: after the launch the Duo is shut and opened again
+# (round_open: no bite, `SNAP-T round open`), and only then do the bugs come.
+BITE_CAUGHT=""   # the BITE check's caught count (SLOW-CLOSE compares with it; the same seed)
 
-  # 1. SNAP. Attract waves start at 1.2 s; wait for a bug to sip (the moment a player would bite).
-  if wait_for "$HL" "SNAP-T event bugSipping" 40; then sip="a bug was sipping"; else sip="no bugSipping in 40 s (snapped anyway)"; fi
-  attempt=1; sl=""; minA=none; maxc=none
+# The BITE launch: ROUND (INFO), BITE, then COVER and REOPEN on the same shut.
+check_bite() {
+  hinge_set 150
+  launch bite "screen=play;mode=attract;seed=7"
+  BL="$OUT_ABS/logs/bite.txt"
+  result CANVAS INFO "$(canvas_line "$BL"); input $(input_of "$BL"); hinge lines $(count '^SNAP-H' "$BL"); trap lines $(count 'SNAP-T trap closure' "$BL"), hinge closure lines $(count 'SNAP-T hinge closure' "$BL")$(simnote)"
+  round_open "$BL" 150
+  result ROUND INFO "$ROUND_DETAIL$(simnote)"
+
+  # BITE: 150 → 5 in about 0.3 s, then a snapped event with caught ≥ 1. Attract waves start 1.2 s after the round
+  # opens; wait for a bug to sip (the moment a player would bite). One retry: the hinge tool sometimes under-delivers.
+  if wait_for "$BL" "SNAP-T event bugSipping" 40; then sip="a bug was sipping"; else sip="no bugSipping in 40 s (bit anyway)"; fi
+  attempt=1; sl=""; minA=none
   while :; do
-    snap_once "$HL" 128
-    sleep 1
-    sl=$(first_line "$HL" "SNAP-T event snapped" "$S0")
-    minA=$(after "$HL" "$S0" | trap_vals angle | min_of)
-    maxc=$(after "$HL" "$S0" | trap_vals closure | max_of)
-    log "SNAP attempt $attempt: snapped@${sl:-none}; logged min angle ${minA}°, max closure ${maxc}°"
+    bite_once "$BL" 5 0.3
+    sleep 1.5
+    sl=$(first_line "$BL" "SNAP-T event snapped" "$S0")
+    minA=$(after "$BL" "$S0" | trap_vals angle | min_of)
+    log "BITE attempt $attempt: snapped@${sl:-none}; logged min angle ${minA}°"
     [[ -n "$sl" ]] && break
     (( attempt >= 2 )) && break
     attempt=2
-    # Re-open (which also re-arms: θ ≥ 150) and try once more: the hinge tool sometimes under-delivers a fast sweep.
-    hinge_sweep 160 1.0; sleep 1.5
+    hinge_sweep 150 1.0; sleep 1.5; wait_for "$BL" "SNAP-T event bugSipping" 10 || true
   done
-  inp=$(input_of "$HL")
-  snapline=$( [[ -n "$sl" ]] && sed -n "${sl}p" "$HL" | tr -d '\r' )
-  d="attempt $attempt/2; $sip; input=${inp:-none}; ${snapline:-no snapped line}; min angle ${minA}°, max closure ${maxc}°"
-  if [[ -n "$sl" ]]; then verdict SNAP PASS "$d"
-  elif [[ "$minA" == none ]] || ! lt "$minA" 135; then
-    verdict SNAP INCONCLUSIVE "$d (the app never logged an angle under 135°: the hinge tool under-delivered the sweep, or no trap lines)"
-  else verdict SNAP FAIL "$d (the app saw the close but did not snap)"; fi
-  shoot_now duo-h1-snapped-128
+  snapline=$( [[ -n "$sl" ]] && sed -n "${sl}p" "$BL" | tr -d '\r' )
+  BITE_CAUGHT=$(grep -oE 'caught=[0-9]+' <<<"$snapline" | head -1 | cut -d= -f2)
+  shutl=$(first_line "$BL" "SNAP-T shut " "$S0")
+  d="attempt $attempt/2; $sip; input=$(input_of "$BL"); ${snapline:-no snapped line}; shut line: $( [[ -n "$shutl" ]] && sed -n "${shutl}p" "$BL" | tr -d '\r' || echo none); min angle ${minA}°"
+  if [[ -n "$sl" && "${BITE_CAUGHT:-0}" -ge 1 ]]; then verdict BITE PASS "$d"
+  elif [[ -n "$sl" ]]; then verdict BITE FAIL "$d (a bite, but nothing caught)"
+  elif [[ "$minA" == none ]] || ! lt "$minA" 40; then
+    verdict BITE INCONCLUSIVE "$d (the app never logged an angle under 40°: the hinge tool under-delivered the sweep, or no trap lines)"
+  else verdict BITE FAIL "$d (the app saw the shut but did not bite)"; fi
 
-  # 3. REARM (ROUND-1 lists it after CREEP; it is the re-open that CREEP starts with). After the snap, back to 160.
-  r0=$(nlines "$HL")
-  hinge_sweep 160 0.6; sleep 1.5
+  # COVER: a screenshot while shut (the cover display's CHOMP card). The shot (~15 s) also makes the shut long.
+  shoot duo-h1-cover-shut cover
+  cb=$(brightness "$OUT_ABS/raw/duo-h1-cover-shut-cover.png")
+  d="cover panel brightness ${cb} (inner $(brightness "$OUT_ABS/raw/duo-h1-cover-shut-inner.png")); hinge ${CUR}°"
+  if [[ "$cb" =~ ^[0-9]+$ ]] && (( cb > 6 )); then verdict COVER PASS "$d"; else verdict COVER FAIL "$d (the cover panel was dark or not captured)"; fi
+
+  # REOPEN: rearmed after the reopen, and the clock frozen while shut (no wave started and no bug arrived between the
+  # bite and the re-arm, over the ~15 s shut; attract waves come every 3–4.5 s).
+  hinge_sweep 150 0.8; sleep 2
   if [[ -n "$sl" ]]; then
-    rl=$(first_line "$HL" "SNAP-T event rearmed" "$sl")
-    d="rearmed@${rl:-none} (snapped@$sl); armed after the re-open: $(after "$HL" "$r0" | trap_vals armed | tail -1)"
-    if [[ -n "$rl" ]]; then verdict REARM PASS "$d"; else verdict REARM FAIL "$d"; fi
+    rl=$(first_line "$BL" "SNAP-T event rearmed" "$sl")
+    ro=$(first_line "$BL" "SNAP-T reopened" "$sl")
+    frozen="?"
+    [[ -n "$rl" ]] && frozen=$(between "$BL" "$sl" "$rl" | grep -cE "SNAP-T event (waveStarted|bugArrived)")
+    d="rearmed@${rl:-none} (snapped@$sl); reopened line@${ro:-none}; waves/arrivals while shut: ${frozen}; armed after the reopen: $(after "$BL" "${rl:-$sl}" | trap_vals armed | tail -1)"
+    if [[ -n "$rl" && "$frozen" == 0 ]]; then verdict REOPEN PASS "$d"
+    elif [[ -n "$rl" ]]; then verdict REOPEN FAIL "$d (the clock ran while shut)"
+    else verdict REOPEN FAIL "$d (never rearmed)"; fi
   else
-    verdict REARM INCONCLUSIVE "no snap to re-arm from; rearmed lines in the run: $(count 'SNAP-T event rearmed' "$HL")"
+    verdict REOPEN INCONCLUSIVE "no bite to reopen from; rearmed lines in the run: $(count 'SNAP-T event rearmed' "$BL")"
   fi
-
-  # 2. CREEP: from 160 (the rest reference settles over 0.6 s; the wiggles keep samples flowing), 160 → 128 over 3 s
-  #    (~10.7°/s). The 0.6 s rest window absorbs part of a slow close, so the logged closure should sit around 6–7°
-  #    (over the 6° creep depth) and never reach 22°. The max closure is in the detail for exactly that reason.
-  hinge_wiggle 160 2
-  c0=$(nlines "$HL")
-  hinge_sweep 128 3 whole; sleep 1   # whole: chunks would let the rest reference settle between them
-  c1=$(nlines "$HL")
-  creeps=$(between "$HL" "$c0" "$c1" | trap_vals creep | grep -c '^1$')
-  cmax=$(between "$HL" "$c0" "$c1" | trap_vals closure | max_of)
-  spooked=$(between "$HL" "$c0" "$c1" | grep -c "SNAP-T event bugSpooked")
-  csl=$(first_line "$HL" "SNAP-T event snapped" "$c0"); [[ -n "$csl" && "$csl" -gt "$c1" ]] && csl=""
-  early=""
-  if [[ -n "$csl" ]]; then
-    cb=$(closure_before "$HL" "$csl"); ca=$(closure_after "$HL" "$csl")
-    near=$(printf '%s\n%s\n' "$cb" "$ca" | max_of)
-    { [[ "$near" == none ]] || lt "$near" 20; } && early="snapped@$csl at closure ~${near}° (before ${cb}, after ${ca})"
-  fi
-  d="creep-1 lines=$creeps; max closure ${cmax}°; spooked=$spooked; snapped in the window: ${csl:-none}${early:+; EARLY: $early}"
-  if (( creeps > 0 )) && [[ -z "$early" ]]; then verdict CREEP PASS "$d"; else verdict CREEP FAIL "$d"; fi
-  # CREEP-FAST (INFO): the same close over 1.5 s (~21°/s, still under the reference's 25°/s fall), closure ~13°.
-  hinge_sweep 160 1.0; sleep 1.5; hinge_wiggle 160 1
-  f0=$(nlines "$HL")
-  hinge_sweep 128 1.5; sleep 1
-  f1=$(nlines "$HL")
-  fsl=$(first_line "$HL" "SNAP-T event snapped" "$f0"); [[ -n "$fsl" && "$fsl" -gt "$f1" ]] && fsl=""
-  result CREEP-FAST INFO "160 → 128 over 1.5 s: creep-1 lines=$(between "$HL" "$f0" "$f1" | trap_vals creep | grep -c '^1$'); max closure $(between "$HL" "$f0" "$f1" | trap_vals closure | max_of)°; snapped: ${fsl:-none}$(simnote)"
-  hinge_sweep 160 1.0; sleep 1
+  shoot "duo-h2-reopened-150" inner
 }
 
-# 4. CLOSE-PAUSE (fresh launch at 150, on its own fresh Duo). First NO-PAUSE-95 (INFO): a hard snap often reaches
-#    90–100° on hardware and must never pause (the closing gate is θ < 50° for 0.6 s). Then on down to 40° →
-#    `paused closing`; back to 150 → `resumed`.
-check_close_pause() {
+# SLOW-CLOSE (its own fresh launch, the same seed): 150 → 5 over 2.5 s. PASS: fewer caught than BITE's fast close,
+# or escapes ≥ 1 (the flies fled the slow close).
+check_slow() {
   hinge_set 150
-  launch close-pause "screen=play;mode=attract;seed=7"
-  CP="$OUT_ABS/logs/close-pause.txt"
-  n0=$(nlines "$CP")
-  hinge_sweep 95 0.4; sleep 1.5
-  n1=$(nlines "$CP")
-  np=$(first_line "$CP" "SNAP-T paused" "$n0"); [[ -n "$np" && "$np" -gt "$n1" ]] && np=""
-  result NO-PAUSE-95 INFO "held 95° for 1.5 s: $( [[ -n "$np" ]] && echo "PAUSED at line $np: $(sed -n "${np}p" "$CP" | tr -d '\r')" || echo "no pause" ); last angle $(angle_before "$CP" $(( n1 + 1 )))°$(simnote)"
-  hinge_sweep 150 1.0; sleep 1.5
-  p0=$(nlines "$CP")
-  hinge_sweep 40 1.5; sleep 1.5
-  p=$(first_line "$CP" "SNAP-T paused closing" "$p0")
-  other=$(after "$CP" "$p0" | grep -m1 -oE "SNAP-T paused [a-zA-Z]+" | tr -d '\r')
-  shoot duo-h3-closing-40 inner
-  # A pause line can land in the log after the wait (sister duo run 40510297922), so look again after the shot (still
-  # before the reopen).
-  [[ -z "$p" ]] && p=$(first_line "$CP" "SNAP-T paused closing" "$p0")
-  [[ -z "$other" ]] && other=$(after "$CP" "$p0" | grep -m1 -oE "SNAP-T paused [a-zA-Z]+" | tr -d '\r')
-  went=150
-  hinge_sweep 150 1.5; sleep 2
-  r=""; [[ -n "$p" ]] && r=$(first_line "$CP" "SNAP-T resumed" "$p")
-  if [[ -n "$p" && -z "$r" ]]; then
-    # The cover display can stay lit up to ~150° on a reopen; go on to 165° (the known relight) and look again.
-    went=165; hinge_sweep 165 1; sleep 3
-    r=$(first_line "$CP" "SNAP-T resumed" "$p")
-  fi
-  d="paused@${p:-none} ($( [[ -n "$p" ]] && angle_before "$CP" "$p" || echo -)°; first pause line: ${other:-none}); reopened to ${went}°; resumed@${r:-none} ($( [[ -n "$r" ]] && angle_before "$CP" "$r" || echo -)°); $(canvas_line "$CP")"
-  if [[ -n "$p" && -n "$r" ]]; then verdict CLOSE-PAUSE PASS "$d"; else verdict CLOSE-PAUSE FAIL "$d"; fi
-  shoot "duo-h4-resumed-$went" inner
+  launch slow-close "screen=play;mode=attract;seed=7"
+  SL="$OUT_ABS/logs/slow-close.txt"
+  round_open "$SL" 150
+  if wait_for "$SL" "SNAP-T event bugSipping" 40; then sip="a bug was sipping"; else sip="no bugSipping in 40 s"; fi
+  hinge_wiggle 150 2
+  c0=$(nlines "$SL")
+  hinge_sweep 5 2.5 whole; sleep 1.5
+  c1=$(nlines "$SL")
+  sl=$(first_line "$SL" "SNAP-T event snapped" "$c0")
+  snapline=$( [[ -n "$sl" ]] && sed -n "${sl}p" "$SL" | tr -d '\r' )
+  caught=$(grep -oE 'caught=[0-9]+' <<<"$snapline" | head -1 | cut -d= -f2)
+  esc=$(grep -oE 'escaped=[0-9]+' <<<"$snapline" | head -1 | cut -d= -f2)
+  spooked=$(between "$SL" "$c0" "$c1" | grep -c "SNAP-T event bugSpooked")
+  slowc=$(between "$SL" "$c0" "$c1" | trap_vals creep | grep -c '^1$')
+  d="$sip; ${snapline:-no snapped line}; fled the close (bugSpooked) $spooked; slow-close (creep 1) lines $slowc; the fast close caught ${BITE_CAUGHT:-?}"
+  if [[ -z "$sl" ]]; then
+    minA=$(between "$SL" "$c0" "$c1" | trap_vals angle | min_of)
+    if [[ "$minA" == none ]] || ! lt "$minA" 40; then verdict SLOW-CLOSE INCONCLUSIVE "$d (no angle under 40° logged)"
+    else verdict SLOW-CLOSE FAIL "$d (shut, but no bite)"; fi
+  elif (( ${esc:-0} >= 1 )) || { [[ -n "$BITE_CAUGHT" ]] && (( ${caught:-0} < BITE_CAUGHT )); }; then
+    verdict SLOW-CLOSE PASS "$d"
+  else verdict SLOW-CLOSE FAIL "$d (a slow close lost nothing)"; fi
+  hinge_sweep 150 1.0; sleep 1
+}
+
+# NO-BITE-DEEP (its own fresh launch): 150 → 60 → 150. PASS: no snapped event, however deep the partial close.
+check_nobite() {
+  hinge_set 150
+  launch no-bite-deep "screen=play;mode=attract;seed=7"
+  NL="$OUT_ABS/logs/no-bite-deep.txt"
+  round_open "$NL" 150
+  wait_for "$NL" "SNAP-T event bugSipping" 30 || log "WARN no-bite-deep: no bugSipping in 30 s (closing anyway)"
+  hinge_wiggle 150 2
+  n0=$(nlines "$NL")
+  hinge_sweep 60 0.5; sleep 1.2
+  hinge_sweep 150 0.6; sleep 1.5
+  n1=$(nlines "$NL")
+  nsl=$(first_line "$NL" "SNAP-T event snapped" "$n0"); [[ -n "$nsl" && "$nsl" -gt "$n1" ]] && nsl=""
+  minA=$(between "$NL" "$n0" "$n1" | trap_vals angle | min_of)
+  maxc=$(between "$NL" "$n0" "$n1" | trap_vals closure | max_of)
+  d="snapped in the window: ${nsl:-none}; min angle ${minA}°, max closure ${maxc}°; fled (bugSpooked) $(between "$NL" "$n0" "$n1" | grep -c 'SNAP-T event bugSpooked')"
+  if [[ -n "$nsl" ]]; then verdict NO-BITE-DEEP FAIL "$d ($(sed -n "${nsl}p" "$NL" | tr -d '\r'))"
+  elif [[ "$minA" == none ]] || ! lt "$minA" 100; then verdict NO-BITE-DEEP INCONCLUSIVE "$d (the close never logged under 100°)"
+  else verdict NO-BITE-DEEP PASS "$d"; fi
 }
 
 if [[ " $PASSES " == *" hinge "* ]]; then
-  run_check hinge check_hinge
-  run_check close-pause check_close_pause
+  run_check bite check_bite
+  run_check slow-close check_slow
+  run_check no-bite-deep check_nobite
 fi
 
 # ---- pass: the book-pose frames (open 165, half closed 150, snapped 130, cover shut, reopened, pose card) ---------
@@ -761,6 +788,7 @@ if [[ " $PASSES " == *" frames "* ]]; then
   # Attract runs on the real hinge (no pilot: the hinge drives the jaws; snaps never run out).
   hinge_set 165
   launch frames-open "screen=play;mode=attract;seed=7"
+  round_open "$OUT_ABS/logs/frames-open.txt" 165
   sleep 3; shoot duo-01-open-165 inner
   # The drawn closure is relative to the player's own rest angle (it falls back to 0 within ~1 s of any still hold,
   # and a shot takes ~15 s), so the half-closed frame holds the jaws at 11° (half the 22° snap) with `closure=11`,
@@ -768,17 +796,19 @@ if [[ " $PASSES " == *" frames "* ]]; then
   hinge_sweep 150 2
   launch frames-half "screen=play;mode=attract;seed=7;closure=11"
   sleep 2; shoot duo-02-half-150 inner
-  # The bite itself: `freezeOn=snap` stops the session 0.12 s after the bite (the scene keeps drawing the jaw slam),
-  # and the inner panel is shot the moment `SNAP-T freeze snap` is logged. R5: a hinge launch, so on a fresh Duo with
+  # The bite itself (R8: at the shut, so the cover panel): `freezeOn=snap` stops the session 0.12 s after the bite,
+  # and the panels are shot once `SNAP-T freeze snap` is logged. R5: a hinge launch, so on a fresh Duo with
   # whole retries (run 40634483657 lost it to a hung hinge call).
   frame_snap() {
     hinge_set 160
     launch frames-snap "screen=play;mode=attract;seed=7;freezeOn=snap"
     FS="$OUT_ABS/logs/frames-snap.txt"
     wait_for "$FS" "SNAP-T event bugSipping" 40 || log "WARN frames-snap: no bugSipping in 40 s (snapping anyway)"
-    snap_once "$FS" 130
+    round_open "$FS" 160
+    wait_for "$FS" "SNAP-T event bugSipping" 30 || log "WARN frames-snap: no bugSipping after the round opened"
+    bite_once "$FS" 5 0.3
     if wait_for "$FS" "SNAP-T freeze snap" 3; then fz="froze on the snap"; else fz="no 'SNAP-T freeze snap' within 3 s"; fi
-    shoot_now duo-03-snapped-130
+    shoot duo-03-bite-shut cover
     result FRAME-SNAP INFO "$fz; $(grep -m1 -E 'SNAP-T event snapped' "$FS" | tr -d '\r' || echo 'no snapped line')$(simnote)"
   }
   run_check frames-snap frame_snap
@@ -786,10 +816,11 @@ if [[ " $PASSES " == *" frames "* ]]; then
   hinge_set 160
   launch frames-cover "screen=play;mode=attract;seed=7"
   FC="$OUT_ABS/logs/frames-cover.txt"
+  round_open "$FC" 160
   hinge_sweep 60 1.5; hinge_sweep 10 0.6; hinge_set 0; sleep 3; shoot duo-04-cover-shut cover
   o0=$(nlines "$FC")
   hinge_sweep 165 2.5; sleep 3; shoot duo-05-reopened-165 inner
-  result COVER INFO "paused lines=$(count 'SNAP-T paused' "$FC"); resumed after the reopen: $(first_line "$FC" "SNAP-T resumed" "$o0" | grep . || echo none); $(canvas_line "$FC")$(simnote)"
+  result SHUT-FRAMES INFO "bites $(count 'SNAP-T event snapped' "$FC"); shut lines $(count 'SNAP-T shut ' "$FC"); rearmed after the reopen: $(first_line "$FC" "SNAP-T event rearmed" "$o0" | grep . || echo none); $(canvas_line "$FC")$(simnote)"
   # The pose card ("Hold it open like a book"). The Duo sim stays in book pose (no CLI rotate), so the card is shown
   # with `screen=pose`; a real portrait frame needs the app's own orientation request (none in R1).
   launch frames-pose "screen=pose"
@@ -801,39 +832,39 @@ fi
 if [[ " $PASSES " == *" ui "* ]]; then
   hinge_set 160 || true
   launch ui-home "screen=home;progress=mid"; shoot duo-ui-home-160 inner
-  # First Bite step 1 (pose) passes when 125° ≤ θ ≤ 176° for 0.6 s, so at 160° it should pass by itself.
-  launch ui-lesson-1 "screen=lesson;lessonStep=1"; sleep 2; shoot duo-ui-lesson-1-160 inner
-  launch ui-lesson-2 "screen=lesson;lessonStep=2"; sleep 3; shoot duo-ui-lesson-2 inner
-  # R5 (REVIEW-4 #11, Duo P1-3): lesson steps 2 and 3 with `fold=1` and the real hinge, played the way a player gets
-  # there: step 1 (pose) passes at 160°, step 2 is shot with its fly sipping, a hinge snap (160 → 128) moves it to
-  # step 3 ("Open up…"), shot at 128°, and the reopen to 160° moves it to step 4. (Run 40634483657: a launch straight
-  # into lessonStep=2 logs "tap to snap!", because the step starts before the first hinge sample; via step 1 it says
-  # "snap shut!".) A hinge launch: a fresh Duo and whole retries.
-  lesson_hinge() {
+  # R8 (app-R8.md): the lesson is gone; Levels 1–5 teach. The level map, a level's intro card, a level's results.
+  launch ui-levels "screen=levels;progress=mid"; sleep 2; shoot duo-ui-levels inner
+  launch ui-level-intro "screen=levelIntro;level=1"; sleep 2; shoot duo-ui-level-intro-1 inner
+  launch ui-level-results "screen=levelResults;level=1;pilot=perfect"
+  wait_for "$OUT_ABS/logs/ui-level-results.txt" "SNAP-T level result " 60 || log "WARN ui-level-results: no 'SNAP-T level result' in 60 s"
+  sleep 2; shoot duo-ui-level-results-1 inner
+  result LEVEL-RESULT INFO "$(grep -m1 'SNAP-T level result ' "$OUT_ABS/logs/ui-level-results.txt" | tr -d '\r' | grep . || echo 'no level result line')$(simnote)"
+  # R8 (founder rule 3): "Close the phone to start": a hinge round launched with the Duo open waits for the shut.
+  close_start() {
     hinge_set 160 || true
-    launch ui-lesson-hinge "screen=lesson;lessonStep=1;fold=1"
-    LH="$OUT_ABS/logs/ui-lesson-hinge.txt"
-    wait_for "$LH" "SNAP-T lesson step 2 " 20 || log "WARN ui-lesson-hinge: no 'SNAP-T lesson step 2' in 20 s (the pose step did not pass at 160°?)"
-    wait_for "$LH" "SNAP-T event bugSipping" 30 || log "WARN ui-lesson-hinge: no bugSipping in 30 s (snapping anyway)"
-    shoot duo-ui-lesson-2-hinge-160 inner
-    snap_once "$LH" 128
-    wait_for "$LH" "SNAP-T lesson step 3 " 5 || log "WARN ui-lesson-hinge: no 'SNAP-T lesson step 3' within 5 s of the hinge snap"
-    sleep 1; shoot duo-ui-lesson-3-hinge-128 inner
-    hinge_sweep 160 1.0
-    wait_for "$LH" "SNAP-T lesson step 4 " 6 || log "WARN ui-lesson-hinge: no 'SNAP-T lesson step 4' within 6 s of the reopen"
-    sleep 1; shoot duo-ui-lesson-4-hinge-160 inner
-    lsn=$(first_line "$LH" "SNAP-T event snapped" "$S0")
-    result LESSON-HINGE INFO "step 2: $(grep 'SNAP-T lesson step 2 ' "$LH" | tail -1 | tr -d '\r' | grep . || echo none); hinge snap: $( [[ -n "$lsn" ]] && sed -n "${lsn}p" "$LH" | tr -d '\r' || echo 'no snapped line'); step 3: $(grep 'SNAP-T lesson step 3 ' "$LH" | tail -1 | tr -d '\r' | grep . || echo none); after the reopen: $(grep 'SNAP-T lesson step 4 ' "$LH" | tail -1 | tr -d '\r' | grep . || echo none); input $(input_of "$LH"); $(canvas_line "$LH")$(simnote)"
+    launch ui-close-to-start "screen=play;mode=attract;seed=7"
+    CS="$OUT_ABS/logs/ui-close-to-start.txt"
+    sleep 3; shoot duo-ui-close-to-start-160 inner
+    result CLOSE-TO-START INFO "waves before the first shut: $(count 'SNAP-T event waveStarted' "$CS") (want 0); input $(input_of "$CS")$(simnote)"
+    # Then shut and open: the round starts.
+    round_open "$CS" 160
+    sleep 2; shoot duo-ui-round-open-160 inner
+    result ROUND-OPEN INFO "$ROUND_DETAIL; waves after it opened: $(count 'SNAP-T event waveStarted' "$CS")$(simnote)"
   }
-  run_check ui-lesson-hinge lesson_hinge
+  run_check ui-close-to-start close_start
   hinge_set 160 || true
   launch ui-results "screen=results;seed=7;progress=mid;pilot=casual"; sleep 3; shoot duo-ui-results inner
   launch ui-book "screen=book;progress=late"; sleep 2; shoot duo-ui-book inner
   launch ui-settings "screen=settings"; sleep 2; shoot duo-ui-settings inner
-  # Too flat (θ ≥ 174° at the start of play): "Bend it a little, like a book", no penalty.
+  # R8 (founder rule 2): no pose demands: a flat Duo plays like any other angle.
   hinge_set 178 || true
-  launch ui-too-flat "screen=play;mode=attract;seed=7"; sleep 2; shoot duo-ui-too-flat-178 inner
+  launch ui-flat "screen=play;mode=attract;seed=7"; round_open "$OUT_ABS/logs/ui-flat.txt" 178; sleep 2; shoot duo-ui-flat-178 inner
   hinge_sweep 160 1.5
+  # R8: the outer display's CHOMP card (app-R8.md `screen=chomp`), the Duo shut.
+  launch ui-chomp "screen=chomp;chomp=catch"
+  hinge_sweep 60 1.5; hinge_sweep 10 0.6; hinge_set 0 || true; sleep 3; shoot duo-ui-chomp-card cover
+  result CHOMP-CARD INFO "$(grep -m1 'SNAP-T chomp card' "$OUT_ABS/logs/ui-chomp.txt" | tr -d '\r' | grep . || echo 'no chomp card line')$(simnote)"
+  hinge_sweep 165 1.5; sleep 2
   launch ui-cover "screen=home;progress=mid"
   hinge_sweep 40 1.5; hinge_set 0; sleep 3; shoot duo-ui-cover cover
   hinge_set 160 || true
@@ -841,7 +872,7 @@ fi
 
 # ---- pass: the App Store Duo set (ci/duo-scenarios.txt) ------------------------------------------------------------
 # One book-pose launch per line of STORE_LIST (name|demo args|wait|caption|expect), the hinge held at STORE_ANGLE (150°:
-# open, so no closing pause; the pilot drives the trap itself). A freezeOn= line waits for "SNAP-T freeze <tag>" (at
+# open; the pilot drives the trap itself, and a hinge round without a pilot waits for its first shut: R8). A freezeOn= line waits for "SNAP-T freeze <tag>" (at
 # least `wait`, at least 20 s), a freezeAfter= line for any "SNAP-T freeze" line, then 2 s for the held frame; others
 # wait `wait` s. Writes store-<name>.png (the lit panel) and logs/store-<name>.at-capture.txt (the log at capture).
 # R5 CI-only keys (stripped before launch): `ciHinge=<deg>` moves the hinge there after the launch (under 30°: closed

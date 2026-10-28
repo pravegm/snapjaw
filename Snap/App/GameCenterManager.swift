@@ -90,8 +90,8 @@ final class GameCenterManager {
             if scored && outcome.dailyCounted && score > 0 {
                 queueScore(score, leaderboard: Leaderboard.daily, day: day)
             }
-        case .zen:
-            // R6: the Zen Bog has no leaderboard; its achievements still count.
+        case .zen, .level:
+            // R6: the Zen Bog has no leaderboard (R8: nor a level); its achievements still count.
             break
         case .attract, .lesson:
             return

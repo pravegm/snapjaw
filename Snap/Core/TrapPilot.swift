@@ -3,19 +3,22 @@ import Foundation
 
 // MARK: - The simulated player (attract mode, CI frames, balance tests)
 //
-// It only sees what a player sees (the snapshot) and drives the trap's closure the way hands would: a snap is a
-// linear close at 18° per `duration` (so the 4° → 22° crossing takes exactly `duration`), an overshoot to 28°, a
-// 0.15 s hold and a 0.35 s reopen; it re-arms 16° above the peak, like the detector. Deterministic with its seed.
-// - Decisions (ROUND-1 "TrapPilot", R2 casual): novice snaps on any landed bug; casual waits for 3 landed, or 2 with
-//   nothing else flying in (or 1 worth ≥ 20, or 7 s), and fumbles 30 % of its snaps (a slow 0.3–0.45 s close);
-//   expert waits for 3 it can catch at its speed, or value ≥ 120, or 2 with one about to leave, or 6 s; perfect waits
-//   for 5, or 3 with nothing else about to land, or value ≥ 400, or 7 s. Each decision waits a human reaction delay
-//   and is re-checked before the stroke. R4: expert and perfect also bite any landed bug after Tuning.pilotGiveUp
-//   (12 s) without a snap, even one they judge too quick (hands never wait for ever).
+// It only sees what a player sees (the snapshot) and drives the trap the way hands would. R8 (ROUND-8 §1–§2): it closes
+// the whole phone. Its angle is Tuning.pilotIdleAngle (150°) − closure; a close runs at a steady rate so the stretch
+// from Tuning.closeStart to the shut (θ = Tuning.shutAngle) takes exactly the planned close time (the SnapTrigger's
+// duration, fired at the shut), on to Tuning.pilotShutAngle; it holds shut, then reopens over the reopen time (armed
+// again at Tuning.armAngle, idle at the top). Deterministic with its seed.
+// - Close times by skill (ROUND-8 §2): novice 0.6–1.1 s, casual 0.35–0.65 s, expert 0.2–0.35 s, perfect 0.18 s; it
+//   holds shut 0.3–0.6 / 0.2–0.4 / 0.15–0.3 / 0.15 s and reopens over 0.6–0.8 / 0.5–0.7 / 0.4–0.6 / 0.4 s.
+// - Decisions (ROUND-1 "TrapPilot"): R8 novice waits for 2 landed (or 1 after Tuning.novicePatience s); casual waits for
+//   3 landed, or 2 with nothing else flying in (or 1 worth ≥ 20, or 7 s); expert waits for 3 it can catch at its speed
+//   (TrapRules.modelExposure within the reaction), or value ≥ 120, or 2 with one about to leave, or 6 s; perfect waits
+//   for 5, or 3 with nothing else about to land, or value ≥ 400, or 7 s. Each decision waits a human reaction delay and
+//   is re-checked before the stroke. R4: expert and perfect also bite any landed bug after Tuning.pilotGiveUp (12 s).
 // - Bees: each protected bug in the trap is rolled once: missed (ignored) with novice 0.6, casual 0.25, expert 0.02;
 //   perfect never misses and also waits while a protected bug is flying low over the trap.
-// - The novice sometimes creeps (a slow 12° close over 1.2 s before finishing the snap). The expert shoos a bee that
-//   has sat in the trap for 5 s with a slow 11° creep (bugs with nerve ≤ the creep depth leave) and reopens.
+// - R8: the expert and perfect shoo a bee that has sat in the trap (5 s / at once) with a partial close to
+//   Tuning.shooDepth° of closure, held until it has gone (at most Tuning.shooHoldMax), then reopen. It never bites.
 // - R3 (REVIEW-2 #21): deterministic. Its only randomness is its SeededRandom and its only clock is the sum of its dt,
 //   so the same seed and the same dts give the same run; PilotRun steps a pilot and a session in fixed
 //   Tuning.pilotStep steps, so a CI capture is the same run whatever the display's frame times.
@@ -33,28 +36,32 @@ struct PilotOutput: Equatable {
 struct TrapPilot {
 
     private struct Profile {
-        var durationMin: Double
-        var durationMax: Double
+        var closeMin: Double
+        var closeMax: Double
         var delayMin: Double
         var delayMax: Double
+        var holdMin: Double
+        var holdMax: Double
+        var reopenMin: Double
+        var reopenMax: Double
         var beeMiss: Double
 
         static func of(_ skill: PilotSkill) -> Profile {
             switch skill {
-            case .novice: return Profile(durationMin: 0.22, durationMax: 0.40, delayMin: 0.35, delayMax: 0.6,
-                                         beeMiss: Tuning.noviceBeeMiss)
-            case .casual: return Profile(durationMin: 0.14, durationMax: 0.24, delayMin: 0.25, delayMax: 0.45,
-                                         beeMiss: Tuning.casualBeeMiss)
-            case .expert: return Profile(durationMin: 0.10, durationMax: 0.15, delayMin: 0.15, delayMax: 0.3,
-                                         beeMiss: Tuning.expertBeeMiss)
-            case .perfect: return Profile(durationMin: 0.08, durationMax: 0.08, delayMin: 0.1, delayMax: 0.1,
-                                          beeMiss: 0)
+            case .novice: return Profile(closeMin: 0.6, closeMax: 1.1, delayMin: 0.35, delayMax: 0.6, holdMin: 0.3,
+                                         holdMax: 0.6, reopenMin: 0.6, reopenMax: 0.8, beeMiss: Tuning.noviceBeeMiss)
+            case .casual: return Profile(closeMin: 0.35, closeMax: 0.65, delayMin: 0.25, delayMax: 0.45, holdMin: 0.2,
+                                         holdMax: 0.4, reopenMin: 0.5, reopenMax: 0.7, beeMiss: Tuning.casualBeeMiss)
+            case .expert: return Profile(closeMin: 0.2, closeMax: 0.35, delayMin: 0.15, delayMax: 0.3, holdMin: 0.15,
+                                         holdMax: 0.3, reopenMin: 0.4, reopenMax: 0.6, beeMiss: Tuning.expertBeeMiss)
+            case .perfect: return Profile(closeMin: 0.18, closeMax: 0.18, delayMin: 0.1, delayMax: 0.1, holdMin: 0.15,
+                                          holdMax: 0.15, reopenMin: 0.4, reopenMax: 0.4, beeMiss: 0)
             }
         }
     }
 
     private enum Stage {
-        case idle, down, hold, up, shoo
+        case idle, down, hold, up, shoo, shooHold
     }
 
     private struct View {
@@ -66,21 +73,32 @@ struct TrapPilot {
         var restless: Double = 0
     }
 
+    /// R8: the closure at the shut (θ = shutAngle), at the bottom of the close, and at the re-arm (θ = armAngle).
+    static var shutClosure: Double { return Tuning.pilotIdleAngle - Tuning.shutAngle }
+    static var fullClosure: Double { return Tuning.pilotIdleAngle - Tuning.pilotShutAngle }
+    static var armClosure: Double { return Tuning.pilotIdleAngle - Tuning.armAngle }
+
     let skill: PilotSkill
     /// R5 (REVIEW-4 P2): false switches off the Tuning.pilotGiveUp rule (the player model, not the game). The balance
     /// report runs expert and perfect both ways; everything else keeps the default.
     var givesUp: Bool = true
+    /// R8 (ROUND-8 §4): a level goal of one bite of n: wait for n (landed for novice and casual, catchable for expert
+    /// and perfect), never bite fewer. 0: off.
+    var minBite: Int = 0
+    /// R8: a level goal's species: one of them landed (novice, casual) or catchable (expert, perfect) is worth a bite.
+    var targets: [BugSpecies] = []
     private let profile: Profile
     private var rng: SeededRandom
     private var stage: Stage = .idle
     private var closure: Double = 0
     private var armed: Bool = true
     private var el: Double = 0
-    private var duration: Double = 0.2
-    private var creepy: Bool = false
+    private var duration: Double = 0.3
+    private var hold: Double = 0.2
+    private var reopen: Double = 0.5
     private var peak: Double = 0
-    private var t4: Double? = nil
-    private var t6: Double? = nil
+    private var tStart: Double? = nil
+    private var closeSince: Double? = nil
     private var decideAt: Double? = nil
     private var beeSince: Double? = nil
     private var missed: [Int: Bool] = [:]
@@ -95,7 +113,7 @@ struct TrapPilot {
         let p: Profile = Profile.of(skill)
         self.profile = p
         self.rng = SeededRandom(seed: seed)
-        self.plannedDuration = p.durationMin
+        self.plannedDuration = p.closeMin
     }
 
     private static func isLanded(_ a: BugActivity) -> Bool {
@@ -110,13 +128,14 @@ struct TrapPilot {
         return false
     }
 
+    /// A draw in lo…hi (no draw when they are equal, as in the sim).
+    private mutating func pick(_ lo: Double, _ hi: Double) -> Double {
+        if lo == hi { return lo }
+        return rng.between(lo, hi)
+    }
+
     private mutating func planDuration() -> Double {
-        // R2: a casual hand sometimes fumbles a snap (slow), which is what breaks its chains besides the bees.
-        if skill == .casual && rng.chance(Tuning.casualFumbleChance) {
-            return rng.between(Tuning.casualFumbleMin, Tuning.casualFumbleMax)
-        }
-        if profile.durationMin == profile.durationMax { return profile.durationMin }
-        return rng.between(profile.durationMin, profile.durationMax)
+        return pick(profile.closeMin, profile.closeMax)
     }
 
     /// A protected bug sitting in the trap (landed): what a shoo can clear.
@@ -149,6 +168,7 @@ struct TrapPilot {
         return false
     }
 
+    /// R8: a bug counts as catchable when the planned close's modelled exposure is within its reaction time.
     private func view(_ snap: TrapSnapshot, _ d: Double) -> View {
         var v = View()
         var sum: Int = 0
@@ -172,7 +192,7 @@ struct TrapPilot {
             // R6: the session's pace wave (the Zen Bog never speeds up).
             let r: Double = TrapRules.reaction(info, sipping: sipping, flying: TrapRules.isFlying(a), onRim: b.onRim,
                                                wave: TrapRules.paceWave(snap.wave, mode: snap.mode))
-            if d <= r {
+            if TrapRules.modelExposure(nerve: info.nerve, duration: d) <= r {
                 v.catchable += 1
                 sum += info.points
             }
@@ -181,13 +201,41 @@ struct TrapPilot {
         return v
     }
 
+    /// R8: how many target-species bugs are landed (novice, casual) or catchable at `d` (expert, perfect).
+    private func targetCount(_ snap: TrapSnapshot, _ d: Double) -> Int {
+        if targets.isEmpty { return 0 }
+        var k: Int = 0
+        for b in snap.bugs where b.inTrap && targets.contains(b.species) {
+            let a: BugActivity = b.activity
+            if skill == .novice || skill == .casual {
+                if TrapPilot.isLanded(a) { k += 1 }
+                continue
+            }
+            if TrapPilot.isArriving(a) && b.height >= Tuning.catchableHeight { continue }
+            if !TrapRules.isCandidate(a, height: b.height) { continue }
+            let info: BugInfo = BugCatalog.info(b.species)
+            var sipping: Bool = false
+            if case .sipping = a { sipping = true }
+            let r: Double = TrapRules.reaction(info, sipping: sipping, flying: TrapRules.isFlying(a), onRim: b.onRim,
+                                               wave: TrapRules.paceWave(snap.wave, mode: snap.mode))
+            if TrapRules.modelExposure(nerve: info.nerve, duration: d) <= r { k += 1 }
+        }
+        return k
+    }
+
     private mutating func wants(_ snap: TrapSnapshot, _ time: Double) -> Bool {
         let v: View = view(snap, plannedDuration)
         let waited: Double = time - lastSnap
         var want: Bool = false
+        if minBite > 0 {
+            let count: Int = (skill == .novice || skill == .casual) ? v.landed : v.catchable
+            if count < minBite { return false }
+            return !beeBlocks(snap)
+        }
+        if targetCount(snap, plannedDuration) >= 1 { return !beeBlocks(snap) }
         switch skill {
         case .novice:
-            want = v.landed >= 1
+            want = v.landed >= 2 || (v.landed >= 1 && waited >= Tuning.novicePatience)
         case .casual:
             want = v.landed >= 3 || (v.landed >= 2 && v.arriving == 0) || (v.landed >= 1 && v.maxPoints >= 20)
                 || (v.landed >= 1 && waited >= Tuning.casualPatience)
@@ -230,7 +278,6 @@ struct TrapPilot {
                 if shooAfter > 0, let since = beeSince, time - since >= shooAfter {
                     stage = .shoo
                     el = 0
-                    peak = Tuning.shooDepth
                     decideAt = nil
                     beeSince = nil
                 } else if let at = decideAt {
@@ -240,70 +287,73 @@ struct TrapPilot {
                             stage = .down
                             el = 0
                             duration = plannedDuration
-                            t4 = nil
-                            creepy = skill == .novice && rng.chance(Tuning.noviceCreepChance)
-                            peak = Tuning.snapDepth + Tuning.pilotOvershoot
+                            tStart = nil
+                            hold = pick(profile.holdMin, profile.holdMax)
+                            reopen = pick(profile.reopenMin, profile.reopenMax)
                             plannedDuration = planDuration()
                         }
                     }
                 } else if wants(snapshot, time) {
-                    let delay: Double = profile.delayMin == profile.delayMax ? profile.delayMin
-                        : rng.between(profile.delayMin, profile.delayMax)
-                    decideAt = time + delay
+                    decideAt = time + pick(profile.delayMin, profile.delayMax)
                 }
             }
         case .shoo:
             el += h
-            closure = min(peak, peak * el / Tuning.shooTime)
-            if let since = t6, time - since >= Tuning.creepDwell + Tuning.shooHold {
+            closure = min(Tuning.shooDepth, Tuning.shooDepth * el / Tuning.shooTime)
+            if el >= Tuning.shooTime {
+                stage = .shooHold
+                el = 0
+            }
+        case .shooHold:
+            el += h
+            if !beeSitting(snapshot) || el >= Tuning.shooHoldMax {
                 stage = .up
                 el = 0
+                peak = closure
+                reopen = pick(profile.reopenMin, profile.reopenMax)
             }
         case .down:
             el += h
-            let rate: Double = (Tuning.snapDepth - Tuning.snapStartDepth) / max(1e-6, duration)
-            if creepy && closure < Tuning.noviceCreepDepth && el <= Tuning.noviceCreepTime {
-                closure = min(Tuning.noviceCreepDepth, Tuning.noviceCreepDepth * el / Tuning.noviceCreepTime)
-            } else {
-                closure = min(peak, closure + rate * h)
+            let rate: Double = (TrapPilot.shutClosure - Tuning.closeStart) / max(1e-6, duration)
+            closure = min(TrapPilot.fullClosure, closure + rate * h)
+            if tStart == nil && closure >= Tuning.closeStart {
+                tStart = SnapDetector.crossing(time - h, prev, time, closure, Tuning.closeStart)
             }
-            if t4 == nil && closure >= Tuning.snapStartDepth {
-                t4 = time - h + h * (Tuning.snapStartDepth - prev) / max(1e-9, closure - prev)
-            }
-            if armed && closure >= Tuning.snapDepth {
-                let t22: Double = time - h + h * (Tuning.snapDepth - prev) / max(1e-9, closure - prev)
-                let start: Double = t4 ?? t22
-                fired = SnapTrigger(duration: max(0, t22 - start), time: stamp.isFinite ? stamp : time)
+            if armed && closure >= TrapPilot.shutClosure {
+                let tShut: Double = SnapDetector.crossing(time - h, prev, time, closure, TrapPilot.shutClosure)
+                let start: Double = tStart ?? tShut
+                fired = SnapTrigger(duration: max(0, tShut - start), time: stamp.isFinite ? stamp : time)
                 armed = false
                 lastSnap = time
             }
-            if closure >= peak {
+            if closure >= TrapPilot.fullClosure {
                 stage = .hold
                 el = 0
             }
         case .hold:
             el += h
-            if el >= Tuning.pilotHold {
+            if el >= hold {
                 stage = .up
                 el = 0
+                peak = closure
             }
         case .up:
             el += h
-            closure = max(0, peak * (1 - el / Tuning.pilotReopen))
-            if !armed && closure <= peak - Tuning.rearmRise { armed = true }
+            closure = max(0, peak * (1 - el / max(1e-6, reopen)))
+            if !armed && closure <= TrapPilot.armClosure { armed = true }
             if closure <= 0 {
                 stage = .idle
                 closure = 0
                 armed = true
             }
         }
-        if closure > Tuning.creepDepth && armed {
-            if t6 == nil { t6 = time }
+        if armed && closure >= Tuning.closeStart {
+            if closeSince == nil { closeSince = time }
         } else {
-            t6 = nil
+            closeSince = nil
         }
         var creeping: Bool = false
-        if let since = t6, armed, time - since >= Tuning.creepDwell { creeping = true }
+        if let since = closeSince, time - since > Tuning.slowCloseAfter { creeping = true }
         let input = TrapInput(closure: closure, armed: armed, creeping: creeping, snap: fired, tooFlat: false,
                               angle: Tuning.pilotIdleAngle - closure)
         return PilotOutput(input: input)

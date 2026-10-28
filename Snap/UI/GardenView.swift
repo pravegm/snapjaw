@@ -41,11 +41,11 @@ struct GardenView: View {
         let grown = data.unlockedVarieties
         let chosen = controller.trapVariety
         return VStack(alignment: .leading, spacing: c ? 6 : 10) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .bottom) {
                 if header {
-                    Text(Self.title)
-                        .font(SnapType.title(c))
-                        .foregroundStyle(SnapTheme.cream)
+                    // R8: the display type.
+                    DisplayText(text: Self.title, size: c ? 32 : 44, tilt: -2)
+                        .fixedSize()
                     Text(Self.countLine(data))
                         .font(SnapType.body(c))
                         .foregroundStyle(SnapTheme.mist)

@@ -123,9 +123,10 @@ public struct BugInfo: Codable, Hashable, Sendable {
     public var name: String            // "Housefly"
     public var joke: String            // one short line for the Bug Book
     public var points: Int             // 0 for protected bugs
-    /// Seconds: a snap faster than this catches it (before the sipping / flying / rim factors).
+    /// Seconds: R8, how long it takes to flee once startled (before the sipping / flying / rim factors). A bug still in
+    /// the trap at the shut is caught.
     public var reaction: Double
-    /// Degrees of slow closure (creep) it tolerates before leaving.
+    /// R8: its startle depth: degrees of closure at which it starts to flee (nervy flies ~12°, ants and beetles ~45°).
     public var nerve: Double
     /// Art radius in points (touch-free; cosmetic and for crowd spacing).
     public var radius: CGFloat
@@ -211,6 +212,10 @@ public enum RunMode: Codable, Hashable, Sendable {
     /// R6 Zen Bog: a relaxed run that never ends (snaps never run out, no hunger); no leaderboard; still fills the Bug
     /// Book and the goals.
     case zen
+    /// R8 (ROUND-8 §4): hand-made level `id` (1…30, `LevelBook.all`): a scripted bug set, a bite and/or time limit, one
+    /// goal and 1–3 stars (`LevelBook.evaluate`). Build its session with `LevelBook.session(...)` or
+    /// `SessionOptions.for(.level(id))`.
+    case level(Int)
 }
 
 // MARK: Trap varieties (R6, cosmetic; the Garden)
@@ -223,9 +228,19 @@ public enum TrapVariety: String, Codable, CaseIterable, Sendable {
 
 // MARK: Input
 
-/// A snap as detected by the input (hinge: `SnapDetector`; touch: a tap).
+/// R8: what the iPhone Duo's hinge says about itself (`DeviceHinge.status`), passed through with each sample. Hardware
+/// reads `.closed` from about 85°, so Core only trusts it at a low angle (`Tuning.statusShutAngle`).
+public enum TrapHingeStatus: Equatable, Sendable {
+    case closed, partiallyOpen, fullyOpen
+    /// No status (no hinge, the simulator's CLI, or an older caller).
+    case unknown
+}
+
+/// The bite (hinge: `SnapDetector`; touch: a tap). R8 (ROUND-8 §1): it fires once per close, at the moment the phone
+/// SHUTS (θ ≤ `Tuning.shutAngle`, or the status `.closed` low enough), never on a partial close.
 public struct SnapTrigger: Equatable, Sendable {
-    /// Seconds from the snap start (closure 4°) to the bite (closure `Tuning.snapDepth`). Touch: `Tuning.touchSnapTime`.
+    /// R8: the close time: seconds from the close's start (closure passing `Tuning.closeStart`, 8°) to the shut.
+    /// Touch: `Tuning.touchSnapTime` (an instant bite).
     public var duration: Double
     /// The time it fired (CACurrentMediaTime clock).
     public var time: Double
@@ -234,15 +249,17 @@ public struct SnapTrigger: Equatable, Sendable {
 
 /// The trap as the game sees it, once per frame.
 public struct TrapInput: Equatable, Sendable {
-    /// Degrees closed from the player's rest reference (0 = open). Drives the drawn teeth.
+    /// Degrees closed from the open reference (0 = open; R8: continuous, up to ~145° at the shut). Drives the bugs'
+    /// fear and the Scene's closing cues. While shut (after a bite) it is measured from the reference at the bite.
     public var closure: Double
-    /// The trap is open and ready to bite.
+    /// The trap is open and ready to bite (R8: θ has reached `Tuning.armAngle` since the last bite).
     public var armed: Bool
-    /// Closing slowly (closure > 6° for > 0.45 s without a snap): twitchy bugs leave.
+    /// R8: a slow close: a close under way for more than `Tuning.slowCloseAfter` (the "quick!" hint). Core's bug fear
+    /// reads `closure`, not this.
     public var creeping: Bool
     /// Non-nil on the one frame a snap fired.
     public var snap: SnapTrigger?
-    /// θ ≥ 174° (flat): the "bend it a little" hint.
+    /// R8 (founder rule 2: no pose demands): always false from Core and Input; kept so callers compile.
     public var tooFlat: Bool
     /// The filtered hinge angle, if there is a hinge (telemetry, logs).
     public var angle: Double?
@@ -285,13 +302,17 @@ public struct BiteReport: Equatable, Sendable {
     public var chainMultiplier: Double
     public var snapsBack: Int           // Feast / scarab / ladybird refunds
     public var snapsLost: Int           // stinger costs (beyond the 1 every snap costs)
-    public var duration: Double         // the snap's duration
+    public var duration: Double         // the snap's duration (R8: the close time)
     public var time: Double             // session time of the bite
+    /// R8 (ROUND-8 §2, the skill readout): caught ÷ the catchable bugs that were in the trap during the close (from its
+    /// start to the shut, including those that fled it), 0…1. 0 when there were none (a dry bite of an empty trap).
+    public var catchRatio: Double
     public init(caught: [BugSpecies], escaped: Int, stingers: [BugSpecies], points: Int, countMultiplier: Int,
-                chainMultiplier: Double, snapsBack: Int, snapsLost: Int, duration: Double, time: Double) {
+                chainMultiplier: Double, snapsBack: Int, snapsLost: Int, duration: Double, time: Double,
+                catchRatio: Double = 0) {
         self.caught = caught; self.escaped = escaped; self.stingers = stingers; self.points = points
         self.countMultiplier = countMultiplier; self.chainMultiplier = chainMultiplier; self.snapsBack = snapsBack
-        self.snapsLost = snapsLost; self.duration = duration; self.time = time
+        self.snapsLost = snapsLost; self.duration = duration; self.time = time; self.catchRatio = catchRatio
     }
 }
 
@@ -321,18 +342,26 @@ public struct TrapSnapshot: Equatable, Sendable {
     public var beesSpared: Int              // protected bugs that came into the trap and left uneaten
     /// R2 hunger: 0 just fed … 1 a snap wilts (GAME-DESIGN §5 "Hunger"). Drives the draining snap glyph.
     public var hunger: Double
+    /// R8 (ROUND-8 §1): the trap is shut = digesting: true from the bite until the input is armed again. While shut the
+    /// session clock is frozen (`time` does not move: no waves, spawns, lingers or hunger); bugs already caught,
+    /// escaping or leaving finish their moves.
+    public var shut: Bool
+    /// R8 (founder rule 3: every round starts closed): true from the session's start until its input is first armed
+    /// (on a hinge: the phone shut once, then opened; touch and the pilot: at once). The clock is frozen and nothing
+    /// spawns; the App says "Close the phone to start" while the hinge reads open.
+    public var waitingForClose: Bool
     public init(phase: RunPhase = .playing, mode: RunMode = .feed, time: Double = 0, bugs: [BugState] = [],
                 nectar: [NectarDrop] = [], closure: Double = 0, armed: Bool = true, creeping: Bool = false,
                 snapsLeft: Int = 0, snapsMax: Int = 12, score: Int = 0, best: Int = 0, chain: Int = 0,
                 chainMultiplier: Double = 1, wave: Int = 0, dayPhase: DayPhase = .morning, dayClock: Double = 0,
                 lastBite: BiteReport? = nil, hint: TrapHint? = nil, bugsCaught: Int = 0, beesSpared: Int = 0,
-                hunger: Double = 0) {
+                hunger: Double = 0, shut: Bool = false, waitingForClose: Bool = false) {
         self.phase = phase; self.mode = mode; self.time = time; self.bugs = bugs; self.nectar = nectar
         self.closure = closure; self.armed = armed; self.creeping = creeping; self.snapsLeft = snapsLeft
         self.snapsMax = snapsMax; self.score = score; self.best = best; self.chain = chain
         self.chainMultiplier = chainMultiplier; self.wave = wave; self.dayPhase = dayPhase; self.dayClock = dayClock
         self.lastBite = lastBite; self.hint = hint; self.bugsCaught = bugsCaught; self.beesSpared = beesSpared
-        self.hunger = hunger
+        self.hunger = hunger; self.shut = shut; self.waitingForClose = waitingForClose
     }
 }
 
@@ -344,9 +373,9 @@ public enum TrapEvent: Equatable, Sendable {
     case bugSipping(id: Int, species: BugSpecies)
     case bugHopped(id: Int, species: BugSpecies)
     case bugLeft(id: Int, species: BugSpecies)          // flew off the screen (linger over)
-    case bugSpooked(id: Int, species: BugSpecies)       // took off because of a creep
-    case snapStarted                                    // closure passed 4° while armed (feedback: whoosh)
-    /// The bite. Fires with the caught/escaped/released details below in the same step.
+    case bugSpooked(id: Int, species: BugSpecies)       // R8: fled a close before the shut (startled, then its reaction)
+    case snapStarted                                    // R8: a close started (closure passed 8° while armed)
+    /// The bite (R8: at the shut). Fires with the caught/escaped/released details below in the same step.
     case snapped(BiteReport)
     case bugCaught(id: Int, species: BugSpecies, position: CGPoint)
     case bugEscaped(id: Int, species: BugSpecies)
@@ -356,7 +385,7 @@ public enum TrapEvent: Equatable, Sendable {
     case luckySnap(species: BugSpecies)                 // ladybird / scarab refund
     case chainUp(count: Int, multiplier: Double)
     case chainBroken(count: Int)                        // a chain of ≥ 2 ended
-    case rearmed
+    case rearmed                                        // R8: reopened after a bite (the shut is over, the clock runs)
     case beeSpared(species: BugSpecies)                 // a protected bug left the trap uneaten
     case lastSnap                                       // snapsLeft reached 1
     /// R2 hunger: 3 s before a snap wilts (once per hunger cycle).
@@ -387,15 +416,18 @@ public struct RunResult: Codable, Equatable, Sendable {
     public var waves: Int
     public var drySnaps: Int
     public var fastestSnap: Double              // seconds (hinge only; touch runs report 0)
+    /// R8: bugs that escaped a bite or fled a close (`BiteReport.escaped` summed). Nil in results saved before R8 or
+    /// built without it (LevelBook.evaluate reads nil as 0).
+    public var escapes: Int?
     public init(mode: RunMode, seed: UInt64, score: Int, seconds: Double, snaps: Int, bugsCaught: Int,
                 caughtBySpecies: [String: Int], sparedBySpecies: [String: Int], bestBitePoints: Int, biggestBite: Int,
                 longestChain: Int, beesSpared: Int, stings: Int, feasts: Int, waves: Int, drySnaps: Int,
-                fastestSnap: Double) {
+                fastestSnap: Double, escapes: Int? = nil) {
         self.mode = mode; self.seed = seed; self.score = score; self.seconds = seconds; self.snaps = snaps
         self.bugsCaught = bugsCaught; self.caughtBySpecies = caughtBySpecies; self.sparedBySpecies = sparedBySpecies
         self.bestBitePoints = bestBitePoints; self.biggestBite = biggestBite; self.longestChain = longestChain
         self.beesSpared = beesSpared; self.stings = stings; self.feasts = feasts; self.waves = waves
-        self.drySnaps = drySnaps; self.fastestSnap = fastestSnap
+        self.drySnaps = drySnaps; self.fastestSnap = fastestSnap; self.escapes = escapes
     }
 }
 

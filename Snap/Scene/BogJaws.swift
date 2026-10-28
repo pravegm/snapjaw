@@ -139,6 +139,9 @@ final class BogLobeSide {
 /// **R3 (#1) the bite**: both lobes squeeze to `TrapArt.slamSqueeze` about the midrib in 60 ms while the closed trap
 /// (`BogTextures.closedTrap`: margins meeting over a dark interior, the cilia interlocked) fades in over them; the open
 /// cilia fold in and hide. It holds 120 ms and lets go. Nothing is drawn outside the open trap's outline (SceneTests).
+///
+/// **R8 (the phone IS the trap):** with hinge input the scene never calls `slam()` and passes `closure01` 0, so the
+/// lobes stay drawn open; the closure shows only through `cue` (the cilia lean, the rim shadow). Touch keeps the slam.
 @MainActor
 final class BogJaws {
     /// At the trap centre (scene z 10).
@@ -190,6 +193,10 @@ final class BogJaws {
     private(set) var spread: CGFloat = 1
     /// R6 (Golden Glow): the rim twinkles showing now.
     private(set) var sparklesShowing = 0
+    /// R8 (hinge input): the closing cue drawn now (0 open … 1, `TrapArt.closingCue`) and the rim shadow it lays on
+    /// the lobes. The cue never moves the lobes: it leans the cilia in, deepens the rim shadow and dims the rim light.
+    private(set) var cueLevel: CGFloat = 0
+    private(set) var rimShadow: CGFloat = 0
     private var glossBoost: CGFloat = 1
     private var sparkleOn = false
     var reduceMotion = false
@@ -363,6 +370,8 @@ final class BogJaws {
         closingLevel = 0
         faceShade = 0
         teethAlpha = 1
+        cueLevel = 0
+        rimShadow = 0
     }
 
     /// R5 (#3): the bite's own darkening `t` session seconds after it: it follows the slam while the jaws close and
@@ -389,13 +398,17 @@ final class BogJaws {
 
     /// One frame. `fxDt` runs the moments (it is 0 while the session is frozen); `time` is the wall clock for
     /// shimmer. `hunger` is the snapshot's 0…1; `tint`/`tintAlpha` the day's overlay on the lobes, `rim`/`rimAlpha`
-    /// the day's rim light.
+    /// the day's rim light. R8: `cue` is the hinge's closing cue (0 … 1; the scene passes `closure01` 0 with it, so
+    /// the lobes stay drawn open and only the cues follow the hands).
     func update(fxDt: Double, closure01 c: CGFloat, tired target: CGFloat, hunger: CGFloat, time: Double,
                 night: CGFloat, dusk: CGFloat, tint: UIColor, tintAlpha: CGFloat, rim: UIColor = .white,
-                rimAlpha: CGFloat = 0) {
+                rimAlpha: CGFloat = 0, cue cueIn: CGFloat = 0) {
         let cc = BogMath.clamp01(c.isFinite ? c : 0)
+        let cue = BogMath.clamp01(cueIn.isFinite ? cueIn : 0)
         let dt = max(fxDt, 0)
         drawnClosure = cc
+        cueLevel = cue
+        rimShadow = TrapArt.rimShadow(cue)
         // The slam envelope: shut in 60 ms (ease out), hold 120 ms, open by 0.5 s.
         var squeezeK: CGFloat = 0
         var releaseT: Double = -1
@@ -469,7 +482,11 @@ final class BogJaws {
 
         // R3 (#17): hungry teeth lean 20° (and tired ones 40°). R5 (#3): the bite leans them in only while it closes
         // and holds; they are back out `releaseFade` into the release, and the hinge's lean waits for a re-close.
-        let leanDeg = max(Double(hingeK) * TrapArt.toothMaxLean, TrapArt.slamLean * Double(closingLevel))
+        // R8: with the hinge the cilia lean in with the closing cue (the lobes themselves never move).
+        let hingeLean: Double = Double(hingeK) * TrapArt.toothMaxLean
+        let biteLean: Double = TrapArt.slamLean * Double(closingLevel)
+        let cueTilt: Double = Double(cue) * TrapArt.cueLean
+        let leanDeg = max(hingeLean, biteLean, cueTilt)
             + 40 * Double(tiredLevel) + 20 * Double(droop) * (1 - Double(closingLevel))
         lean = CGFloat(leanDeg * .pi / 180)
         let reach = TrapArt.toothReach(lean: lean) * spring
@@ -485,16 +502,21 @@ final class BogJaws {
         // R6 (#17): tiredness no longer drives them (they cover the margin and back too: the R5 tired trap lost its
         // green rim); the tired trap dims its face only (`faceDim`).
         let shadeK = shut
-        let narrow = 0.95 * BogMath.smoothstep(0.02, 0.6, shadeK)
+        // R8: the hinge's rim shadow deepens with the closing cue (the narrow shade lies round the rim).
+        let narrow = max(0.95 * BogMath.smoothstep(0.02, 0.6, shadeK), rimShadow)
         let wide = 0.6 * BogMath.smoothstep(0.45, 1, shadeK)
         marginShade = max(narrow, wide)
         faceDimAlpha = 0.42 * tiredLevel
         faceShade = max(narrow, wide, faceDimAlpha)
-        let darkTeeth = min(0.32 * hingeK * (1 - closingLevel) + 0.1 * tiredLevel + 0.25 * droop + 0.3 * night, 0.7)
+        let darkBase: CGFloat = 0.32 * hingeK * (1 - closingLevel) + 0.1 * tiredLevel + 0.25 * droop + 0.3 * night
+        // R8: the cilia darken a little as they lean into the closing cue's shadow.
+        let darkTeeth = min(darkBase + 0.3 * cue, 0.7)
         let shimmer = CGFloat(0.05 * sin(time * 1.3))
         overlayAlpha = min(max(tintAlpha, 0), 0.25)
         overlayColor = tint
-        rimLightAlpha = min(max(rimAlpha, 0), 0.8) * (1 - 0.7 * shut)
+        // R8: the cue dims the rim light, the gloss and the twinkles as the shut does.
+        let dimK = max(shut, cue)
+        rimLightAlpha = min(max(rimAlpha, 0), 0.8) * (1 - 0.7 * dimK)
         // At night the teeth go a deep blue-grey (never violet: the cream tips stay readable). QA-2 #19: one UIColor
         // per change of the night level, not per frame.
         if abs(night - toothTintNight) > 0.002 {
@@ -508,7 +530,7 @@ final class BogJaws {
         teethAlpha = 1 - BogMath.smoothstep(0.25, 0.75, closingLevel)
         let wiltA = 0.15 * droop + 0.12 * tiredLevel
         // R6 (Golden Glow): the rim twinkles, on the wall clock, gone while the jaws close.
-        let twinkle = sparkleOn ? (1 - shut) * (1 - 0.6 * tiredLevel) : 0
+        let twinkle = sparkleOn ? (1 - dimK) * (1 - 0.6 * tiredLevel) : 0
         sparklesShowing = 0
         for s in sides {
             let sx = CGFloat(s.side)
@@ -538,7 +560,7 @@ final class BogJaws {
             s.wilt.alpha = wiltA
             s.wilt.isHidden = wiltA < 0.005
             s.gloss.position = CGPoint(x: -sx * 18 * shut, y: -6 * shut)
-            let glossA = max(0.75 - 0.45 * shut - 0.3 * tiredLevel - 0.35 * droop + shimmer, 0.08)
+            let glossA = max(0.75 - 0.45 * dimK - 0.3 * tiredLevel - 0.35 * droop + shimmer, 0.08)
             s.gloss.alpha = min(glossA * glossBoost, 1)
             s.glow.color = rim
             s.glow.alpha = rimLightAlpha

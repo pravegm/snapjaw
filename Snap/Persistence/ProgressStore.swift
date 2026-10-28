@@ -61,6 +61,8 @@ struct RecordOutcome: Equatable {
     var firstRun = false
     /// R6: the run was a Zen Bog (no best, no leaderboard; the Bug Book and goals still count).
     var zen = false
+    /// R8: the run was a level (its stars are kept apart, no best).
+    var level = false
     /// R6 goals: the three goals the run was played with, as they stood at its end (ticked or not), in slot order.
     var goalLines: [GoalLine] = []
     /// R6 goals: the ids completed by this run, and the growth they gave (bugs-equivalent, on the rank bar).
@@ -86,7 +88,8 @@ struct RecordOutcome: Equatable {
 struct ProgressData: Codable, Equatable {
     /// v1 (R1). v2 (R6): Core's goal book, the rank's own bug count (Zen counts a quarter), the Garden, the Daily
     /// streak, the chain tip. v0 = a save without a version (never shipped; the migration rule is still tested).
-    static let currentVersion = 2
+    /// v3 (R8): the levels' stars.
+    static let currentVersion = 3
 
     var version = ProgressData.currentVersion
     /// Best protein in a Feed run.
@@ -145,6 +148,11 @@ struct ProgressData: Codable, Equatable {
     /// The one-time chain explainer has shown (#14).
     var chainTipSeen = false
 
+    // MARK: R8
+
+    /// The levels: level id (1…30) → the best stars ever (1…3; a level never passed has no entry).
+    var levelStars: [Int: Int] = [:]
+
     init() {}
 
     private enum CodingKeys: String, CodingKey {
@@ -153,6 +161,7 @@ struct ProgressData: Codable, Equatable {
         case bestBitePoints, biggestBite, longestChain, fastestSnap, caught, spared, foundOrder, achievements, daily
         case dailyAttempted, lastDailyDay, lessonDone, pendingRun
         case pendingGoals, goalBook, rankBugs, variety, varietiesSeen, bestStreak, chainTipSeen
+        case levelStars
     }
 
     /// Tolerant: unknown or missing fields fall back to their defaults, never wiping the rest.
@@ -191,6 +200,7 @@ struct ProgressData: Codable, Equatable {
         varietiesSeen = (try? c.decodeIfPresent(Set<String>.self, forKey: .varietiesSeen)) ?? []
         bestStreak = max((try? c.decodeIfPresent(Int.self, forKey: .bestStreak)) ?? 0, 0)
         chainTipSeen = (try? c.decodeIfPresent(Bool.self, forKey: .chainTipSeen)) ?? false
+        levelStars = (try? c.decodeIfPresent([Int: Int].self, forKey: .levelStars)) ?? [:]
         ProgressRules.migrate(&self, fromVersion: storedVersion)
     }
 
@@ -227,6 +237,7 @@ struct ProgressData: Codable, Equatable {
         try c.encode(varietiesSeen, forKey: .varietiesSeen)
         try c.encode(bestStreak, forKey: .bestStreak)
         try c.encode(chainTipSeen, forKey: .chainTipSeen)
+        try c.encode(levelStars, forKey: .levelStars)
     }
 
     // MARK: Derived
@@ -283,6 +294,9 @@ enum ProgressRules {
         if TrapVariety(rawValue: data.variety) == nil { data.variety = TrapVariety.classic.rawValue }
         data.varietiesSeen = data.varietiesSeen.filter { TrapVariety(rawValue: $0) != nil }
         data.varietiesSeen.insert(TrapVariety.classic.rawValue)
+        // R8: stars are 1…3 on a real level id.
+        data.levelStars = data.levelStars.filter { $0.key >= 1 && $0.key <= 99 && $0.value >= 1 }
+            .mapValues { min($0, 3) }
         let found = BugSpecies.allCases.filter { data.isFound($0) }.map(\.rawValue)
         let foundSet = Set(found)
         var seen = Set<String>()
@@ -394,7 +408,7 @@ enum ProgressRules {
         case let .daily(day, _):
             guard let r = data.daily[day] else { return 0 }
             return max(r.score, r.practiceBest)
-        case .attract, .lesson, .zen: return 0
+        case .attract, .lesson, .zen, .level: return 0
         }
     }
 
@@ -440,6 +454,9 @@ enum ProgressRules {
         case .zen:
             // R6: no best and no leaderboard; the bugs, the Bug Book, the rank and the goals still count.
             outcome.zen = true
+        case .level:
+            // R8: a level keeps its stars (`LevelRules.record`), not a best; its bugs fill the Bug Book and the rank.
+            outcome.level = true
         case .feed:
             outcome.previousBest = data.bestFeed
             if score > data.bestFeed {
@@ -551,7 +568,7 @@ enum ProgressRules {
     static func worthRecording(_ result: RunResult, goals: GoalReport = GoalReport()) -> Bool {
         switch result.mode {
         case .attract, .lesson: return false
-        case .feed, .daily, .zen:
+        case .feed, .daily, .zen, .level:
             return result.score > 0 || result.bugsCaught > 0 || result.beesSpared > 0 || !goals.completed.isEmpty
         }
     }
@@ -701,6 +718,15 @@ final class ProgressStore: ObservableObject {
         guard let pending = data.pendingRun else { return nil }
         let outcome = recordAbandoned(pending, today: today, goals: data.pendingGoals ?? GoalReport())
         return (pending, outcome)
+    }
+
+    /// R8: keeps a level try's stars (the best ever). Returns the best before and after, and a world it opened.
+    @discardableResult
+    func recordLevel(_ id: Int, stars: Int) -> (before: Int, after: Int, opened: Int?) {
+        var d = data
+        let kept = LevelRules.record(&d, id: id, stars: stars)
+        commit(d)
+        return kept
     }
 
     func markLessonDone() {

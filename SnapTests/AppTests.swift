@@ -222,7 +222,7 @@ struct DailyRuleTests {
 struct DemoTests {
     @Test func parsesEveryKey() {
         let d = DemoMode.parse("screen=play;mode=daily;seed=42;pilot=expert;progress=mid;freezeOn=lastSnap;"
-                               + "freezeAfter=3.5;closure=14;wave=23;lessonStep=4;hudLeft=1;fold=1;sound=0")
+                               + "freezeAfter=3.5;closure=14;wave=23;level=12;chomp=sting;hudLeft=1;fold=1;sound=0")
         #expect(d.screen == .play)
         #expect(d.mode == .daily)
         #expect(d.seed == 42)
@@ -232,7 +232,8 @@ struct DemoTests {
         #expect(d.holdAfter == 3.5)
         #expect(d.closure == 14)
         #expect(d.wave == 23)
-        #expect(d.lessonStep == 4)
+        #expect(d.level == 12)
+        #expect(d.chomp == .sting)
         #expect(d.hudLeft == true)
         #expect(d.fold)
         #expect(!d.sound)
@@ -250,7 +251,7 @@ struct DemoTests {
         #expect(!DemoMode.Freeze.crowd.isEvent)
         #expect(abs(DemoMode.Freeze.snap.holdDelay - 0.12) < 1e-9)
         #expect(DemoMode.parse("freezeOn=CROWD").freezeOn == .crowd)
-        #expect(DemoMode.parse("lessonStep=99").lessonStep == LessonScript.Step.done.rawValue)
+        #expect(DemoMode.parse("level=99").level == 30)
     }
 
     @Test func presetsAgree() {
@@ -314,12 +315,15 @@ struct PoseRuleTests {
         #expect(OrientationLock.trustsStoredHinge(true, screen: CGSize(width: 669, height: 951)))
     }
 
-    @Test func closingPauseResumesWellAboveNinety() {
-        #expect(AppRules.resumeAngle > 100)
-        #expect(!AppRules.mayResume(angle: 95, isClosing: false, isShut: false))
-        #expect(AppRules.mayResume(angle: 150, isClosing: false, isShut: false))
-        #expect(!AppRules.mayResume(angle: 150, isClosing: true, isShut: false))
-        #expect(!AppRules.mayResume(angle: nil, isClosing: false, isShut: false))
+    /// R8 (ROUND-8 §1): closed is not a pause; while the Duo is shut (no scene frames) the hinge's reports step a live
+    /// hinge run, never one under the pause menu.
+    @Test func aShutDuoStepsFromTheHinge() {
+        #expect(AppRules.stepsFromHinge(sinceSceneFrame: 0.5, liveHingeRun: true, menuOpen: false))
+        #expect(!AppRules.stepsFromHinge(sinceSceneFrame: 0.01, liveHingeRun: true, menuOpen: false))
+        #expect(!AppRules.stepsFromHinge(sinceSceneFrame: 0.5, liveHingeRun: false, menuOpen: false))
+        #expect(!AppRules.stepsFromHinge(sinceSceneFrame: 0.5, liveHingeRun: true, menuOpen: true))
+        #expect(AppRules.stepsFromHinge(sinceSceneFrame: .infinity, liveHingeRun: true, menuOpen: false))
+        #expect(!AppRules.stepsFromHinge(sinceSceneFrame: .nan, liveHingeRun: true, menuOpen: false))
     }
 
     @Test func stepClamp() {
@@ -327,180 +331,6 @@ struct PoseRuleTests {
         #expect(AppRules.clampStep(-1) == 0)
         #expect(AppRules.clampStep(.nan) == 0)
         #expect(abs(AppRules.clampStep(1.0 / 120.0) - 1.0 / 120.0) < 1e-12)
-    }
-}
-
-// MARK: - The First Bite
-
-struct LessonTests {
-    @Test func poseStepNeedsTheBookHold() {
-        var s = LessonScript(start: .pose)
-        _ = s.update(LessonScript.Input(time: 0, angle: 178, hasHinge: true))
-        _ = s.update(LessonScript.Input(time: 1, angle: 178, hasHinge: true))
-        #expect(s.step == .pose)
-        #expect(s.praise == nil)
-        _ = s.update(LessonScript.Input(time: 1.1, angle: 150, hasHinge: true))
-        _ = s.update(LessonScript.Input(time: 1.5, angle: 152, hasHinge: true))
-        #expect(s.praise == nil)
-        _ = s.update(LessonScript.Input(time: 1.8, angle: 151, hasHinge: true))
-        #expect(s.praise != nil)
-        let spawned = s.update(LessonScript.Input(time: 3.2, angle: 151, hasHinge: true))
-        #expect(s.step == .firstSnap)
-        #expect(spawned == [.spawn(.housefly, slot: 0, linger: .infinity)])
-    }
-
-    @Test func noHingeSkipsThePose() {
-        var s = LessonScript(start: .pose)
-        let actions = s.update(LessonScript.Input(time: 0, hasHinge: false))
-        #expect(s.step == .firstSnap)
-        #expect(actions.count == 1)
-        #expect(s.display(touch: true, hasPose: false).line.contains("tap"))
-        // Phone numbering: no pose step, no re-arm step (REVIEW-1 #22).
-        #expect(s.display(touch: true, hasPose: false).stepOf == "Step 1 of 4")
-    }
-
-    @Test func stepNumbersCountOnlyVisibleSteps() {
-        // R5 (REVIEW-4 #11): four numbered steps on phones; R7 (#12): five on the Duo (its re-arm step counts).
-        #expect(LessonScript.stepLabel(.firstSnap, touch: false, hasPose: true) == "Step 1 of 5")
-        #expect(LessonScript.stepLabel(.tooSlow, touch: true, hasPose: false) == "Step 2 of 4")
-        #expect(LessonScript.stepLabel(.triple, touch: true, hasPose: false) == "Step 4 of 4")
-        #expect(LessonScript.stepLabel(.bee, touch: true, hasPose: true) == "Step 3 of 4")
-        #expect(LessonScript.next(.firstSnap, touch: true) == .tooSlow)
-        #expect(LessonScript.next(.firstSnap, touch: false) == .openAgain)
-    }
-
-    @Test func skipIsOfferedFromStepOne() {
-        let s = LessonScript(start: .pose)
-        #expect(s.allowsSkip)
-        #expect(s.display(touch: false, hasPose: true).allowsSkip)
-        #expect(!LessonScript(start: .done).allowsSkip)
-    }
-
-    @Test func noHingeReadingMovesOnAfterThreeSeconds() {
-        var s = LessonScript(start: .pose)
-        _ = s.update(LessonScript.Input(time: 0, hasHinge: true))
-        _ = s.update(LessonScript.Input(time: 2.5, hasHinge: true))
-        #expect(s.step == .pose)
-        let actions = s.update(LessonScript.Input(time: 3.1, hasHinge: true))
-        #expect(s.step == .firstSnap)
-        #expect(actions == [.spawn(.housefly, slot: 0, linger: .infinity)])
-    }
-
-    @Test func anySnapWithAFlyPassesStepTwo() {
-        var s = LessonScript(start: .firstSnap)
-        _ = s.update(LessonScript.Input(time: 0, hasHinge: true, liveFlies: 1))
-        // A slow snap: the fly escapes, and the step still passes (GAME-DESIGN §8: any speed).
-        let slow: [TrapEvent] = [.snapped(report(caught: [], escaped: 1)), .bugEscaped(id: 1, species: .housefly)]
-        _ = s.update(LessonScript.Input(time: 2, hasHinge: true, events: slow, liveFlies: 0))
-        #expect(s.praise == LessonScript.praiseMiss)
-        _ = s.update(LessonScript.Input(time: 3.4, hasHinge: true))
-        #expect(s.step == .openAgain)
-    }
-
-    @Test func touchMergesTheReArmIntoStepTwo() {
-        var s = LessonScript(start: .firstSnap)
-        _ = s.update(LessonScript.Input(time: 0, hasHinge: false, liveFlies: 1))
-        let caught: [TrapEvent] = [.snapped(report(caught: [.housefly])),
-                                   .bugCaught(id: 1, species: .housefly, position: .zero)]
-        _ = s.update(LessonScript.Input(time: 2, hasHinge: false, events: caught))
-        #expect(s.praise == LessonScript.praiseCatchTouch)
-        let cast = s.update(LessonScript.Input(time: 3.4, hasHinge: false))
-        #expect(s.step == .tooSlow)
-        #expect(cast.count == 2)
-        // "Two flies. Get both in one bite.": one is not enough on touch.
-        let one: [TrapEvent] = [.snapped(report(caught: [.housefly])),
-                                .bugCaught(id: 2, species: .housefly, position: .zero)]
-        _ = s.update(LessonScript.Input(time: 5, hasHinge: false, events: one, liveFlies: 1))
-        #expect(s.praise == nil)
-        #expect(s.warning != nil)
-    }
-
-    @Test func theBeeStaysLongEnoughToLearn() {
-        #expect(LessonScript.beeLinger >= 6)
-    }
-
-    @Test func firstSnapPassesOnACatch() {
-        var s = LessonScript(start: .firstSnap)
-        _ = s.update(LessonScript.Input(time: 0, hasHinge: true, liveFlies: 1))
-        let caught: [TrapEvent] = [.snapped(report(caught: [.housefly])),
-                                   .bugCaught(id: 1, species: .housefly, position: .zero)]
-        _ = s.update(LessonScript.Input(time: 2, hasHinge: true, events: caught, liveFlies: 0))
-        #expect(s.praise == "CHOMP!")
-        _ = s.update(LessonScript.Input(time: 3.4, hasHinge: true, armed: false))
-        #expect(s.step == .openAgain)
-        #expect(s.allowsSkip)
-    }
-
-    @Test func aDrySnapWaitsAndAFlownFlyComesBack() {
-        var s = LessonScript(start: .firstSnap)
-        _ = s.update(LessonScript.Input(time: 0, hasHinge: true, liveFlies: 1))
-        // Snapped before the fly was in the trap: no pass, a hint to wait.
-        _ = s.update(LessonScript.Input(time: 1, hasHinge: true, events: [.snapped(report(caught: []))],
-                                        liveFlies: 1, fliesInTrap: 0))
-        #expect(s.warning == LessonScript.waitForSip)
-        #expect(s.step == .firstSnap)
-        // The fly is spooked away: another comes.
-        _ = s.update(LessonScript.Input(time: 2, hasHinge: true, events: [.bugSpooked(id: 1, species: .housefly)],
-                                        liveFlies: 0))
-        let again = s.update(LessonScript.Input(time: 3.3, hasHinge: true, liveFlies: 0))
-        #expect(again == [.spawn(.housefly, slot: 0, linger: .infinity)])
-    }
-
-    @Test func eatingTheBeeRepeatsTheStep() {
-        var s = LessonScript(start: .bee)
-        let first = s.update(LessonScript.Input(time: 0, hasHinge: true))
-        // REVIEW-2 #18: the bee comes first (the drop nearest its slot), with two flies sipping beside it.
-        #expect(first.first == .spawn(.bee, slot: 0, linger: LessonScript.beeLinger))
-        let fly = LessonScript.Action.spawn(.housefly, slot: 1, linger: LessonScript.beeFlyLinger)
-        #expect(first.contains(fly))
-        #expect(first.count == 3)
-        let sting: [TrapEvent] = [.snapped(report(caught: [], stingers: [.bee])),
-                                  .stung(id: 1, species: .bee, cost: 0)]
-        _ = s.update(LessonScript.Input(time: 2, hasHinge: true, events: sting, liveFlies: 2, liveBees: 0))
-        #expect(s.warning != nil)
-        // The bitten bee's leaving is not a spare.
-        _ = s.update(LessonScript.Input(time: 2.5, hasHinge: true, events: [.beeSpared(species: .bee)], liveFlies: 2,
-                                        liveBees: 0))
-        #expect(s.praise == nil)
-        let again = s.update(LessonScript.Input(time: 4.5, hasHinge: true, liveFlies: 2, liveBees: 0))
-        #expect(again == [.spawn(.bee, slot: 0, linger: LessonScript.beeLinger)])
-        _ = s.update(LessonScript.Input(time: 9, hasHinge: true, events: [.beeSpared(species: .bee)], liveBees: 0))
-        #expect(s.praise != nil)
-    }
-
-    @Test func tripleNeedsThree() {
-        var s = LessonScript(start: .triple)
-        let cast = s.update(LessonScript.Input(time: 0, hasHinge: true))
-        #expect(cast.count == 3)
-        _ = s.update(LessonScript.Input(time: 3, hasHinge: true,
-                                        events: [.snapped(report(caught: [.housefly, .housefly]))], liveFlies: 0))
-        #expect(s.praise == nil)
-        #expect(s.warning != nil)
-        _ = s.update(LessonScript.Input(time: 8, hasHinge: true,
-                                        events: [.snapped(report(caught: [.housefly, .housefly, .housefly]))],
-                                        liveFlies: 0))
-        #expect(s.praise == "TRIPLE ×3!")
-        _ = s.update(LessonScript.Input(time: 9.5, hasHinge: true))
-        #expect(s.step == .done)
-        #expect(s.display(touch: false, hasPose: true).isFinal)
-    }
-
-    @Test func linesAreShort() {
-        for step in LessonScript.Step.allCases {
-            for touch in [false, true] {
-                let words = LessonScript.line(step, touch: touch).split(separator: " ").count
-                #expect(words <= 8)
-            }
-        }
-    }
-
-    @Test func lessonSpotsAreInsideTheTrap() {
-        let g = ScreenLayout(hasFold: true).geometry
-        for slot in 0..<LessonScript.Step.allCases.count {
-            let spot = AppRules.lessonSpot(slot: slot, geometry: g)
-            #expect(g.contains(spot.target))
-            #expect(spot.entry.y > g.sceneSize.height)
-        }
     }
 }
 
@@ -526,9 +356,9 @@ struct WordsTests {
         }
     }
 
-    /// ROUND-3 founder call: the fold is the input on a Duo; phones keep the tap.
+    /// ROUND-3 founder call: the fold is the input on a Duo; phones keep the tap. R8: "phone", "close".
     @Test func foldInputWords() {
-        #expect(AppRules.hudHintText(.foldInput, touch: false) == "Snap the halves together")
+        #expect(AppRules.hudHintText(.foldInput, touch: false) == "Close the phone to bite")
         #expect(AppRules.hudHintText(.foldInput, touch: true) == "Tap to snap")
         // REVIEW-3 #3: the founder's copy, good news on the cream plate.
         #expect(AppRules.hudHintText(.beesCost, touch: true) == "Bees and wasps cost snaps. This one's free!")
@@ -538,11 +368,14 @@ struct WordsTests {
         #expect(AppRules.hudHintText(.chainTag(1.5), touch: false) == "Chain ×1.5! Big bites in a row multiply.")
         #expect(AppRules.allHintCopy.contains(AppRules.freeStingCopy))
         #expect(!AppRules.hudHintIsWarning(.foldInput))
-        #expect(AppRules.hudHintText(.trap(.crowd), touch: false) == "Now!")
-        #expect(AppRules.allHintCopy.contains("Snap the halves together"))
+        #expect(AppRules.hudHintText(.trap(.crowd), touch: false) == "Now! Close it!")
+        #expect(AppRules.hudHintText(.trap(.crowd), touch: true) == "Now! Tap!")
+        #expect(AppRules.allHintCopy.contains("Close the phone to bite"))
         #expect(AppRules.allHintCopy.contains("Tap to snap"))
-        #expect(AppRules.hintText(.lastSnap, touch: false) == "Last snap! Make it count")
-        #expect(HomeView.foldCaption == "Snap it a little shut")
+        #expect(AppRules.hintText(.lastSnap, touch: false) == "Last snap!")
+        #expect(HomeView.foldCaption == "Close the phone to bite")
+        // Founder rule 4: "phone", never "lid".
+        for line in AppRules.allHintCopy { #expect(!line.lowercased().contains("lid")) }
     }
 
     @Test func foldHintShowsOnTheFirstWaveOnly() {
@@ -560,6 +393,7 @@ struct WordsTests {
         #expect(!AppRules.showsFoldHint(mode: .feed, wave: 1, snapsMade: 0, time: 3, after: 2.6, coreHint: .crowd))
         #expect(!AppRules.showsFoldHint(mode: .lesson, wave: 1, snapsMade: 0, time: 3, after: 2.6, coreHint: nil))
         #expect(!AppRules.showsFoldHint(mode: .attract, wave: 1, snapsMade: 0, time: 3, after: 2.6, coreHint: nil))
+        #expect(!AppRules.showsFoldHint(mode: .level(1), wave: 1, snapsMade: 0, time: 3, after: 2.6, coreHint: nil))
     }
 
     /// REVIEW-2 #9: Sprout's first Feed run never wilts and its first bee is free, with the toast.
@@ -585,17 +419,6 @@ struct WordsTests {
         #expect(!AppRules.isFreeSting(.drySnap, mode: .feed))
         #expect(AppRules.snapGainText(1) == "+1 snap")
         #expect(AppRules.snapGainText(2) == "+2 snaps")
-    }
-
-    @Test func lessonShowsTheSnapsFromStepThree() {
-        #expect(!LessonScript.showsSnaps(.firstSnap))
-        #expect(LessonScript.showsSnaps(.openAgain))
-        #expect(LessonScript.showsSnaps(.tooSlow))
-        #expect(LessonScript.showsSnaps(.done))
-        let clap = LessonScript(start: .firstSnap).display(touch: false, hasPose: true)
-        #expect(clap.showsClap)
-        #expect(!LessonScript(start: .firstSnap).display(touch: true, hasPose: false).showsClap)
-        #expect(LessonFinalCard.snapsLine == "These are your snaps")
     }
 
     /// The clap diagrams loop 160° → 138° → 160° and hold the clap for a still frame.
@@ -671,13 +494,9 @@ struct WordsTests {
     }
 
     @Test func hungerWords() {
-        #expect(AppRules.hintText(.hungry, touch: false) == "Hungry… bite!")
-        #expect(AppRules.hintText(.hungry, touch: true) == "Hungry… bite!")
+        #expect(AppRules.hintText(.hungry, touch: false) == "Hungry! Bite soon")
+        #expect(AppRules.hintText(.hungry, touch: true) == "Hungry! Bite soon")
         #expect(AppRules.hintIsWarning(.hungry))
-        // R6 (#6, frame 07): the bee step's card says it, so the plate doesn't repeat "Bee! Wait…".
-        #expect(!AppRules.lessonShowsHint(.beeInside))
-        #expect(AppRules.lessonShowsHint(.crowd))
-        #expect(!AppRules.lessonShowsHint(.hungry))
         #expect(AppRules.hudHunger(0.51, live: true) == 0.5)
         #expect(AppRules.hudHunger(2, live: true) == 1)
         #expect(AppRules.hudHunger(0.7, live: false) == 0)
@@ -718,14 +537,16 @@ struct WordsTests {
     }
 
     @Test func cardCopy() {
-        #expect(PoseCard.title(isDuo: true) == "Hold it open like a book")
-        #expect(CoverCard.title(midRun: true) == "Open it up to carry on")
-        #expect(CoverCard.title(midRun: false) == "Open it up to carry on")
+        // R8 (founder rule 2): no pose demands.
+        #expect(PoseCard.title(isDuo: true) == "Snapjaw plays sideways")
+        #expect(!PoseCard.title(isDuo: true).lowercased().contains("hold"))
+        #expect(CoverCard.title(midRun: true) == "Open to keep feeding")
+        #expect(CoverCard.title(midRun: false) == "Open to play")
+        #expect(CoverCard.openToStart == "Open to start")
         // R6 (#12): the number big, "score so far" under it.
         #expect(CoverCard.scoreLine(1_174) == "1,174")
         #expect(CoverCard.scoreCaption == "score so far")
         #expect(CoverCard.bestLine(3_200) == "Best score 3,200")
-        #expect(ClosingCard.title == CoverCard.title(midRun: true))
         // REVIEW-2 #20: no debug line in Settings, a hinge readout only on TestFlight with a hinge.
         #expect(!SettingsView.showsDiagnostics(channel: .debug, hasHinge: true))
         #expect(!SettingsView.showsDiagnostics(channel: .appStore, hasHinge: true))
@@ -1062,25 +883,7 @@ struct TallyTests {
         #expect(t == RunTally())
     }
 
-    @Test func lessonBugsLandOnRealDrops() {
-        let g = ScreenLayout(hasFold: true).geometry
-        let drops = [NectarDrop(id: 1, position: CGPoint(x: 300, y: 340), radius: 10),
-                     NectarDrop(id: 2, position: CGPoint(x: 280, y: 400), radius: 10, occupant: 9),
-                     NectarDrop(id: 3, position: CGPoint(x: 640, y: 260), radius: 10),
-                     NectarDrop(id: 4, position: CGPoint(x: 478, y: 330), radius: 10)]
-        let a = AppRules.lessonSpot(slot: 0, geometry: g, nectar: drops, taken: [])
-        #expect(a.drop == 1)
-        #expect(a.target == CGPoint(x: 300, y: 340))
-        // A drop already given out is skipped; an occupied one and one on the crease are never used.
-        let b = AppRules.lessonSpot(slot: 0, geometry: g, nectar: drops, taken: [1])
-        #expect(b.drop == 3)
-        let none = AppRules.lessonSpot(slot: 0, geometry: g, nectar: drops, taken: [1, 3])
-        #expect(none.drop == nil)
-        #expect(g.contains(none.target))
-        #expect(none.entry.y > g.sceneSize.height)
-    }
-
-    @Test func lessonClaimsAndTargets() {
+    @Test func pointerTargets() {
         let bugs = [
             BugState(id: 1, species: .housefly, position: CGPoint(x: 301, y: 341), heading: 0, activity: .sipping,
                      height: 0, inTrap: true, onRim: false),
@@ -1090,7 +893,10 @@ struct TallyTests {
                      height: 0.5, inTrap: false, onRim: false),
         ]
         let s = TrapSnapshot(bugs: bugs)
-        #expect(AppRules.liveClaims([1: 10, 3: 11, 7: 12], snapshot: s) == [1: 10])
+        // R8: the coach's counts (a fly sipping, a bee walking in the trap).
+        let counts = AppRules.trapCounts(s)
+        #expect(counts.sipping == 1)
+        #expect(counts.beeInTrap)
         // R3: with a bee in play only the bee is pointed at.
         let targets = AppRules.lessonTargets(s)
         #expect(targets.count == 1)
@@ -1098,19 +904,6 @@ struct TallyTests {
         let flies = AppRules.lessonTargets(TrapSnapshot(bugs: [bugs[0], bugs[2]]))
         #expect(flies.count == 1)
         #expect(flies.first?.sipping == true)
-    }
-
-    @Test func lessonPrefersInnerDrops() {
-        let g = ScreenLayout(hasFold: true).geometry
-        // A rim drop right on the slot's spot, and an inner one further off: the inner one wins.
-        let spot = AppRules.lessonSpot(slot: 0, geometry: g).target
-        let rimX = g.center.x - g.a * 0.92
-        let drops = [NectarDrop(id: 1, position: CGPoint(x: rimX, y: g.center.y), radius: 10),
-                     NectarDrop(id: 2, position: CGPoint(x: spot.x + 60, y: spot.y + 40), radius: 10)]
-        #expect(g.normalizedRadius(drops[0].position) > AppRules.lessonInnerRadius)
-        #expect(AppRules.lessonSpot(slot: 0, geometry: g, nectar: drops, taken: []).drop == 2)
-        // A rim drop only when no inner one is free.
-        #expect(AppRules.lessonSpot(slot: 0, geometry: g, nectar: drops, taken: [2]).drop == 1)
     }
 
     @Test func drawnClosureIsClamped() {
@@ -1175,7 +968,6 @@ struct RoundFourTests {
         #expect(AppRules.chainChipText(2, short: false, held: false) == "Chain ×2")
         #expect(AppRules.chainChipText(2, short: true, held: false) == "×2")
         #expect(AppRules.chainLesson == "Big bites in a row build a chain.")
-        #expect(LessonFinalCard.rules.contains(AppRules.chainLesson))
     }
 
     /// REVIEW-3 #2: play demos are standard unless `firstRun=1` or `progress=fresh`; the new freeze tags.
@@ -1309,15 +1101,6 @@ struct RoundFourTests {
         ]
         #expect(AppRules.lessonAvoidPoints(TrapSnapshot(bugs: bugs)) == [CGPoint(x: 600, y: 340)])
         #expect(AppRules.lessonAvoidPoints(TrapSnapshot(bugs: [bugs[1]])).isEmpty)
-    }
-
-    /// QA-2 #15: held flat, the pose step says "bend it".
-    @Test func lessonSaysBendWhenFlat() {
-        var script = LessonScript(start: .pose)
-        _ = script.update(LessonScript.Input(time: 0.1, angle: 179, hasHinge: true))
-        #expect(script.display(touch: false, hasPose: true).warning == LessonScript.bendALittle)
-        _ = script.update(LessonScript.Input(time: 0.2, angle: 150, hasHinge: true))
-        #expect(script.display(touch: false, hasPose: true).warning == nil)
     }
 
     /// REVIEW-3 #13: the Daily's name is the score's caption (it ran under Pause).
@@ -1468,11 +1251,6 @@ struct RoundFiveTests {
         #expect(AppRules.scoreWord == "score")
         #expect(ScoreBlock.caption(passedBest: false, best: 0, daily: nil) == "SCORE")
         #expect(SettingsView.hudSideTitle == "Score on the left")
-        let sentences = LessonFinalCard.rules.split(separator: ".")
-            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
-        #expect(sentences <= LessonFinalCard.maxSentences)
-        #expect(LessonFinalCard.maxSentences == 3)
-        #expect(LessonFinalCard.rules.contains(AppRules.chainLesson))
         var record = DailyRecord(score: 800, finished: true, practiceBest: 0)
         let lines = [AppRules.story(makeRun(biggest: 6)), AppRules.story(makeRun(biggest: 3)),
                      DailyView.status(canPlay: false, record: record)]
@@ -1498,7 +1276,7 @@ struct RoundFiveTests {
     /// REVIEW-4 #12: Home's subtitle no longer repeats the clap card's "Snap it shut a little".
     @Test func homeSubtitleSaysTheRule() {
         #expect(!HomeView.subtitle(foldInput: true).contains(HomeView.foldCaption))
-        #expect(HomeView.subtitle(foldInput: false) == "Tap the trap. It bites!")
+        #expect(HomeView.subtitle(foldInput: false) == "Tap to snap. Spare bees.")
     }
 
     /// ROUND-5: the Daily's one-line share (scored Dailies only).
@@ -1509,29 +1287,6 @@ struct RoundFiveTests {
         #expect(scored?.contains("#301 · 4,210 · biggest bite 6") == true)
         #expect(ResultsView.shareText(makeRun(mode: .daily(day: 300, scored: false))) == nil)
         #expect(ResultsView.shareText(makeRun(mode: .feed)) == nil)
-    }
-
-    /// REVIEW-4 #11: "Step n of N" never depends on the pose step. R7 (#12, duo-ui-lesson-3-hinge-128): on the Duo the
-    /// re-arm step is a step of its own, so the counter moves on with its words (of 5); phones count 4.
-    @Test func lessonNumberingMatches() {
-        let steps: [LessonScript.Step] = [.firstSnap, .openAgain, .tooSlow, .bee, .triple, .done]
-        var duoSeen: [String] = []
-        for s in steps {
-            let duo = LessonScript.stepLabel(s, touch: false, hasPose: true)
-            let phone = LessonScript.stepLabel(s, touch: true, hasPose: false)
-            let duoNoPose = LessonScript.stepLabel(s, touch: false, hasPose: false)
-            #expect(duo == duoNoPose)
-            #expect(duo.hasSuffix("of 5"))
-            #expect(phone.hasSuffix("of 4"))
-            if s != .done { duoSeen.append(duo) }
-        }
-        // Every Duo step has its own number.
-        #expect(Set(duoSeen).count == duoSeen.count)
-        #expect(LessonScript.stepLabel(.openAgain, touch: false, hasPose: true) == "Step 2 of 5")
-        #expect(LessonScript.stepLabel(.openAgain, touch: true, hasPose: false) == "Step 1 of 4")
-        #expect(LessonScript.stepLabel(.pose, touch: false, hasPose: true) == LessonScript.readyLabel)
-        #expect(LessonScript.stepLabel(.bee, touch: false, hasPose: true) == "Step 4 of 5")
-        #expect(LessonScript.stepLabel(.bee, touch: true, hasPose: false) == "Step 3 of 4")
     }
 
     /// REVIEW-4 #8 (founder call): the Sprout taper's options for Feed runs 1–3, standard from run 4.
@@ -1737,7 +1492,7 @@ struct RoundSixTests {
         let raw = try #require(ProgressStore.encode(d))
         let back = try #require(ProgressStore.decode(raw))
         #expect(back == d)
-        #expect(back.version == 2)
+        #expect(back.version == ProgressData.currentVersion)
         let v1 = try #require(ProgressStore.decode(Data(#"{"version":1,"lifetimeBugs":250,"longestChain":2}"#.utf8)))
         #expect(v1.rankBugs == 250)
         #expect(v1.chainTipSeen)
@@ -2018,25 +1773,16 @@ struct RoundSevenTests {
         #expect(AppRules.leaderboardName == "Best Score")
     }
 
-    /// #12: the too-flat prompt replaces any hint but a warning; the lesson's pose step says it in full.
-    @Test func tooFlatPrompt() {
-        #expect(AppRules.isTooFlat(angle: 178))
-        #expect(AppRules.isTooFlat(angle: Tuning.tooFlatAngle))
-        #expect(!AppRules.isTooFlat(angle: 160))
-        #expect(!AppRules.isTooFlat(angle: nil))
-        #expect(!AppRules.isTooFlat(angle: Double.nan))
-        #expect(AppRules.flatGuardedHint(.crowd, tooFlat: true) == .bendALittle)
-        #expect(AppRules.flatGuardedHint(nil, tooFlat: true) == .bendALittle)
-        #expect(AppRules.flatGuardedHint(.beeInside, tooFlat: true) == .beeInside)
-        #expect(AppRules.flatGuardedHint(.crowd, tooFlat: false) == .crowd)
-        #expect(AppRules.hintText(.bendALittle, touch: false) == "Fold it a little")
+    /// R8 (founder rule 2: no pose demands, ever): no too-flat prompt, no "hold it like a book" anywhere a plate speaks.
+    @Test func noPoseDemands() {
+        #expect(AppRules.hintText(.bendALittle, touch: false) == nil)
         #expect(AppRules.hintText(.bendALittle, touch: true) == nil)
-        #expect(LessonScript.bendALittle.hasPrefix(AppRules.tooFlatCopy))
-        #expect(LessonScript.numbered(touch: false).count == 5)
-        #expect(LessonScript.numbered(touch: true).count == 4)
-        // The triple step's card says wait; the "Now!" plate says now.
-        #expect(!LessonScript.line(.triple, touch: true).lowercased().contains("now"))
-        #expect(!LessonScript.line(.triple, touch: false).lowercased().contains("now"))
+        for line in AppRules.allHintCopy + AppRules.coachSamples {
+            let l = line.lowercased()
+            #expect(!l.contains("fold it"))
+            #expect(!l.contains("like a book"))
+            #expect(!l.contains("stand it"))
+        }
     }
 
     /// #17: a bee's halo over the trap's edge counts as beside the trap (no "Hungry… bite!").
@@ -2157,6 +1903,224 @@ struct RoundSevenTests {
         #expect(story.unlockedVarieties.count == 5)
         #expect(story.speciesFound == 13)
         #expect(story.goalBook?.active.count == GoalBridge.slots)
+    }
+}
+
+// MARK: - Round 8: the phone IS the trap; levels; the CHOMP card; plain words
+
+private func bite(caught: [BugSpecies], escaped: Int = 0, stingers: [BugSpecies] = [], lost: Int = 0,
+                  duration: Double = 0.2, ratio: Double = 1) -> BiteReport {
+    BiteReport(caught: caught, escaped: escaped, stingers: stingers, points: 90 * caught.count,
+               countMultiplier: caught.count, chainMultiplier: 1, snapsBack: 0, snapsLost: lost, duration: duration,
+               time: 4, catchRatio: ratio)
+}
+
+@MainActor
+struct RoundEightTests {
+    /// ROUND-8 §3: every bite says plainly what was good or bad.
+    @Test func biteVerdicts() {
+        #expect(AppRules.biteVerdict(bite(caught: [.housefly, .gnat, .gnat])).text == "3 bugs! Fast close")
+        #expect(AppRules.biteVerdict(bite(caught: [.housefly, .gnat, .gnat])).good)
+        #expect(AppRules.biteVerdict(bite(caught: [], escaped: 2)).text == "Too slow, they flew")
+        #expect(!AppRules.biteVerdict(bite(caught: [], escaped: 2)).good)
+        #expect(AppRules.biteVerdict(bite(caught: [])).text == "Empty bite")
+        #expect(AppRules.biteVerdict(bite(caught: [], stingers: [.bee], lost: 1)).text == "Bee! \u{2212}1 snap")
+        #expect(AppRules.biteVerdict(bite(caught: [], stingers: [.wasp])).text == "Wasp! Let it leave")
+        #expect(AppRules.biteVerdict(bite(caught: [.gnat], escaped: 3, duration: 1.2, ratio: 0.25)).text
+                == "Too slow, 3 flew")
+        #expect(AppRules.biteVerdict(bite(caught: [.gnat, .gnat], duration: 0.8)).text == "2 bugs! Clean bite")
+        #expect(AppRules.biteVerdict(bite(caught: [.gnat, .gnat, .gnat], duration: 0.8)).text == "3 bugs! Feast!")
+        // A tap has no speed: never "Fast close" on a phone.
+        #expect(AppRules.biteVerdict(bite(caught: [.gnat], duration: 0.12), touch: true).text == "Got it! Clean bite")
+        #expect(AppRules.biteVerdict(bite(caught: [.gnat], duration: Double.nan)).text == "Got it! Clean bite")
+        for s in AppRules.verdictSamples { #expect(s.split(separator: " ").count <= 5) }
+        #expect(AppRules.hudHintIsToast(.verdict("x", good: true)))
+        #expect(AppRules.hudHintIsWarning(.verdict("x", good: false)))
+        #expect(!AppRules.hudHintIsWarning(.verdict("x", good: true)))
+        #expect(!AppRules.hudHintIsToast(.coach("x")))
+    }
+
+    /// Levels 1–5 teach one idea each: the coach says one short thing at the right moment.
+    @Test func teachingCoach() {
+        #expect(AppRules.teachNeed(level: 1) == 1)
+        #expect(AppRules.teachNeed(level: 3) == 2)
+        #expect(AppRules.teachNeed(level: 5) == 3)
+        #expect(AppRules.teachNeed(level: 6) == nil)
+        #expect(AppRules.coachLine(level: 1, sipping: 1, beeInTrap: false, armed: true, touch: false)
+                == "Now close it, fast!")
+        #expect(AppRules.coachLine(level: 3, sipping: 1, beeInTrap: false, armed: true, touch: false) == "Wait for 2…")
+        #expect(AppRules.coachLine(level: 5, sipping: 3, beeInTrap: false, armed: true, touch: true) == "Now! Tap!")
+        // A bee in the trap: Core's "Bee! Wait…" speaks, not the coach.
+        #expect(AppRules.coachLine(level: 4, sipping: 1, beeInTrap: true, armed: true, touch: false) == nil)
+        #expect(AppRules.coachLine(level: 9, sipping: 3, beeInTrap: false, armed: true, touch: false) == nil)
+        // Never "open it" to a phone that's open (founder rule 3): only when the trap isn't armed.
+        #expect(AppRules.coachLine(level: 2, sipping: 0, beeInTrap: false, armed: false, touch: false) == "Open it again")
+        #expect(AppRules.coachLine(level: 2, sipping: 0, beeInTrap: false, armed: false, touch: true) == nil)
+        for line in AppRules.coachSamples { #expect(line.split(separator: " ").count <= 4) }
+    }
+
+    /// The CHOMP card's words, per kind.
+    @Test func chompCardWords() {
+        let catchBite = ChompInfo(bite(caught: [.housefly, .gnat, .gnat, .ant]), score: 1_240)
+        #expect(catchBite.kind == .catchBite)
+        #expect(ChompWords.headline(.catchBite) == "CHOMP!")
+        #expect(ChompWords.callout(catchBite) == "4 bugs · +360")
+        #expect(ChompWords.note(catchBite) == "Fast close")
+        let one = ChompInfo(bite(caught: [.gnat]), score: 90)
+        #expect(ChompWords.callout(one) == "1 bug · +90")
+        let sting = ChompInfo(bite(caught: [], stingers: [.bee], lost: 1), score: 0)
+        #expect(sting.kind == .sting)
+        #expect(ChompWords.headline(.sting) == "Bzzt!")
+        #expect(ChompWords.callout(sting) == "A bee · \u{2212}1 snap")
+        #expect(ChompWords.note(sting) == "Bee! \u{2212}1 snap")
+        let dry = ChompInfo(bite(caught: [], escaped: 2), score: 0)
+        #expect(dry.kind == .dry)
+        #expect(ChompWords.callout(dry) == "They all flew")
+        #expect(ChompWords.carryOn == "Open to keep feeding")
+        #expect(ChompArt.bumpSpots.count == ChompArt.maxBumps)
+        for kind in [ChompInfo.Kind.catchBite, .sting, .dry] {
+            let made = AppRules.demoChomp(kind, score: 100)
+            #expect(made.kind == kind)
+        }
+        #expect(AppRules.demoChompMatches(bite(caught: [.gnat, .gnat, .gnat]), want: .catchBite))
+        #expect(!AppRules.demoChompMatches(bite(caught: [.gnat]), want: .catchBite))
+        #expect(AppRules.demoChompMatches(bite(caught: [], stingers: [.bee]), want: .sting))
+        #expect(AppRules.demoChompMatches(bite(caught: []), want: .dry))
+    }
+
+    /// The CHOMP card fits the Duo's cover display and a phone (CI's forced cover), every size measured.
+    @Test func chompCardFits() {
+        let cases: [(CGSize, EdgeInsets)] = [
+            (CGSize(width: 466, height: 678), EdgeInsets(top: 24, leading: 0, bottom: 20, trailing: 0)),
+            (CGSize(width: 874, height: 402), EdgeInsets(top: 0, leading: 62, bottom: 21, trailing: 62)),
+            (CGSize(width: 402, height: 874), EdgeInsets(top: 62, leading: 0, bottom: 34, trailing: 0)),
+        ]
+        for (size, insets) in cases {
+            let l = CoverLayout.make(size: size, insets: insets, midRun: true, hasBest: false)
+            #expect(l.contentHeight <= l.area.height + 0.5)
+            #expect(l.trap.height >= CoverLayout.trapMinH)
+            let aspect = l.trap.height / max(l.trap.width, 1)
+            #expect(abs(aspect - CoverLayout.trapAspect) < 0.01)
+        }
+        #expect(DisplayText.inkWidth(40) >= 2)
+        #expect(DisplayText.inkWidth(10) == 2)
+    }
+
+    /// Level progress: in order, a world at 20 stars (Core's rules), the best stars kept, persisted (v3).
+    @Test func levelProgress() throws {
+        var d = ProgressData()
+        #expect(LevelRules.next(d) == 1)
+        #expect(LevelRules.isOpen(d, 1))
+        #expect(!LevelRules.isOpen(d, 2))
+        #expect(!LevelRules.isWorldOpen(d, world: 2))
+        let first = LevelRules.record(&d, id: 1, stars: 2)
+        #expect(first.before == 0 && first.after == 2 && first.opened == nil)
+        #expect(LevelRules.isOpen(d, 2))
+        #expect(LevelRules.next(d) == 2)
+        // A worse try never lowers the best; a failed one (0) never counts.
+        _ = LevelRules.record(&d, id: 1, stars: 1)
+        #expect(LevelRules.stars(d, 1) == 2)
+        _ = LevelRules.record(&d, id: 2, stars: 0)
+        #expect(!LevelRules.passed(d, 2))
+        // 20 stars open Dusk (its first level open, the next world's line counts down).
+        var w = ProgressData()
+        var opened: Int?
+        for id in 1...7 { opened = LevelRules.record(&w, id: id, stars: 3).opened ?? opened }
+        #expect(opened == 2)
+        #expect(LevelRules.totalStars(w) == 21)
+        #expect(LevelRules.isWorldOpen(w, world: 2))
+        #expect(LevelRules.isOpen(w, 11))
+        #expect(LevelWords.unlockLine(w, world: 3) == "19 more ★ to open Night")
+        #expect(LevelRules.world(of: 1) == 1 && LevelRules.world(of: 20) == 2 && LevelRules.world(of: 30) == 3)
+        #expect(LevelRules.ids(world: 2) == 11...20)
+        #expect(LevelRules.nextAfter(7, in: w) == 8)
+        // Persisted.
+        let raw = try #require(ProgressStore.encode(w))
+        let back = try #require(ProgressStore.decode(raw))
+        #expect(back.levelStars == w.levelStars)
+        #expect(ProgressData.currentVersion == 3)
+        let odd = try #require(ProgressStore.decode(Data(#"{"levelStars":{"3":9,"0":2,"5":0}}"#.utf8)))
+        #expect(odd.levelStars == [3: 3])
+        // A level run fills the Bug Book but keeps no best.
+        var r = ProgressData()
+        r.bestFeed = 500
+        let o = record(makeRun(mode: .level(3), score: 900, bugs: 5, caught: ["housefly": 5]), &r)
+        #expect(o.level)
+        #expect(!o.isNewBest)
+        #expect(r.bestFeed == 500)
+        #expect(r.caughtCount(.housefly) == 5)
+        #expect(ProgressRules.best(for: .level(3), in: r) == 0)
+        #expect(AppRules.againMode(.level(4)) == .level(4))
+    }
+
+    /// The levels' words and pictures.
+    @Test func levelWords() {
+        #expect(LevelWords.levelName(3) == "Level 3")
+        #expect(LevelWords.worldName(1) == "Morning Bog")
+        #expect(LevelWords.worldName(3) == "Night")
+        #expect(LevelWords.startLine(touch: false) == "Close the phone to start")
+        #expect(LevelWords.startLine(touch: true) == "Tap to start")
+        #expect(LevelGoalBadge.caption(LevelHUD(id: 3, goal: "Catch 3 flies", secondsLeft: 75)) == "LEVEL 3 · 1:15")
+        #expect(LevelGoalBadge.caption(LevelHUD(id: 12, goal: "x")) == "LEVEL 12")
+        for id in 1...30 {
+            let n = LevelArt.species(id).count
+            #expect(n >= 1 && n <= 3)
+        }
+        #expect(LevelArt.species(4).contains(.bee))
+        let box = CGSize(width: 400, height: 500)
+        for i in 0..<10 {
+            let p = LevelMapView.padCenter(i, in: box)
+            #expect(p.x > 0 && p.x < box.width && p.y > 0 && p.y < box.height)
+        }
+        #expect(ClosingPhoneGlyph.spread(at: 0) > 60)
+        #expect(ClosingPhoneGlyph.spread(at: ClosingPhoneGlyph.loop * 0.5) < 1)
+        #expect(LevelResultsView.headline(LevelResult(id: 1, world: 1, title: "", goal: "", stars: 3, bestStars: 3,
+                                                      passed: true, line: "", next: 2, worldOpened: nil)) == "Perfect!")
+        #expect(LevelResultsView.headline(LevelResult(id: 1, world: 1, title: "", goal: "", stars: 0, bestStars: 0,
+                                                      passed: false, line: "", next: nil, worldOpened: nil)) == "Not yet!")
+    }
+
+    /// The goal line mirrors the score, so it sits on the other page, off the fold.
+    @Test func goalLineSitsOnTheOtherPage() {
+        for left in [false, true] {
+            let size = CGSize(width: 951, height: 669)
+            let c = AppCanvas(size: size, insets: EdgeInsets(),
+                              layout: ScreenLayout.make(viewSize: size, hasFold: true, hudOnLeft: left))
+            let l = HUDLayout.make(c)
+            let goal = LevelGoalLayout.rect(c, score: l.score)
+            #expect(c.isFoldClear(goal))
+            #expect(c.otherPage.insetBy(dx: -40, dy: 0).contains(CGPoint(x: goal.midX, y: goal.midY)))
+            #expect(!goal.intersects(l.score))
+        }
+    }
+
+    /// The R8 demo keys.
+    @Test func roundEightDemoKeys() {
+        #if DEBUG
+        #expect(DemoMode.parse("screen=levels").screen == .levels)
+        #expect(DemoMode.parse("screen=levelIntro").screen == .levelIntro)
+        #expect(DemoMode.parse("screen=LEVELRESULTS").screen == .levelResults)
+        #expect(DemoMode.parse("screen=chomp;chomp=dry").chomp == .dry)
+        #expect(DemoMode.parse("screen=shut").screen == .shut)
+        #expect(DemoMode.parse("screen=lesson").screen == nil)
+        #expect(DemoMode.parse("mode=level;level=7").runMode(today: 3) == .level(7))
+        #expect(DemoMode.parse("mode=level").runMode(today: 3) == .level(DemoMode.defaultLevel))
+        #endif
+        #expect(DemoMode.chompKind("catch") == .catchBite)
+        #expect(DemoMode.chompKind("bogus") == nil)
+        let mid = DemoPresets.progress(.mid, today: 299)
+        #expect(LevelRules.next(mid) == 7)
+        let late = DemoPresets.progress(.late, today: 299)
+        #expect(LevelRules.isWorldOpen(late, world: 3))
+        #expect(DemoPresets.progress(.fresh, today: 299).levelStars.isEmpty)
+    }
+
+    /// Menus sit on the live bog; only play is a play route.
+    @Test func routes() {
+        #expect(AppRoute.playing.isPlay)
+        #expect(!AppRoute.levels.isPlay)
+        #expect(AppRoute.levels.showsLiveBog && AppRoute.results.showsLiveBog && AppRoute.home.showsLiveBog)
+        #expect(!AppRoute.playing.showsLiveBog)
     }
 }
 

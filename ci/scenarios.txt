@@ -12,16 +12,16 @@
 #  - Long waits (lastSnap, tired, results) are for a novice pilot spending 10 snaps; a missed freeze is captured anyway.
 #
 # Home
-01-home-fresh|screen=home;progress=fresh|6|Home, first launch: the title over a live trap, a bee bumbling across; Feed / Daily Bog / Bug Book / Settings; rank Sprout, no best yet|SNAP-T canvas
-02-home-mid|screen=home;progress=mid|6|Home, returning: rank 4, best 3,200, the daily status, 9 species found|SNAP-T canvas
-03-home-duo-layout|screen=home;progress=mid;fold=1|6|Home laid out as on a Duo (fold=1): the midrib on the fold band, the buttons on the right (HUD) half|SNAP-T canvas [0-9]+x[0-9]+ fold=1
-# First Bite (GAME-DESIGN §8), phone texts ("Tap to snap"; the pose step is skipped on a phone)
-04-lesson-2-first-snap|screen=lesson;lessonStep=2|7|Lesson step 2: one fat housefly sipping on a nectar drop, "When it's sipping… tap to snap!"|SNAP-T canvas
-05-lesson-3-open-again|screen=lesson;lessonStep=3;fold=1;closure=24|7|Lesson step 3, the Duo's re-arm step (fold=1 gives the Duo lesson on a phone sim; a touch phone has no step 3, it merges into step 2's praise): the jaws held at 24°, past the bite, so the trap never re-arms and the card waits on "Open up to reset the trap." (R7: it was frame 06 again)|SNAP-T lesson step 3
-06-lesson-4-too-slow|screen=lesson;lessonStep=4|7|Lesson step 4: two flies land, "Quick snaps catch more."|SNAP-T canvas
-07-lesson-5-bee|screen=lesson;lessonStep=5|5|Lesson step 5: a bee sipping with its white protected halo, "Never eat a bee. Wait…"|SNAP-T canvas
-08-lesson-6-triple|screen=lesson;lessonStep=6|8|Lesson step 6: three flies landing together, "Wait for a crowd… now!"|SNAP-T canvas
-09-lesson-7-card|screen=lesson;lessonStep=7|6|Lesson step 7 card: "Snaps run out. Big bites earn them back."|SNAP-T canvas
+01-home-fresh|screen=home;progress=fresh|6|R8 Home, first launch: "Snapjaw" in the inked display type over the live bog; the big gold Play ("Level 1 · …"); three lily pads Endless / Daily / Zen; the quiet row Levels / Bug Book / Garden / Settings; rank Sprout, ★ 0|SNAP-T canvas
+02-home-mid|screen=home;progress=mid|6|R8 Home, returning: Play says "Level 7 · …", ★ 14, best 3,200 under Endless, the goals leaf, 9/16 under the book|SNAP-T canvas
+03-home-duo-layout|screen=home;progress=mid;fold=1|6|Home laid out as on a Duo (fold=1): the title on the left page, Play and the pads on the right (HUD) half, nothing on the fold band|SNAP-T canvas [0-9]+x[0-9]+ fold=1
+# R8 Levels (Levels 1–5 replace the First Bite; phone texts, "Tap to snap")
+04-levels-map|screen=levels;progress=mid|6|The level map: three worlds on the left (Morning Bog picked, Dusk "6 more ★ to open Dusk", Night locked), ten lily pads on a winding path on the right, levels 1–6 with stars, 7 glowing (next), 8–10 locked|SNAP-T screen levels
+05-level-intro|screen=levelIntro;level=3|6|Level 3's intro card: "LEVEL 3" huge on the left page, the goal in one line and its picture (two flies on a pad) on the right, Go! (a phone; a Duo says "Close the phone to start")|SNAP-T level intro 3
+06-level-1-coach|screen=play;mode=level;level=1;pilot=casual;freezeOn=landed|40|Level 1 in play: the goal line top-left ("Catch …", LEVEL 1), the fly ringed by the pointer, the coach plate "Now! Tap!"; score and bites only|SNAP-T freeze landed
+07-level-4-bee|screen=play;mode=level;level=4;pilot=perfect;freezeOn=bee|60|Level 4: a bee sipping beside a fly, its white halo ringed, "Bee! Wait…"|SNAP-T freeze bee
+08-level-results-3|screen=levelResults;level=1;pilot=perfect|30|Level results: "Perfect!" in display type, three gold stars (instant in CI), Core's line, score / bugs / spared, Next level and Retry, Levels and Home|SNAP-T level result 1 stars=
+09-chomp-card|screen=chomp|60|The outer display's CHOMP card, forced on a phone sim: the closed trap from outside with a bump per bug, "CHOMP!", "4 bugs · +360", "Fast close", "Open to keep feeding", the score|SNAP-T chomp card
 # Play (Feed), a pilot drives the trap, frozen on a moment (the scene keeps drawing)
 10-play-landed|screen=play;seed=7;pilot=expert;freezeOn=landed|30|First bug sipping inside the trap: gold sip ring, the HUD on the right half (score, 10 snap icons)|SNAP-T input pilot
 11-play-crowd|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd|60|Three or more bugs sipping at once, the "Now!" hint|SNAP-T freeze crowd
@@ -46,8 +46,8 @@
 28-book-mid|screen=book;progress=mid|6|Bug Book: 9 of 16 drawn with name, joke and count; the rest silhouettes|SNAP-T canvas
 29-book-late|screen=book;progress=late|6|Bug Book, all 16 found (bees show "spared")|SNAP-T canvas
 30-settings|screen=settings|5|Settings: Sound, Haptics, Respect silent switch, Score on the left, Reduce motion, Replay First Bite, Game Center, About|SNAP-T canvas
-31-pose|screen=pose|5|The pose card: "Hold it open like a book" with its diagram|SNAP-T canvas
-32-cover|screen=cover|5|The cover-display card: "Open it up to carry on" and the score|SNAP-T canvas
+31-pose|screen=pose|5|The pose card (R8: no pose demand): "Snapjaw plays sideways", "The two halves are its jaws." with its diagram|SNAP-T canvas
+32-cover|screen=cover|5|R8 the outer display off a run: the closed trap at rest, "Snapjaw", the next level, "Open to play"|SNAP-T canvas
 # R2: hunger (GAME-DESIGN §5)
 33-play-hungry|screen=play;seed=7;freezeOn=hungry|40|No pilot and no taps, so nothing is eaten. Hungry: the next snap glyph draining, "Hungry… bite!"|SNAP-T event hungry
 34-play-wilted|screen=play;seed=7;freezeOn=wilted|45|No pilot and no taps. A snap wilted: the "wilted −1" pop, the snaps row one shorter|SNAP-T event wilted
@@ -77,3 +77,11 @@
 55-variety-golden|screen=play;seed=7;wave=6;pilot=perfect;progress=late;variety=goldenGlow;freezeOn=crowd|60|Golden Glow variety: the gold sheen|SNAP-T freeze crowd
 # R7 (SCORE-R6 #16): the Garden pick (variety= is the chosen trap, so it wears the gold check)
 56-garden-pick|screen=garden;progress=late;variety=redDragon|8|The Garden with Red Dragon picked: the gold check on Red Dragon, not on Classic; grown cards in colour, two still locked|SNAP-T screen garden
+# R8 (design/notes/app-R8.md): the phone IS the trap: the outer display's cards, the shut state, more of the levels
+57-chomp-sting|screen=chomp;chomp=sting|90|The CHOMP card's sting: "Bzzt!" in bee yellow, the margin lifted a crack, the bee flying off, "A bee · −1 snap" (or "in the bite")|SNAP-T chomp card sting
+58-chomp-dry|screen=chomp;chomp=dry|90|The CHOMP card's dry bite: "Empty!", the trap flat and pale, "Too slow, they flew" or "Empty bite"|SNAP-T chomp card dry
+59-shut|screen=shut|6|The shut state: a run just started, the phone closed before its first bite: the closed trap, "The bugs are coming.", "Open to start"|SNAP-T canvas
+60-levels-late|screen=levels;progress=late|6|The map late on: Night open (picked), levels 21–23 with stars, 24 glowing|SNAP-T screen levels
+61-level-5-crowd|screen=play;mode=level;level=5;pilot=perfect;freezeOn=crowd|60|Level 5: a crowd of three sipping, the coach plate "Now! Tap!", the goal line top-left|SNAP-T freeze crowd
+62-level-results-retry|screen=levelResults;level=4;pilot=novice|90|A level not passed (a novice): "Not yet!", the stars dark, Core's line ("You bit a bee…"), Retry as the focal action|SNAP-T level result 4
+63-results-endless|screen=results;seed=7;progress=mid;pilot=casual|8|R8 Endless Results: the title in display type, the big score, the grid of four, goals and rank on leaf panels; Again big, Home as an icon|SNAP-T canvas

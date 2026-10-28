@@ -120,6 +120,9 @@ private struct BogFlash {
     var origin: CGPoint = .zero
     var angle: CGFloat = 0
     var size: CGFloat = 0
+    /// R8: height ÷ width (the digest's wing scrap is long) and the alpha it holds at (the digest's stains, remains).
+    var aspect: CGFloat = 1
+    var peak: CGFloat = 1
 }
 
 /// A pool of `BogFlash` sprites of one kind.
@@ -183,6 +186,9 @@ final class BogEffects {
     private let whiffs: BogFlashPool
     private let startles: BogFlashPool
     private let ripples: BogFlashPool
+    /// R8 (the digest): gold juice stains and the remains (flecks, a wing scrap) where caught bugs were.
+    private let stains: BogFlashPool
+    private let remains: BogFlashPool
     private var rng = BogRNG(seed: 0x51A7)
     var reduceMotion = false {
         didSet {
@@ -197,6 +203,11 @@ final class BogEffects {
     static let juiceColor = RGBA(hex: 0xFFC83D)
     /// R6: the spray's bright core (the FEAST burst's sparkle).
     static let juiceGlint = RGBA(hex: 0xFFF2B0)
+    /// R8 (the digest): how long the stain and the remains stay (session seconds), and the remains' dark fleck colour.
+    static let digestLife: Double = 3
+    static let remainsColor = RGBA(hex: 0x2A1A10)
+    /// R8: the remains per caught bug (one pale wing scrap, the rest dark flecks).
+    static let remainsPerBug = 4
 
     init() {
         decalRoot = SKNode()
@@ -209,9 +220,15 @@ final class BogEffects {
         whiffs = BogFlashPool(capacity: 8, texture: BogTextures.whiff, blend: .add)
         startles = BogFlashPool(capacity: 6, texture: BogTextures.startle, blend: .alpha)
         ripples = BogFlashPool(capacity: 10, texture: BogTextures.ripple, blend: .add)
+        stains = BogFlashPool(capacity: 14, texture: BogTextures.splat(1), blend: .alpha)
+        remains = BogFlashPool(capacity: 14 * BogEffects.remainsPerBug, texture: BogTextures.dot, blend: .alpha)
         decalRoot.zPosition = 16
         groundRoot.zPosition = 23
         fxRoot.zPosition = 50
+        stains.root.zPosition = -0.4
+        remains.root.zPosition = -0.2
+        decalRoot.addChild(stains.root)
+        decalRoot.addChild(remains.root)
         decalRoot.addChild(splats.root)
         groundRoot.addChild(ripples.root)
         dust.root.zPosition = 0
@@ -233,11 +250,14 @@ final class BogEffects {
     /// Active particles and flashes (tests).
     var activeCount: Int {
         juice.activeCount + sparks.activeCount + dust.activeCount + splats.activeCount + whiffs.activeCount
-            + startles.activeCount + ripples.activeCount
+            + startles.activeCount + ripples.activeCount + stains.activeCount + remains.activeCount
     }
 
     var activeSplats: Int { splats.activeCount }
     var activeWhiffs: Int { whiffs.activeCount }
+    /// R8 (tests): the digest's stains and remains showing now.
+    var activeStains: Int { stains.activeCount }
+    var activeRemains: Int { remains.activeCount }
 
     func clear() {
         juice.clear()
@@ -247,6 +267,8 @@ final class BogEffects {
         whiffs.clear()
         startles.clear()
         ripples.clear()
+        stains.clear()
+        remains.clear()
     }
 
     private func count(_ n: Int, _ pool: BogParticlePool) -> Int { max(1, Int((CGFloat(n) * pool.density).rounded())) }
@@ -305,6 +327,47 @@ final class BogEffects {
     /// R6: a little gold gulp where a caught bug vanishes into the midrib (the FEAST's one-after-another gulps).
     func gulp(at p: CGPoint) {
         sparkBurst(at: p, count: 3, color: BogPaint.ui(TrapArt.palette.gold), speed: 110, size: 16)
+    }
+
+    /// R8 (the digest, as the trap reopens after a hinge bite): where a caught bug was, a gold juice stain soaking into
+    /// the lobe and its remains (dark flecks and one pale wing scrap), fading after `digestLife`. A cheeky leftover,
+    /// never gore (4+). Placed at once (position, size, alpha), so it shows on the first frame even at dt 0.
+    func digest(at p: CGPoint, radius r: CGFloat, tint: RGBA) {
+        let i = stains.next()
+        let size = max(r * 2.6, 36)
+        let angle = rng.range(0, 2 * .pi)
+        stains.flashes[i] = BogFlash(age: 0, life: BogEffects.digestLife, active: true, origin: p, angle: angle,
+                                     size: size, aspect: 0.82, peak: 0.85)
+        let s = stains.sprites[i]
+        s.texture = BogTextures.splat(Int(rng.range(0, 3)))
+        s.color = BogPaint.ui(BogPaint.multiply(BogEffects.juiceColor, tint))
+        s.colorBlendFactor = 0.7
+        s.position = p
+        s.zRotation = angle
+        s.size = CGSize(width: size * 0.6, height: size * 0.6 * 0.82)
+        s.alpha = 0.85
+        s.isHidden = false
+        let fleck = BogPaint.ui(BogEffects.remainsColor)
+        for k in 0..<BogEffects.remainsPerBug {
+            let j = remains.next()
+            let a = rng.range(0, 2 * .pi)
+            let d = rng.range(0.1, 0.55) * r
+            let q = CGPoint(x: p.x + cos(a) * d, y: p.y + sin(a) * d)
+            let wing = k == 0
+            let sz = wing ? max(r * 0.6, 9) : max(r * rng.range(0.16, 0.3), 4)
+            let aspect: CGFloat = wing ? 0.45 : rng.range(0.7, 1)
+            let peak: CGFloat = wing ? 0.55 : 0.85
+            remains.flashes[j] = BogFlash(age: 0, life: BogEffects.digestLife, active: true, origin: q, angle: a,
+                                          size: sz, aspect: aspect, peak: peak)
+            let sp = remains.sprites[j]
+            sp.color = wing ? UIColor(white: 0.93, alpha: 1) : fleck
+            sp.colorBlendFactor = 1
+            sp.position = q
+            sp.zRotation = a
+            sp.size = CGSize(width: sz, height: sz * aspect)
+            sp.alpha = peak
+            sp.isHidden = false
+        }
     }
 
     /// R6: sparkles round the FEAST banner (`box`, scene space).
@@ -412,6 +475,20 @@ final class BogEffects {
             let k = 0.4 + 0.9 * u
             s.size = CGSize(width: f.size * k, height: f.size * k * 0.8)
             s.alpha = 0.65 * (1 - u)
+        }
+        step(stains, dt) { s, f, u in
+            // R8: the stain soaks out to its size in the first moment, holds, and fades at the end.
+            let soak: CGFloat = u < 0.08 ? 0.6 + 0.4 * (u / 0.08) : 1
+            s.position = f.origin
+            s.zRotation = f.angle
+            s.size = CGSize(width: f.size * soak, height: f.size * soak * f.aspect)
+            s.alpha = f.peak * (1 - BogMath.smoothstep(0.7, 1, u))
+        }
+        step(remains, dt) { s, f, u in
+            s.position = f.origin
+            s.zRotation = f.angle
+            s.size = CGSize(width: f.size, height: f.size * f.aspect)
+            s.alpha = f.peak * (1 - BogMath.smoothstep(0.75, 1, u))
         }
     }
 

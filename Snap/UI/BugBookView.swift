@@ -33,11 +33,11 @@ struct BugBookView: View {
 
     private func page(_ species: [BugSpecies], rect: CGRect, headerH: CGFloat, header: Bool, _ c: Bool) -> some View {
         VStack(alignment: .leading, spacing: c ? 6 : 10) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .bottom) {
                 if header {
-                    Text("Bug Book")
-                        .font(SnapType.title(c))
-                        .foregroundStyle(SnapTheme.cream)
+                    // R8: the display type.
+                    DisplayText(text: "Bug Book", size: c ? 32 : 44, tilt: -2)
+                        .fixedSize()
                     Text("\(store.data.speciesFound) of \(BugSpecies.allCases.count) found")
                         .font(SnapType.body(c))
                         .foregroundStyle(SnapTheme.mist)

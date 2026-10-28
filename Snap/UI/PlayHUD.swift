@@ -2,8 +2,11 @@ import SwiftUI
 import UIKit
 
 /// The play layer over the scene: the HUD in the outer corners of the HUD page (R3: off the cilia, `HUDLayout`), the
-/// hint, the lesson card, the pause menu and the closing card. Only the buttons take touches: every tap elsewhere
-/// reaches the scene (tap to snap on iPhones without a hinge).
+/// hint, the pause menu, and (R8) a level's goal line, its intro card and the "Close the phone to start" card. Only the
+/// buttons take touches: every tap elsewhere reaches the scene (tap to snap on iPhones without a hinge).
+///
+/// R8 (ROUND-8 §3: the in-play HUD is minimal): the score, the snaps (a level's bites) and, in a level, its goal. The
+/// closing card is gone: closed is not a pause (the pause menu comes from the pause button only).
 struct PlayLayer: View {
     @ObservedObject var controller: GameController
     @ObservedObject var hud: HUDState
@@ -14,57 +17,56 @@ struct PlayLayer: View {
     /// The chain chip bumps on each chain step (the scene no longer pops "chain ×n" on the lobe).
     @State private var chainBump = false
     @State private var bumpTask: Task<Void, Never>?
-    @State private var lessonCardHeight: CGFloat = 0
 
     var body: some View {
         let l = HUDLayout.make(info)
         let v = hud.values
         let c = info.isCompact
-        let paused = controller.isMenuOpen || controller.isClosingPaused
-        let lesson = controller.route == .lesson ? controller.lessonDisplay : nil
-        let showsCard = lesson.map { !$0.isFinal } ?? false
+        let paused = controller.isMenuOpen
+        let intro = controller.levelIntro
         // R4 (REVIEW-3 #3): the plate never covers a live pop (it moves to the inner bottom, or waits a beat).
         // R7 (#5, frame 43: the free-sting toast sat on the trap's flies): a toast waits, its clock still, rather than
         // cover the bugs (`strict`), up to `MessageQueue.maxHold`; Core's state hints always show.
         let toast = v.hint.map { AppRules.hudHintIsToast($0) } ?? false
-        let slot: (rect: CGRect, low: Bool)? = showsCard
-            ? (rect: l.lessonHint, low: true)
-            : HUDLayout.hintSlot(primary: l.hint, alternate: l.lessonHint, pops: v.popRects.map { info.screenRect($0) },
-                                 subjects: v.subjectRects.map { info.screenRect($0) },
-                                 strict: toast && !v.plateMayCover)
+        let slot = HUDLayout.hintSlot(primary: l.hint, alternate: l.lessonHint, pops: v.popRects.map { info.screenRect($0) },
+                                      subjects: v.subjectRects.map { info.screenRect($0) },
+                                      strict: toast && !v.plateMayCover)
         let plateHeld = toast && slot == nil && !paused
         let hintRect = slot?.rect ?? l.hint
         let inner: HorizontalAlignment = l.trailing ? .leading : .trailing
         let hintAlign = Alignment(horizontal: inner, vertical: (slot?.low ?? false) ? .bottom : .top)
         // R6 Zen: the snaps never run out, so there's no row.
-        let showsSnaps = (!v.lesson || v.lessonSnaps) && !v.zen
+        let showsSnaps = !v.zen
         let tagY = min(l.chain.minY, l.snaps.minY) - (c ? 14 : 18)
+        let goal = LevelGoalLayout.rect(info, score: l.score)
         ZStack {
-            if let lesson, !paused, !lesson.isFinal, !v.lessonTargets.isEmpty {
+            if !paused, intro == nil, !v.lessonTargets.isEmpty {
+                // R8: the teaching levels ring the bugs, an arrow from the goal line to each (the First Bite's).
                 LessonPointer(targets: v.lessonTargets, avoid: v.lessonAvoid, info: info,
-                              from: CGPoint(x: l.lesson.midX, y: l.lesson.minY + max(lessonCardHeight, 60)),
-                              reduceMotion: controller.reduceMotion)
+                              from: CGPoint(x: goal.midX, y: goal.maxY + 6), reduceMotion: controller.reduceMotion)
                     .allowsHitTesting(false)
             }
-            if !v.lesson {
-                // R4 (REVIEW-3 #13: "DAILY BOG · 28 OCT" ran under Pause, on the phone and the Duo): the Daily's name
-                // is the score's own caption line, inside the score's box.
-                ScoreBlock(score: v.score, best: v.best, passedBest: v.passedBest, trailing: l.trailing, compact: c,
-                           daily: paused ? nil : controller.dailyMarker, zen: v.zen)
-                    .frame(width: l.score.width, height: l.score.height,
-                           alignment: l.trailing ? .topTrailing : .topLeading)
-                    .position(x: l.score.midX, y: l.score.midY)
+            // R4 (REVIEW-3 #13): the Daily's name is the score's own caption line, inside the score's box.
+            ScoreBlock(score: v.score, best: v.best, passedBest: v.passedBest, trailing: l.trailing, compact: c,
+                       daily: paused ? nil : controller.dailyMarker, zen: v.zen)
+                .frame(width: l.score.width, height: l.score.height, alignment: l.trailing ? .topTrailing : .topLeading)
+                .position(x: l.score.midX, y: l.score.midY)
+                .allowsHitTesting(false)
+            if let level = v.level, intro == nil {
+                // R8: the level's goal, one line, big, in the other page's top outer corner (the score's mirror).
+                LevelGoalBadge(level: level, trailing: !l.trailing, compact: c)
+                    .frame(width: goal.width, height: goal.height, alignment: l.trailing ? .topLeading : .topTrailing)
+                    .position(x: goal.midX, y: goal.midY)
                     .allowsHitTesting(false)
-                if v.chainMultiplier > 1.01 {
-                    // R6 (#6, frame 42): the bite's own pop says "×2 held"; the chip only glows.
-                    ChainChip(multiplier: v.chainMultiplier, compact: c, short: l.chainCompact, glow: v.chainHeld)
-                        .scaleEffect(chainBump ? 1.22 : 1, anchor: l.trailing ? .trailing : .leading)
-                        .frame(width: l.chain.width, height: l.chain.height,
-                               alignment: l.trailing ? .trailing : .leading)
-                        .position(x: l.chain.midX, y: l.chain.midY)
-                        .allowsHitTesting(false)
-                        .transition(.scale(scale: 0.7).combined(with: .opacity))
-                }
+            }
+            if v.chainMultiplier > 1.01 {
+                // R6 (#6, frame 42): the bite's own pop says "×2 held"; the chip only glows.
+                ChainChip(multiplier: v.chainMultiplier, compact: c, short: l.chainCompact, glow: v.chainHeld)
+                    .scaleEffect(chainBump ? 1.22 : 1, anchor: l.trailing ? .trailing : .leading)
+                    .frame(width: l.chain.width, height: l.chain.height, alignment: l.trailing ? .trailing : .leading)
+                    .position(x: l.chain.midX, y: l.chain.midY)
+                    .allowsHitTesting(false)
+                    .transition(.scale(scale: 0.7).combined(with: .opacity))
             }
             if showsSnaps {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -85,13 +87,8 @@ struct PlayLayer: View {
                 SnapsRow(left: v.snapsLeft, layout: l, size: info.size, hunger: v.hunger, hungry: v.hungry,
                          reduceMotion: controller.reduceMotion)
                     .allowsHitTesting(false)
-                if v.ringSnaps && !paused {
-                    SnapsRing(rect: l.snaps, reduceMotion: controller.reduceMotion)
-                        .allowsHitTesting(false)
-                }
                 // R5 (REVIEW-4 #7): a costly sting says what it cost, at the row ("−2 snaps"); the first Feast its
-                // refund ("+1 snap"). R6 (#6): one tag at a time from the message queue, never beside a plate (the free
-                // sting's plate says it all: the row just flashes green).
+                // refund ("+1 snap"). R6 (#6): one tag at a time from the message queue.
                 if let tag = v.tag {
                     SnapGainTag(tag: tag, compact: c)
                         .frame(width: max(l.snaps.width, 140), alignment: l.trailing ? .trailing : .leading)
@@ -102,7 +99,7 @@ struct PlayLayer: View {
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
             }
-            if !paused && slot != nil {
+            if !paused && slot != nil && intro == nil && !v.waitingForClose {
                 HintPlate(hint: v.hint, banner: v.banner, touch: controller.hintTouch, compact: c)
                     .frame(width: hintRect.width, height: hintRect.height, alignment: hintAlign)
                     .position(x: hintRect.midX, y: hintRect.midY)
@@ -116,35 +113,30 @@ struct PlayLayer: View {
                     .allowsHitTesting(false)
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
             }
-            if let lesson, !paused {
-                if lesson.isFinal {
-                    LessonFinalCard(controller: controller, compact: c, trailing: l.trailing)
-                        .frame(width: l.card.width)
-                        .position(x: l.card.midX, y: min(info.size.height / 2, (l.card.minY + l.chain.minY) / 2))
-                        .transition(.opacity)
-                } else {
-                    LessonCard(lesson: lesson, compact: c, reduceMotion: controller.reduceMotion,
-                               onSkip: { controller.skipLesson() },
-                               onHeight: { h in if abs(h - lessonCardHeight) > 1 { lessonCardHeight = h } })
-                        .frame(width: l.lesson.width, height: l.lesson.height, alignment: .top)
-                        .position(x: l.lesson.midX, y: l.lesson.midY)
-                }
+            if v.waitingForClose && !paused && intro == nil {
+                // R8 (founder rule 3): every round starts closed.
+                CloseToStartCard(info: info, touch: controller.touchWording, reduceMotion: controller.reduceMotion)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
             }
-            if !paused && !(lesson?.isFinal ?? false) && !v.tired {
+            if let intro, !paused {
+                LevelIntroCard(intro: intro, info: info, reduceMotion: controller.reduceMotion,
+                               onGo: { controller.beginLevel() })
+                    .transition(.opacity)
+            }
+            if !paused && !v.tired {
                 SnapRoundButton(systemImage: "pause.fill", label: "Pause") { controller.openMenu() }
                     .position(x: l.pause.midX, y: l.pause.midY)
             }
             if controller.isMenuOpen {
                 PauseMenu(controller: controller, info: info, layout: l)
                     .transition(.opacity)
-            } else if controller.isClosingPaused {
-                ClosingCard(controller: controller, info: info, layout: l)
-                    .transition(.opacity)
             }
         }
         .frame(width: info.size.width, height: info.size.height)
         .animation(SnapTheme.settle(controller.reduceMotion), value: controller.isMenuOpen)
-        .animation(SnapTheme.settle(controller.reduceMotion), value: controller.isClosingPaused)
+        .animation(SnapTheme.settle(controller.reduceMotion), value: controller.levelIntro == nil)
+        .animation(SnapTheme.settle(controller.reduceMotion), value: v.waitingForClose)
         .animation(SnapTheme.pop(controller.reduceMotion), value: v.chainMultiplier > 1.01)
         .animation(SnapTheme.pop(controller.reduceMotion), value: v.tired)
         .animation(SnapTheme.pop(controller.reduceMotion), value: v.tag)
@@ -177,8 +169,12 @@ struct PlayLayer: View {
         let b = info.scenePoint(CGPoint(x: l.snaps.maxX, y: l.snaps.maxY))
         let row = CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
         controller.setSnapsAnchor(info.scenePoint(l.anchor(snapsLeft: left)), row: row)
-        // R6 (Scene #7): the HUD's two corners, so no bug parks under the score, the pause button or the snaps.
-        controller.setHUDKeepOut([l.score.union(l.pause), l.snaps.union(l.chain)].map { sceneRect($0) })
+        // R6 (Scene #7): the HUD's two corners, so no bug parks under the score, the pause button or the snaps. R8: and
+        // the goal line.
+        let goal = LevelGoalLayout.rect(info, score: l.score)
+        var rects = [l.score.union(l.pause), l.snaps.union(l.chain)]
+        if hud.values.level != nil { rects.append(goal) }
+        controller.setHUDKeepOut(rects.map { sceneRect($0) })
     }
 
     /// A screen rect in scene space (y up).
@@ -794,189 +790,3 @@ struct PauseMenu: View {
     }
 }
 
-/// The closing pause: "Open it up to carry on" (θ under 50° for 0.6 s). Nothing steps until it's open again (past
-/// 120°: the pause lifts from the hinge reports, QA-1 #1).
-struct ClosingCard: View {
-    @ObservedObject var controller: GameController
-    let info: AppCanvas
-    let layout: HUDLayout
-
-    /// One line for "open to carry on" everywhere (the cover card says it too: REVIEW-1-ux P2 #14).
-    static let title = CoverCard.carryOn
-    static let detail = "The bugs are waiting. So is your trap."
-
-    var body: some View {
-        let c = info.isCompact
-        ZStack {
-            Color.black.opacity(0.5)
-                .contentShape(Rectangle())
-                .onTapGesture {}
-            VStack(spacing: c ? 10 : 14) {
-                Image(systemName: "arrow.left.and.right")
-                    .font(.system(size: c ? 30 : 38, weight: .heavy))
-                    .foregroundStyle(SnapTheme.limeLight)
-                    .accessibilityHidden(true)
-                Text(Self.title)
-                    .font(SnapType.title(c))
-                    .foregroundStyle(SnapTheme.cream)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(Self.detail)
-                    .font(SnapType.body(c))
-                    .foregroundStyle(SnapTheme.mist)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                SnapButton(kind: .quiet, height: SnapTheme.minTap, compact: c, action: { controller.openMenu() }) {
-                    Text("Menu")
-                }
-            }
-            .frame(width: min(layout.card.width - 36, 340))
-            .snapCard(padding: c ? 14 : 20, radius: 26)
-            .position(x: layout.card.midX, y: info.size.height / 2)
-            .accessibilityElement(children: .contain)
-        }
-    }
-}
-
-
-// MARK: - The First Bite lesson
-
-/// One sentence per step, the step number, praise (green-gold) or a warning (crimson), and Skip on every step. Only
-/// Skip takes touches (QA-1 #11): a tap anywhere else on the card reaches the scene (tap to snap on phones). On a
-/// hinge, step 2 shows the 160° → 138° clap beside its line (ROUND-3 founder call).
-struct LessonCard: View {
-    let lesson: LessonDisplay
-    let compact: Bool
-    var reduceMotion = false
-    let onSkip: () -> Void
-    var onHeight: (CGFloat) -> Void = { _ in }
-
-    var body: some View {
-        let pad: CGFloat = compact ? 10 : 14
-        VStack(alignment: .leading, spacing: compact ? 4 : 6) {
-            HStack {
-                SnapOverline(text: "First Bite · " + lesson.stepOf, compact: compact)
-                Spacer(minLength: 6)
-                // Room for the Skip button (drawn over the card, the one hit-testable part).
-                Color.clear.frame(width: lesson.allowsSkip ? SnapTheme.minTap : 0, height: 30)
-            }
-            HStack(alignment: .top, spacing: compact ? 8 : 12) {
-                VStack(alignment: .leading, spacing: compact ? 4 : 6) {
-                    Text(lesson.line)
-                        .font(SnapType.headline(compact))
-                        .foregroundStyle(SnapTheme.cream)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let praise = lesson.praise {
-                        Text(praise)
-                            .font(SnapType.hint(compact))
-                            .foregroundStyle(SnapTheme.gold)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .transition(.scale(scale: 0.8).combined(with: .opacity))
-                    } else if let warning = lesson.warning {
-                        Text(warning)
-                            .font(SnapType.body(compact))
-                            .foregroundStyle(SnapTheme.pink)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .transition(.opacity)
-                    }
-                }
-                if lesson.showsClap {
-                    Spacer(minLength: 0)
-                    DuoClapDiagram(reduceMotion: reduceMotion)
-                        .frame(width: compact ? 84 : 104, height: compact ? 66 : 82)
-                }
-            }
-        }
-        .snapCard(padding: pad, radius: 20)
-        .background(GeometryReader { g in
-            Color.clear.preference(key: LessonCardHeightKey.self, value: g.size.height)
-        })
-        .onPreferenceChange(LessonCardHeightKey.self) { h in onHeight(h) }
-        .animation(.easeOut(duration: 0.2), value: lesson)
-        .allowsHitTesting(false)
-        .overlay(alignment: .topTrailing) {
-            if lesson.allowsSkip {
-                Button(action: onSkip) {
-                    Text("Skip")
-                        .font(SnapType.body(compact))
-                        .foregroundStyle(SnapTheme.mist)
-                        .frame(minWidth: SnapTheme.minTap, minHeight: SnapTheme.minTap)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(.top, pad - 14)
-                .padding(.trailing, pad - 6)
-                .accessibilityHint("Skip the lesson")
-            }
-        }
-        .accessibilityElement(children: .contain)
-    }
-}
-
-private struct LessonCardHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
-}
-
-/// The lesson's last card: "Snaps run out. Big bites earn them back.", the four rules, and a pointer to the snaps row
-/// (ringed on screen: REVIEW-2 #12). Then Feed.
-struct LessonFinalCard: View {
-    @ObservedObject var controller: GameController
-    let compact: Bool
-    /// The HUD hugs the right edge (the pointer arrow aims at the snaps' corner).
-    var trailing = true
-
-    /// R4 (REVIEW-3 #10): the chain is named on the card. R5 (REVIEW-4 #13, founder call): at most three short
-    /// sentences (the bee step taught the stinger cost, and "Too slow! −1 snap" teaches the wilt when it happens).
-    static let rules = "Every snap costs one. Three bugs in one bite give one back. " + AppRules.chainLesson
-    /// The card's sentence cap (tested).
-    static let maxSentences = 3
-    static let snapsLine = "These are your snaps"
-
-    var body: some View {
-        VStack(spacing: compact ? 8 : 14) {
-            SnapOverline(text: "First Bite done", compact: compact, color: SnapTheme.gold)
-            Text(LessonScript.line(.done, touch: controller.lessonTouch))
-                .font(SnapType.title(compact))
-                .foregroundStyle(SnapTheme.cream)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(Self.rules)
-                .font(SnapType.body(compact))
-                .foregroundStyle(SnapTheme.mist)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 6) {
-                Text(Self.snapsLine)
-                    .font(SnapType.body(compact))
-                    .foregroundStyle(SnapTheme.limeLight)
-                Image(systemName: trailing ? "arrow.down.right" : "arrow.down.left")
-                    .font(.system(size: compact ? 14 : 17, weight: .heavy))
-                    .foregroundStyle(SnapTheme.limeLight)
-            }
-            .accessibilityElement(children: .combine)
-            if compact {
-                // Side by side on a short phone, so the card stays clear of the snaps row it points at.
-                HStack(spacing: 8) {
-                    SnapButton(kind: .secondary, height: 52, compact: true, action: { controller.finishLessonHome() }) {
-                        Text("Home")
-                    }
-                    .frame(width: 96)
-                    SnapButton(kind: .primary, height: 52, compact: true, action: { controller.finishLesson() }) {
-                        Text("Start feeding")
-                    }
-                }
-            } else {
-                SnapButton(kind: .primary, height: SnapTheme.primaryHeight, compact: false,
-                           action: { controller.finishLesson() }) {
-                    Text("Start feeding")
-                }
-                SnapButton(kind: .quiet, height: SnapTheme.minTap, compact: false,
-                           action: { controller.finishLessonHome() }) {
-                    Text("Home")
-                }
-            }
-        }
-        .snapCard(padding: compact ? 14 : 22, radius: 28)
-    }
-}

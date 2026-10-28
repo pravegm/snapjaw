@@ -1084,16 +1084,21 @@ enum FeelSoundBook {
         return bed
     }
 
-    /// The creep groan's level: 0 unless creeping; 0.55 at the creep line rising to 1 at the snap depth.
+    /// R8 (the phone IS the trap): a close runs from Core's close start (8°) to about 120° of closure before the
+    /// shut (Scene's `cueFull`), so the leaf's groan and its texture stretch over the whole close.
+    static let closeFrom: Double = 8
+    static let closeFull: Double = 120
+
+    /// The slow-close groan's level: 0 unless closing slowly (Core's `creeping`); 0.55 at the close's start rising to
+    /// 1 near the shut.
     static func groanLevel(closure: Double, creeping: Bool) -> Double {
         guard creeping, closure.isFinite else { return 0 }
-        let span = max(Tuning.snapDepth - Tuning.creepDepth, 1)
-        return 0.55 + 0.45 * FeelMath.clamp01((closure - Tuning.creepDepth) / span)
+        return 0.55 + 0.45 * FeelMath.clamp01((closure - closeFrom) / (closeFull - closeFrom))
     }
 
-    /// The groan's pitch (Hz): 70 open … 140 at the snap depth.
+    /// The groan's pitch (Hz): 70 open … 140 near the shut.
     static func groanHz(closure: Double) -> Double {
-        70 + 70 * FeelMath.clamp01(closure / Tuning.snapDepth)
+        70 + 70 * FeelMath.clamp01(closure / closeFull)
     }
 
     /// The marimba voices for a chain: 1, then one more at chains of 2, 4 and 6, and (R3) a fifth, the bright chime
@@ -1141,7 +1146,7 @@ enum FeelSoundBook {
     static func isZen(_ mode: RunMode) -> Bool {
         switch mode {
         case .zen: return true
-        case .feed, .daily, .attract, .lesson: return false
+        case .feed, .daily, .attract, .lesson, .level: return false
         }
     }
 

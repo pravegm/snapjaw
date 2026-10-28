@@ -66,51 +66,151 @@ enum AppRules {
         return min(max(reference - predicted, 0), 90)
     }
 
-    // MARK: Hinge pause
+    // MARK: R8: closed is not a pause
+    //
+    // ROUND-8 §1: the closing pause is gone. Shutting the Duo IS the bite, and the clock stands still while it is shut
+    // (Core's `TrapSnapshot.shut`). The pause menu comes only from the pause button.
 
-    /// The closing pause lifts once the hinge is back open past this (a natural snap often reaches 90–100°, so the
-    /// pause never sits near 90°: it engages under `Tuning.closingAngle` and lifts well above it).
-    static let resumeAngle: Double = 120
+    /// Demo `closure=` holds the drawn closure; it reads as armed (open) below this many degrees (Core's close start).
+    static let heldClosureArmedBelow: Double = 8
+    /// Home's title trap: the closure (degrees) that reads as fully shut for its little creak meter.
+    static let homeClosureSpan: Double = 90
 
-    /// Whether a paused (closing) hinge run may carry on. Pure; tested.
-    static func mayResume(angle: Double?, isClosing: Bool, isShut: Bool) -> Bool {
-        guard let angle, angle.isFinite, !isShut, !isClosing else { return false }
-        return angle >= resumeAngle
+    /// R8: a step made from a hinge report while no scene frame has come for this long (s): the Duo was shut (the app
+    /// moved to the outer display), so the bite at the shut is stepped from the hinge itself. Pure; tested.
+    static let sceneFrameGap: Double = 0.12
+
+    static func stepsFromHinge(sinceSceneFrame: Double, liveHingeRun: Bool, menuOpen: Bool) -> Bool {
+        // No frame ever (+∞) counts as "no scene drawing"; NaN never steps.
+        guard liveHingeRun, !menuOpen, !sinceSceneFrame.isNaN else { return false }
+        return sinceSceneFrame >= sceneFrameGap
     }
 
     // MARK: Words
 
-    /// One line, ≤ 6 words (UI owns the words; Core picks the hint). `touch`: no hinge, so the bend/creep/open hints
-    /// don't apply. Pure; tested.
+    /// One short line, ≤ 4 words (UI owns the words; Core picks the hint). `touch`: no hinge, so the bend/creep/open
+    /// hints don't apply. R8 (ROUND-8 §3: "Unclear what to do"): each says what to do now. Pure; tested.
     static func hintText(_ hint: TrapHint, touch: Bool) -> String? {
         switch hint {
-        // R7 (#12, duo-ui-too-flat-178): the Duo held (nearly) flat says what to do: "Fold it a little".
-        case .bendALittle: return touch ? nil : tooFlatCopy
-        case .quick: return touch ? nil : "Snap it — quick!"
-        case .openUp: return touch ? nil : "Open up to reset"
+        // R8 (founder rule 2: no pose demands, ever): flat, laptop, any angle plays; Core's too-flat hint says nothing.
+        case .bendALittle: return nil
+        case .quick: return touch ? nil : "Close it fast!"
+        case .openUp: return touch ? nil : "Open it again"
         case .beeInside: return "Bee! Wait…"
-        case .crowd: return "Now!"
-        case .lastSnap: return "Last snap! Make it count"
-        case .hungry: return "Hungry… bite!"
+        case .crowd: return touch ? "Now! Tap!" : "Now! Close it!"
+        case .lastSnap: return "Last snap!"
+        case .hungry: return "Hungry! Bite soon"
         }
     }
 
-    /// R7 (#12): the too-flat prompt on play's plate (short, so it fits the narrowest plate in the big type); the
-    /// lesson's pose step says it in full (`LessonScript.bendALittle`).
-    static let tooFlatCopy = "Fold it a little"
+    // MARK: R8: what each bite did, in plain words
 
-    /// R7 (#12): the Duo is held too flat to read as a book (Core's own `Tuning.tooFlatAngle`, 174°). Pure; tested.
-    static func isTooFlat(angle: Double?) -> Bool {
-        guard let a = angle, a.isFinite else { return false }
-        return a >= Tuning.tooFlatAngle
+    /// A close from the book to shut this quick (s) is "fast" (ROUND-8 §1: a decisive slam ≤ 0.3 s).
+    static let fastClose: Double = 0.3
+    /// Under this share caught (of the bugs in the trap at the close's start) the bite was too slow.
+    static let slowRatio: Double = 0.6
+
+    /// R8 (ROUND-8 §3: "every bite's result says plainly what was good or bad"): "3 bugs! Fast close", "Too slow, they
+    /// flew", "Bee! −1 snap". `good`: the cream plate. `touch`: a tap has no speed, so it never says "Fast close".
+    /// Pure; tested.
+    static func biteVerdict(_ r: BiteReport, touch: Bool = false) -> (text: String, good: Bool) {
+        let n = r.caught.count
+        if !r.stingers.isEmpty {
+            let who = r.stingers.contains(.wasp) ? "Wasp!" : "Bee!"
+            if r.snapsLost > 0 { return (who + " " + snapLossText(r.snapsLost), false) }
+            return (who + " Let it leave", false)
+        }
+        if n == 0 {
+            return r.escaped > 0 ? ("Too slow, they flew", false) : ("Empty bite", false)
+        }
+        let ratio = r.catchRatio.isFinite ? r.catchRatio : 1
+        if r.escaped > 0 && ratio < slowRatio && !touch {
+            return ("Too slow, \(r.escaped) flew", false)
+        }
+        let head = n == 1 ? "Got it!" : "\(n) bugs!"
+        if !touch && r.duration.isFinite && r.duration > 0 && r.duration <= fastClose { return (head + " Fast close", true) }
+        if r.escaped > 0 { return (head + " \(r.escaped) got away", true) }
+        if n >= 3 { return (head + " Feast!", true) }
+        return (head + " Clean bite", true)
     }
 
-    /// R7 (#12): play's state hint with the too-flat prompt folded in: on a hinge held too flat it replaces any hint
-    /// but a warning (a bee inside, the last snap, hunger: those still matter more). Pure; tested.
-    static func flatGuardedHint(_ hint: TrapHint?, tooFlat: Bool) -> TrapHint? {
-        guard tooFlat else { return hint }
-        if let h = hint, hintIsWarning(h) { return h }
-        return .bendALittle
+    /// Sample verdicts for the plate's fit tests (every shape the words take).
+    static var verdictSamples: [String] {
+        ["Got it! Fast close", "3 bugs! Fast close", "12 bugs! 3 got away", "Too slow, they flew",
+         "Too slow, 11 flew", "Empty bite", "Bee! \u{2212}2 snaps", "Wasp! Let it leave", "5 bugs! Feast!",
+         "2 bugs! Clean bite"]
+    }
+
+    // MARK: R8: the teaching levels' coach (Levels 1–5 replace the First Bite)
+
+    /// How many sipping bugs each teaching level waits for before it says "Now" (ROUND-8 §4's teaching order: one fly,
+    /// one fly fast, two, a bee then a fly, a crowd of three). Pure; tested.
+    static func teachNeed(level: Int) -> Int? {
+        switch level {
+        case 1, 2, 4: return 1
+        case 3: return 2
+        case 5: return 3
+        default: return nil
+        }
+    }
+
+    /// The teaching level's one line for this moment, or nil (Core's hints, a bee in the trap among them, speak then).
+    /// Pure; tested.
+    static func coachLine(level: Int, sipping: Int, beeInTrap: Bool, armed: Bool, touch: Bool) -> String? {
+        guard let need = teachNeed(level: level) else { return nil }
+        if !armed { return touch ? nil : "Open it again" }
+        if beeInTrap { return nil }
+        if sipping >= need {
+            if touch { return "Now! Tap!" }
+            return level == 2 ? "Now! Close it fast!" : "Now close it, fast!"
+        }
+        if sipping > 0 { return "Wait for \(need)…" }
+        if level == 1 { return touch ? "Wait for a fly" : "Bugs are landing…" }
+        return level == 2 && !touch ? "Slow closes lose flies" : "Wait for a fly…"
+    }
+
+    /// Every coach line, for the fit tests.
+    static var coachSamples: [String] {
+        var out: [String] = []
+        for level in 1...5 {
+            for touch in [false, true] {
+                for sipping in 0...3 {
+                    for armed in [true, false] {
+                        if let line = coachLine(level: level, sipping: sipping, beeInTrap: false, armed: armed,
+                                                touch: touch), !out.contains(line) {
+                            out.append(line)
+                        }
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    // MARK: R8 demo: the CHOMP card's bite
+
+    /// Whether a bite is the kind demo `screen=chomp` waits for (a catch of 3+ bugs, a sting, a dry bite). Pure;
+    /// tested.
+    static func demoChompMatches(_ r: BiteReport, want: ChompInfo.Kind) -> Bool {
+        switch want {
+        case .catchBite: return r.stingers.isEmpty && r.caught.count >= 3
+        case .sting: return !r.stingers.isEmpty
+        case .dry: return r.stingers.isEmpty && r.caught.isEmpty
+        }
+    }
+
+    /// The bite demo `screen=chomp` shows when the pilot never made one of that kind (logged `made up`).
+    static func demoChomp(_ want: ChompInfo.Kind, score: Int) -> ChompInfo {
+        switch want {
+        case .catchBite:
+            return ChompInfo(caught: [.housefly, .gnat, .housefly, .fruitFly], points: 360, score: score + 360,
+                             verdict: "4 bugs! Fast close")
+        case .sting:
+            return ChompInfo(caught: [], stingers: [.bee], points: 0, snapsLost: 1, score: score,
+                             verdict: "Bee! " + snapLossText(1))
+        case .dry:
+            return ChompInfo(caught: [], escaped: 2, points: 0, score: score, verdict: "Too slow, they flew")
+        }
     }
 
     /// R4 (REVIEW-3 #3, the founder's copy): Sprout's free first sting, in the hint slot.
@@ -143,36 +243,41 @@ enum AppRules {
         switch hint {
         case let .trap(h): return hintText(h, touch: touch)
         // ROUND-3 founder call: the Duo's fold is the input, so the first wave says so (phones keep the tap).
-        case .foldInput: return touch ? "Tap to snap" : "Snap the halves together"
+        // R8 (founder rules 4, 6): "phone", and phones say "Tap to snap".
+        case .foldInput: return touch ? "Tap to snap" : "Close the phone to bite"
         case .beesCost: return freeStingCopy
         case let .chainTag(m): return chainTagText(m)
         case let .goalDone(t): return goalDoneText(t)
         case let .nightCue(c): return nightCueText(c)
+        case let .verdict(t, _): return t
+        case let .coach(t): return t
         }
     }
 
-    /// The free sting is good news (cream plate, R4); the crimson plate is for real warnings.
+    /// The free sting is good news (cream plate, R4); the crimson plate is for real warnings (R8: and a bad bite).
     static func hudHintIsWarning(_ hint: HUDHint) -> Bool {
         switch hint {
         case let .trap(h): return hintIsWarning(h)
-        case .foldInput, .beesCost, .chainTag, .goalDone, .nightCue: return false
+        case let .verdict(_, good): return !good
+        case .foldInput, .beesCost, .chainTag, .goalDone, .nightCue, .coach: return false
         }
     }
 
     /// The App's two-sentence toasts set a size smaller (`HintFit.font(compact:long:)`), so they fit three lines.
     static func hudHintIsLong(_ hint: HUDHint) -> Bool {
         switch hint {
-        case .trap, .foldInput, .nightCue: return false
+        case .trap, .foldInput, .nightCue, .verdict, .coach: return false
         case .beesCost, .chainTag, .goalDone: return true
         }
     }
 
     /// R7 (#5): a plate that is a moment from the message queue (a toast), not a state: it waits (its clock still)
-    /// rather than cover the bugs on the trap. Core's hints and the fold line are states and always show. Pure; tested.
+    /// rather than cover the bugs on the trap. Core's hints, the fold line and the coach are states and always show.
+    /// Pure; tested.
     static func hudHintIsToast(_ hint: HUDHint) -> Bool {
         switch hint {
-        case .trap, .foldInput: return false
-        case .beesCost, .chainTag, .goalDone, .nightCue: return true
+        case .trap, .foldInput, .coach: return false
+        case .beesCost, .chainTag, .goalDone, .nightCue, .verdict: return true
         }
     }
 
@@ -180,20 +285,20 @@ enum AppRules {
     static let chainTagSamples: [Double] = [1.5, 2, 2.5]
 
     /// Every line the hint plate can show, on both inputs, with whether it is set in the toast size (REVIEW-2 #3: the
-    /// no-truncation test renders each one). `lesson`: it can show in the lesson (on the inner-bottom plate).
-    static var allHintLines: [(text: String, long: Bool, lesson: Bool)] {
+    /// no-truncation test renders each one). R8: with the bite verdicts and the teaching levels' coach lines.
+    static var allHintLines: [(text: String, long: Bool)] {
         let core: [TrapHint] = [.bendALittle, .quick, .openUp, .beeInside, .crowd, .lastSnap, .hungry]
-        var out: [(text: String, long: Bool, lesson: Bool)] = []
+        var out: [(text: String, long: Bool)] = []
         var hints: [HUDHint] = core.map { HUDHint.trap($0) } + [.foldInput, .beesCost]
         hints += chainTagSamples.map { HUDHint.chainTag($0) }
         // R6: the late night's two cues (the goal toasts have their own plate: `goalToastTitles`).
         hints += [HUDHint.nightCue(.nightGetsFast), HUDHint.nightCue(.lastLight)]
+        hints += verdictSamples.map { HUDHint.verdict($0, good: true) }
+        hints += coachSamples.map { HUDHint.coach($0) }
         for touch in [false, true] {
             for h in hints {
                 guard let t = hudHintText(h, touch: touch), !out.contains(where: { $0.text == t }) else { continue }
-                var lesson = false
-                if case let .trap(c) = h { lesson = lessonShowsHint(c) }
-                out.append((text: t, long: hudHintIsLong(h), lesson: lesson))
+                out.append((text: t, long: hudHintIsLong(h)))
             }
         }
         return out
@@ -217,7 +322,8 @@ enum AppRules {
                               coreHint: TrapHint?) -> Bool {
         switch mode {
         case .feed, .daily, .zen: break
-        case .attract, .lesson: return false
+        // R8: a level's intro card and coach say it.
+        case .attract, .lesson, .level: return false
         }
         return wave <= 2 && snapsMade == 0 && time >= banner && time < banner + foldHintWindow && coreHint == nil
     }
@@ -227,15 +333,6 @@ enum AppRules {
         switch hint {
         case .beeInside, .quick, .lastSnap, .hungry: return true
         case .bendALittle, .openUp, .crowd: return false
-        }
-    }
-
-    /// The lesson shows only the hints it teaches with ("Bee! Wait…" in the bee step, "Now!" when the crowd sips).
-    static func lessonShowsHint(_ hint: TrapHint) -> Bool {
-        switch hint {
-        // R6 (#6, frame 07): the bee step's card already says "Never eat a bee. Wait…", so the plate stays quiet.
-        case .crowd: return true
-        case .beeInside, .bendALittle, .quick, .openUp, .lastSnap, .hungry: return false
         }
     }
 
@@ -291,8 +388,9 @@ enum AppRules {
         guard case let .stung(_, _, cost) = event, cost <= 0 else { return false }
         switch mode {
         case .feed, .daily: return true
-        // R6: in the Zen Bog every sting is free (it only breaks the chain), so there's no "this one's free".
-        case .attract, .lesson, .zen: return false
+        // R6: in the Zen Bog every sting is free (it only breaks the chain), so there's no "this one's free". R8: a
+        // level's verdict says the sting.
+        case .attract, .lesson, .zen, .level: return false
         }
     }
 
@@ -565,7 +663,8 @@ enum AppRules {
         case .feed: return touch ? "Tap to snap. Spare bees." : "Wait for a crowd. Spare bees."
         case let .daily(day, scored): return scored ? dailyTitle(day: day) : "Practice: no score today"
         case .zen: return zenBanner
-        case .attract, .lesson: return nil
+        // R8: a level opens on its intro card (its goal in one line).
+        case .attract, .lesson, .level: return nil
         }
     }
 
@@ -662,59 +761,7 @@ enum AppRules {
                       dayClock: s.dayClock, playing: playing)
     }
 
-    // MARK: The lesson's landing spots
-
-    /// Scripted landing spots on the lobes (fractions of the trap's semi-axes) and where each bug flies in from (above
-    /// the top edge, on its own side). Pure; tested (every target inside the trap, every entry off screen).
-    static let lessonSpots: [(dx: Double, dy: Double)] = [
-        (-0.42, 0.02), (-0.46, 0.22), (0.40, -0.26), (-0.48, 0.10), (0.42, -0.18), (-0.22, -0.34),
-    ]
-
-    static func lessonSpot(slot: Int, geometry g: TrapGeometry) -> (entry: CGPoint, target: CGPoint) {
-        let spot = lessonSpots[((slot % lessonSpots.count) + lessonSpots.count) % lessonSpots.count]
-        let target = CGPoint(x: g.center.x + g.a * CGFloat(spot.dx), y: g.center.y + g.b * CGFloat(spot.dy))
-        return (lessonEntry(for: target, geometry: g), target)
-    }
-
-    /// Where a scripted bug flies in from: above the top edge, on its target's side.
-    static func lessonEntry(for target: CGPoint, geometry g: TrapGeometry) -> CGPoint {
-        let side: CGFloat = target.x < g.center.x ? -1 : 1
-        let entryX = min(max(target.x + side * 220, -30), g.sceneSize.width + 30)
-        return CGPoint(x: entryX, y: g.sceneSize.height + 60)
-    }
-
-    /// The lesson's target for `slot` ON a real nectar drop, so the bug sips (Core sips only when the target is within
-    /// 1.5 pt of a free drop: QA-1 #3, REVIEW-1 #8). The drop nearest the slot's spot that is free (no occupant) and not
-    /// in `taken` (drops already given to this step's other bugs). Falls back to the spot when there's no free drop.
-    /// Returns the drop id used (nil: the fallback). Pure; tested.
-    /// The lesson prefers drops inside this normalised radius (the rim starts at 0.84).
-    static let lessonInnerRadius: Double = 0.74
-
-    static func lessonSpot(slot: Int, geometry g: TrapGeometry, nectar: [NectarDrop],
-                           taken: Set<Int>) -> (entry: CGPoint, target: CGPoint, drop: Int?) {
-        let spot = lessonSpot(slot: slot, geometry: g).target
-        // R3 (REVIEW-2 #18): the lesson's bugs sip in the middle of a lobe, never on the rim, where the pointer and the
-        // bee's halo read plainly. A rim drop only when no inner one is free.
-        func pick(maxRadius: Double) -> NectarDrop? {
-            var best: NectarDrop?
-            var bestD = Double.infinity
-            for d in nectar where d.occupant == nil && !taken.contains(d.id) && g.contains(d.position) {
-                // Keep the lesson's bugs off the crease (the midrib band distorts small sprites on a Duo).
-                guard abs(d.position.x - g.center.x) > ScreenLayout.creaseHalfWidth + 8 else { continue }
-                guard g.normalizedRadius(d.position) <= maxRadius else { continue }
-                let dist = Double(hypot(d.position.x - spot.x, d.position.y - spot.y))
-                if dist < bestD {
-                    bestD = dist
-                    best = d
-                }
-            }
-            return best
-        }
-        guard let drop = pick(maxRadius: lessonInnerRadius) ?? pick(maxRadius: 1) else {
-            return (lessonEntry(for: spot, geometry: g), spot, nil)
-        }
-        return (lessonEntry(for: drop.position, geometry: g), drop.position, drop.id)
-    }
+    // MARK: The teaching levels' pointer (R8: the First Bite's rings, kept for Levels 1–5)
 
     /// Whether a bug is still part of the scene's play (not leaving, caught, escaped or let go).
     static func inPlay(_ a: BugActivity) -> Bool {
@@ -724,14 +771,21 @@ enum AppRules {
         }
     }
 
-    /// The lesson's drop claims kept only for bugs still in play. Pure; tested.
-    static func liveClaims(_ claims: [Int: Int], snapshot s: TrapSnapshot) -> [Int: Int] {
-        var live = Set<Int>()
-        for b in s.bugs where inPlay(b.activity) { live.insert(b.id) }
-        return claims.filter { live.contains($0.key) }
+    /// Sipping bugs in the trap (bees apart) and whether a bee is in it: the coach's counts. Pure; tested.
+    static func trapCounts(_ s: TrapSnapshot) -> (sipping: Int, beeInTrap: Bool) {
+        var sipping = 0
+        var bee = false
+        for b in s.bugs where b.inTrap && inPlay(b.activity) {
+            if b.species.isProtected {
+                bee = true
+            } else if b.activity == .sipping {
+                sipping += 1
+            }
+        }
+        return (sipping, bee)
     }
 
-    /// The lesson's pointer targets: every bug in play (scene space, rounded so the HUD publishes only on movement),
+    /// The pointer's targets: every bug in play (scene space, rounded so the HUD publishes only on movement),
     /// bees marked (they get the "wait" ring). Pure; tested.
     /// R3: while a bee is in play only the bee is pointed at (its flies are the temptation, not the target).
     static func lessonTargets(_ s: TrapSnapshot) -> [LessonTarget] {
@@ -856,7 +910,7 @@ enum AppRules {
     static func againMode(_ mode: RunMode) -> RunMode {
         switch mode {
         case let .daily(day, _): return .daily(day: day, scored: false)
-        case .feed, .attract, .zen: return mode
+        case .feed, .attract, .zen, .level: return mode
         case .lesson: return .feed
         }
     }
@@ -878,6 +932,8 @@ struct RunTally: Equatable {
     var drySnaps = 0
     /// Hinge snaps only (touch runs report 0, like Core).
     var fastestSnap = 0.0
+    /// R8: bugs that escaped a bite.
+    var escapes = 0
     var hingeTiming = false
 
     init(hingeTiming: Bool = false) { self.hingeTiming = hingeTiming }
@@ -903,8 +959,11 @@ struct RunTally: Equatable {
             drySnaps += 1
         case let .chainUp(count, _):
             longestChain = max(longestChain, count)
+        case .bugEscaped:
+            // R8: a level's three stars want none (Core's `RunResult.escapes`).
+            escapes += 1
         case .waveStarted, .dayPhaseChanged, .bugArrived, .bugLanded, .bugSipping, .bugHopped, .bugLeft, .bugSpooked,
-             .snapStarted, .bugEscaped, .luckySnap, .chainBroken, .rearmed, .lastSnap, .hungry, .wilted, .tired,
+             .snapStarted, .luckySnap, .chainBroken, .rearmed, .lastSnap, .hungry, .wilted, .tired,
              .newBest, .finished:
             break
         }
@@ -916,6 +975,7 @@ struct RunTally: Equatable {
                   snaps: snaps, bugsCaught: max(s.bugsCaught, caught.values.reduce(0, +)), caughtBySpecies: caught,
                   sparedBySpecies: spared, bestBitePoints: bestBitePoints, biggestBite: biggestBite,
                   longestChain: max(longestChain, s.chain), beesSpared: max(s.beesSpared, spared.values.reduce(0, +)),
-                  stings: stings, feasts: feasts, waves: max(s.wave, 0), drySnaps: drySnaps, fastestSnap: fastestSnap)
+                  stings: stings, feasts: feasts, waves: max(s.wave, 0), drySnaps: drySnaps, fastestSnap: fastestSnap,
+                  escapes: escapes)
     }
 }

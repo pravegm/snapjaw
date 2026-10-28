@@ -94,7 +94,7 @@ struct GoalRun {
     init(book: GoalBookState, mode: RunMode, startPhase: DayPhase = .morning) {
         switch mode {
         case .feed, .daily, .zen: tracker = GoalBook.tracker(book, mode: mode, startPhase: startPhase)
-        case .attract, .lesson: tracker = nil
+        case .attract, .lesson, .level: tracker = nil
         }
     }
 

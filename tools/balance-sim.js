@@ -42,12 +42,19 @@
 // R7: the FEAST multiplier (a clean bite of >= bigFeastCount scores x feastMultiplier: TrapRules.bitePoints), and
 // the night pool (day bugs x nightDayBugWeight, fireflies and crickets lead) (design/notes/core-R7.md).
 //   node tools/balance-sim.js night=1              # R7: who lands in the trap at night (waves 23-90)
+// R8 (design/notes/core-R8.md): the lid is the jaw. The pilot closes the whole phone (close times by skill), the bite
+// fires at the shut (duration = the close time), bugs startle at their nerve and flee after their reaction (fear), the
+// bite's exposure is max(real, modelExposure), shut and a round waiting for its first close freeze the clock, any miss
+// breaks the chain, 12 start snaps, hunger 18/14/12/12, the sleepy morning; and the 30 levels (tools/levels.js):
+//   node tools/balance-sim.js levels=1 [levelSeeds=8] [ids=1,2] [debug=1] [all=1]   # every level by the four pilots
+//   node tools/balance-sim.js detector=1           # the R8 SnapDetector rules (founder: arm 35, shut 18, start closed)
 'use strict';
+const { LEVELS, goalOf } = require('./levels.js');
 
 // MARK: Tuning (mirror of Snap/Core/Tuning.swift)
 const T = {
   // economy (GAME-DESIGN §5)
-  startSnaps: 10, maxSnaps: 14, snapCost: 1, feastCount: 3, feastRefund: 1, bigFeastCount: 5, bigFeastRefund: 2,
+  startSnaps: 12, maxSnaps: 14, snapCost: 1, feastCount: 3, feastRefund: 1, bigFeastCount: 5, bigFeastRefund: 2,
   // R7 (#3): a clean bite of >= bigFeastCount scores x this, on top of the chain (TrapRules.bitePoints / feastBonus)
   feastMultiplier: 2.0,
   scarabRefund: 2, ladybirdRefund: 1, beeCost: 1, waspCost: 2, chainStep: 0.5, chainMaxMultiplier: 5,
@@ -76,7 +83,7 @@ const T = {
   // session
   tiredSeconds: 2.2, caughtSeconds: 0.5, openUpDelay: 1.0, crowdHintCount: 3, maxSubstep: 1 / 120,
   // R2 hunger (GAME-DESIGN §5)
-  wiltMorning: 18, wiltNoon: 16, wiltDusk: 14, wiltNight: 14, hungryWarning: 3,
+  wiltMorning: 18, wiltNoon: 14, wiltDusk: 12, wiltNight: 12, hungryWarning: 3,
   // R4 (REVIEW-3 #11): a Sprout's first Feed run (SessionOptions.firstRun) starts with this many snaps
   firstRunSnaps: 14,
   // R4: ... and a calm first morning: waves 1..firstRunCalmWaves are crowds, each gap after them x firstRunWaveGap
@@ -105,19 +112,25 @@ const T = {
   hopMin: 120, hopMax: 300, hopSpeed: 300, hopTimeMin: 0.5, hopTimeMax: 1.2, hopHeight: 0.8,
   dartMin: 80, dartMax: 180, dartTime: 0.25, dartHeight: 0.3, darterHoverChance: 0.5, crossHeight: 0.85,
   restlessFrom: 0.75,
-  // pilot (ROUND-1 "TrapPilot")
-  pilotOvershoot: 6, pilotHold: 0.15, pilotReopen: 0.35, pilotIdleAngle: 160,
-  noviceCreepChance: 0.25, noviceCreepDepth: 12, noviceCreepTime: 1.2,
-  casualPatience: 7, expertPatience: 6, perfectPatience: 7,
-  casualFumbleChance: 0.3, casualFumbleMin: 0.3, casualFumbleMax: 0.45,
+  // R8 (ROUND-8 §1): the lid is the jaw. Armed at theta >= armAngle; the bite fires at the shut (theta <= shutAngle);
+  // a close starts when closure passes closeStart and is abandoned under closeCancel. A bite's modelled exposure for a
+  // bug that startles at s degrees is duration x (1 - (s - closeStart) / modelCloseSpan).
+  armAngle: 35, shutAngle: 18, closeStart: 8, closeCancel: 4, reopenCancel: 10, modelCloseSpan: 124, slowCloseAfter: 0.6,
+  untimedCloseDuration: 2.0,
+  // R8 (ROUND-8 §4): a level whose script has nothing left to catch ends after this long (s)
+  levelIdleEnd: 2.5,
+  // R8 (§2): a dry bite costs this many extra snaps; a bite that lets a bug escape breaks the chain
+  dryBiteCost: 0, missBreaksChain: 1, morningReactionFactor: 1.3,
+  // pilot (ROUND-1 "TrapPilot"; R8: closes the whole phone, shut-angle bites, reopen times by skill)
+  pilotIdleAngle: 150, pilotShutAngle: 5,
+  novicePatience: 6, casualPatience: 7, expertPatience: 6, perfectPatience: 7,
   noviceBeeMiss: 0.6, casualBeeMiss: 0.25, expertBeeMiss: 0.02, perfectBeeHeight: 0.85,
-  shooDepth: 11, shooTime: 0.5, shooHold: 0.1, expertShooAfter: 5, perfectShooAfter: 0,
+  shooDepth: 30, shooTime: 0.4, shooHoldMax: 1.6, expertShooAfter: 5, perfectShooAfter: 0,
   expertValue: 120, perfectValue: 400, perfectRestless: 0.7, expertRestless: 0.6,
   // R4: expert and perfect bite a landed bug after this long without a snap even when they judge it too quick (hands
   // never wait for ever; with the R4 hunger rule a trap that is never fed only wilts slowly)
   pilotGiveUp: 12,
 };
-const SNAP_DEPTH = 22, SNAP_START = 4, CREEP_DEPTH = 6, CREEP_DWELL = 0.45, REARM_RISE = 16;
 const SCENE = { w: 952, h: 670 };
 const CREASE_HALF = 20; // ScreenLayout.creaseHalfWidth
 
@@ -156,14 +169,15 @@ class Geo {
 const SPECIES = ['housefly', 'gnat', 'fruitFly', 'bluebottle', 'ant', 'ladybird', 'grasshopper', 'moth', 'mosquito',
   'dragonfly', 'firefly', 'cricket', 'goldenScarab', 'bee', 'bumblebee', 'wasp'];
 const MORNING = 0, NOON = 1, DUSK = 2, NIGHT = 3;
-// species: [points, reaction, nerve, radius, firstPhase]
+// species: [points, reaction, nerve, radius, firstPhase]. R8: nerve is the startle depth (degrees of closure; the bug
+// starts to flee then, and is gone after its reaction time); reaction is that flee time (s).
 const INFO = {
-  housefly: [10, 0.24, 7, 14, MORNING], gnat: [3, 0.32, 10, 7, MORNING], fruitFly: [6, 0.28, 9, 9, MORNING],
-  bluebottle: [25, 0.16, 5, 16, NOON], ant: [8, 0.60, 15, 10, NOON], ladybird: [15, 0.30, 10, 14, NOON],
-  grasshopper: [20, 0.22, 7, 18, NOON], moth: [20, 0.30, 9, 18, DUSK], mosquito: [12, 0.14, 4, 9, DUSK],
-  dragonfly: [50, 0.12, 4, 24, DUSK], firefly: [35, 0.26, 8, 13, NIGHT], cricket: [25, 0.34, 11, 17, NIGHT],
-  goldenScarab: [150, 0.40, 12, 20, NOON], bee: [0, 1.0, 8, 16, MORNING], bumblebee: [0, 1.0, 10, 22, NOON],
-  wasp: [0, 1.0, 6, 16, DUSK],
+  housefly: [10, 0.50, 12, 14, MORNING], gnat: [3, 0.65, 16, 7, MORNING], fruitFly: [6, 0.55, 12, 9, MORNING],
+  bluebottle: [25, 0.32, 10, 16, NOON], ant: [8, 0.90, 45, 10, NOON], ladybird: [15, 0.55, 40, 14, NOON],
+  grasshopper: [20, 0.40, 22, 18, NOON], moth: [20, 0.50, 25, 18, DUSK], mosquito: [12, 0.25, 8, 9, DUSK],
+  dragonfly: [50, 0.22, 8, 24, DUSK], firefly: [35, 0.45, 30, 13, NIGHT], cricket: [25, 0.55, 30, 17, NIGHT],
+  goldenScarab: [150, 0.70, 50, 20, NOON], bee: [0, 1.0, 20, 16, MORNING], bumblebee: [0, 1.0, 28, 22, NOON],
+  wasp: [0, 1.0, 14, 16, DUSK],
 };
 const info = (s) => { const r = INFO[s]; return { species: s, points: r[0], reaction: r[1], nerve: r[2], radius: r[3] * T.bugRadiusScale, firstPhase: r[4] }; };
 const isProtected = (s) => s === 'bee' || s === 'bumblebee' || s === 'wasp';
@@ -185,6 +199,8 @@ const motion = (s) => { const m = MOTION[s]; return { style: m[0], speed: m[1], 
 // R6: the wave the late factor uses (TrapRules.paceWave): Zen's recipe wave, else the real one.
 function paceWave(wave, mode) { return mode === 'zen' ? ((Math.max(wave, 1) - 1) % T.zenDayWaves) + 1 : wave; }
 function lateFactor(wave) {
+  // R8: the morning's bugs are sleepy (x morningReactionFactor): a slow hand still catches something while it learns
+  if (wave < T.noonWave) return T.morningReactionFactor;
   if (wave <= T.lateWaveStart) return 1;
   return Math.max(T.lateReactionFloor, Math.pow(T.lateReactionDecay, wave - T.lateWaveStart));
 }
@@ -195,6 +211,18 @@ function reaction(inf, sipping, flying, onRim, wave) {
   if (flying) r *= T.flyingReactionFactor;
   if (onRim) r *= T.rimReactionFactor;
   return r;
+}
+// R8 (TrapRules.modelExposure): how long a bug that startles at `nerve` degrees has been fleeing at the shut of a
+// close that took `duration` s from closeStart to the shut (a straight close over modelCloseSpan degrees).
+function modelExposure(nerve, duration) {
+  const d = isFinite(duration) ? Math.max(0, duration) : 0;
+  const frac = clamp((nerve - T.closeStart) / T.modelCloseSpan, 0, 1);
+  return d * (1 - frac);
+}
+// R8 (TrapRules.crossing): the time between (t0, c0) and (t1, c1) where the value crossed `thr` (rising), clamped.
+function crossing(t0, c0, t1, c1, thr) {
+  if (c1 <= c0) return t1;
+  return clamp(t0 + (t1 - t0) * (thr - c0) / (c1 - c0), t0, t1);
 }
 // R2: the rim test uses the bug's outer edge (its centre pushed out by its radius), so art and rules agree.
 function onRimBody(g, p, radius) {
@@ -497,6 +525,34 @@ function makeWave(seed, index, g, nectar, calm) {
   return { index, phase: ph, delay: waveDelay(seed, index), bugs, crowd };
 }
 
+// MARK: Levels (R8, ROUND-8 §4; LevelBook in Snap/Core/Levels.swift)
+function levelSeed(id) { return u64(0x1E7E1n * BigInt(id) + 77n); }
+function levelGoalMet(g, r) {
+  let sp = 0; for (const s of g.species) sp += r.bySpecies[s] || 0;
+  return r.caught >= g.catchAny && sp >= g.speciesCount && r.biggest >= g.biteOf && r.spared >= g.spare;
+}
+// LevelBook.evaluate: passed (goal met, no sting where none is allowed, within the limits) and stars by bites used
+function levelEvaluate(L, r) {
+  const passed = levelGoalMet(goalOf(L), r) && (!L.noSting || r.stings === 0) && (L.time == null || r.seconds <= L.time + 1e-6) && (L.bites == null || r.snaps <= L.bites);
+  const three = r.snaps <= L.stars[1] && (!L.clean3 || r.escapes === 0);
+  const stars = !passed ? 0 : (three ? 3 : (r.snaps <= L.stars[0] ? 2 : 1));
+  return { passed, stars };
+}
+// LevelBook.spawnSpec: a scripted bug as a SpawnSpec (the spot at 0.75 of the trap's semi-axes; a sipper aims at the
+// nearest nectar drop on its lobe; flyers enter from their lobe's side edge, walkers from the bottom)
+function levelSpawn(b, g, nectar) {
+  let target = { x: g.cx + b.u * g.a * 0.75, y: g.cy + b.v * g.b * 0.75 };
+  const m = motion(b.s);
+  if (b.sip && m.nectarChance > 0 && nectar.length > 0) {
+    let best = null, bd = Infinity; const side = b.u < 0 ? -1 : 1;
+    for (const d of nectar) { if ((d.x < g.cx ? -1 : 1) !== side) continue; const dd = Math.hypot(d.x - target.x, d.y - target.y); if (dd < bd) { bd = dd; best = d; } }
+    if (best !== null) target = { x: best.x, y: best.y };
+  }
+  let entry = m.style === WALKER ? { x: clamp(target.x, 40, g.w - 40), y: -20 } : { x: b.u < 0 ? -30 : g.w + 30, y: clamp(target.y + 90 * b.v, 40, g.h - 40) };
+  if (isProtected(b.s)) entry = thumbSafeEntry(entry, g);
+  return { species: b.s, entry, target, linger: b.linger, landsInTrap: true, groupOffset: 0 };
+}
+
 // MARK: TrapSession
 const A_ARR = 'arriving', A_WALK = 'walking', A_SIP = 'sipping', A_HOP = 'hopping', A_LEAVE = 'leaving', A_CAUGHT = 'caught', A_ESC = 'escaped', A_REL = 'released';
 const M = { approach: 0, hover: 1, sip: 2, pause: 3, dash: 4, hop: 5, cross: 6, leave: 7, escape: 8, release: 9, caught: 10 };
@@ -534,8 +590,23 @@ class Session {
     this.lastLight = this.wilts && (this.mode === 'feed' || this.mode === 'daily');
     // R4 (QA-2 #1, REVIEW-3 #12): the hunger clock ticks only while hungerTicks() (see tick).
     this.hunger = 0; this.hungrySent = false; this.hungerLive = false; this.freeStingUsed = false;
-    this.prevArmed = true; this.prevClosure = 0;
-    this.stats = { snaps: 0, caught: 0, stings: 0, feasts: 0, dry: 0, bestBite: 0, biggest: 0, longestChain: 0, spared: 0, wilts: 0 };
+    this.prevArmed = true; this.prevClosure = 0; this.prevTime = 0;
+    // R8: the close in progress (closure past closeStart while armed), the bugs in the trap during it, those that fled
+    // it, and the shut (from the bite until the input is armed again: the clock is frozen)
+    this.closing = false; this.closeStartAt = 0; this.closeBugs = new Set(); this.fled = 0; this.shut = false;
+    // R8 (founder rule 3): every round starts closed: waiting (clock frozen, no spawns) until the input is first armed
+    this.waiting = true;
+    // R8 (ROUND-8 §4): a level (LevelBook): its scripted bugs, pace wave, bite limit; no waves, hunger or refunds
+    this.level = this.mode === 'level' ? opts.level : null;
+    this.bySpecies = {}; this.levelEnd = null; this.idleFor = 0;
+    if (this.level) {
+      const L = this.level;
+      this.wave = L.pace; this.dayPhase = phaseForWave(L.pace);
+      this.snapsLeft = L.bites == null ? T.maxSnaps : clamp(L.bites, 1, T.maxSnaps);
+      this.goal = goalOf(L);
+      for (const b of L.bugs) this.pending.push({ at: b.at, spec: levelSpawn(b, this.g, this.nectar) });
+    }
+    this.stats = { snaps: 0, caught: 0, stings: 0, feasts: 0, dry: 0, bestBite: 0, biggest: 0, longestChain: 0, spared: 0, wilts: 0, ratioSum: 0, ratioN: 0, dayRatioSum: 0, dayRatioN: 0, shutTime: 0 };
   }
   installNectar(block) {
     const drops = nectarDrops(nectarSeed(this.seed, block), this.g);
@@ -566,16 +637,56 @@ class Session {
   step(dt, input) {
     if (this.phase === 'finished') return;
     const d = isFinite(dt) ? Math.max(0, dt) : 0;
+    const c = isFinite(input.closure) ? Math.max(0, input.closure) : 0;
     if (this.phase === 'playing') {
-      if (input.snap) this.bite(input.snap);
-      if (input.creeping && this.phase === 'playing') this.creep(input.closure);
+      if (this.waiting && (input.armed || input.snap)) this.waiting = false;
+      this.fear(c, input);
+      if (input.snap) this.bite(input.snap, input.armed);
+      else if (this.shut && input.armed) this.shut = false; // rearmed
     }
-    this.prevArmed = input.armed; this.prevClosure = input.closure;
+    this.prevArmed = input.armed; this.prevClosure = c; this.prevTime = this.time;
     const n = Math.max(1, Math.ceil(d / T.maxSubstep - 1e-9));
     const h = d / n;
     for (let i = 0; i < n; i++) { this.tick(h); if (this.phase === 'finished') break; }
   }
+  // R8 (§1): every bug in the trap feels the closure; past its startle depth (nerve) it flees after its reaction time.
+  fear(c, input) {
+    const now = this.time;
+    const open = input.armed && !this.shut && !this.waiting;
+    if (!this.closing) {
+      if ((open && c >= T.closeStart) || input.snap) {
+        this.closing = true; this.fled = 0; this.closeBugs = new Set();
+        this.closeStartAt = (open && c >= T.closeStart) ? crossing(this.prevTime, this.prevClosure, now, c, T.closeStart) : now;
+      }
+    } else if (c < T.closeCancel && !input.snap) {
+      // the close was abandoned (a partial close, opened again): the startled bugs that stayed calm down
+      this.closing = false;
+      for (const b of this.bugs) b.startledAt = null;
+      return;
+    }
+    if (!this.closing) return;
+    for (const b of this.bugs) {
+      if (!this.inTrap(b)) continue;
+      const a = this.activityOf(b);
+      if (a === A_ARR && b.height >= T.catchableHeight) continue;
+      if (!(a === A_ARR || a === A_WALK || a === A_SIP || a === A_HOP)) continue;
+      if (!isProtected(b.species)) this.closeBugs.add(b.id);
+      if (b.startledAt == null && c >= b.info.nerve) {
+        b.startledAt = this.prevClosure < b.info.nerve ? crossing(this.prevTime, this.prevClosure, now, c, b.info.nerve) : now;
+      }
+      if (b.startledAt == null || input.snap) continue;
+      const r = reaction(b.info, a === A_SIP, a === A_ARR || a === A_HOP, onRimBody(this.g, b, b.info.radius), paceWave(this.wave, this.mode));
+      if (now - b.startledAt >= r) { this.fled += 1; this.takeOff(b, M.escape); }
+    }
+  }
   tick(h) {
+    if (this.phase === 'playing' && (this.shut || this.waiting)) {
+      // R8: shut = digesting. The clock is frozen (no waves, spawns, lingers or hunger); bugs already leaving finish.
+      this.stats.shutTime += h;
+      for (const b of this.bugs) if (b.mode === M.caught || b.mode === M.leave || b.mode === M.escape || b.mode === M.release) this.updateBug(b, h);
+      this.bugs = this.bugs.filter((b) => !b.gone);
+      return;
+    }
     this.time += h;
     if (this.phase === 'playing' && this.opts.waves) {
       while (this.time >= this.nextWaveAt) this.startWave();
@@ -601,6 +712,7 @@ class Session {
         if (this.snapsLeft === 0) this.becomeTired();
       }
     }
+    if (this.level && this.phase === 'playing') this.checkLevel(h);
     if (this.phase === 'tired') {
       this.tiredElapsed += h;
       if (this.tiredElapsed >= T.tiredSeconds) this.phase = 'finished';
@@ -648,6 +760,7 @@ class Session {
       el: 0, dur: 1, age: 0, timer: 0, linger: spec.linger, lingerTotal: spec.linger, landsInTrap: spec.landsInTrap,
       dropID: null, wantsNectar: false, homeX: spec.target.x, homeY: spec.target.y, wobblePhase: 0, landed: false,
       landedInTrap: false, sparedSent: false, hovering: false, restless: 0, sip: 0, gone: false, leavingKind: 0,
+      startledAt: null,
     };
     b.wobblePhase = b.rng.range(0, 2 * Math.PI);
     const bend = b.rng.range(-T.arcBend, T.arcBend);
@@ -940,33 +1053,36 @@ class Session {
     b.timer = b.height; // start height for the climb
     b.mode = kind; b.fx = b.x; b.fy = b.y; b.tx = ex; b.ty = ey; b.el = 0; b.dur = 0; b.hovering = false; b.sip = 0;
   }
-  creep(closure) {
-    for (const b of this.bugs) {
-      if (!this.inTrap(b)) continue;
-      if (b.mode === M.leave) continue;
-      if (b.info.nerve <= closure) {
-        b.restless = 1;
-        this.takeOff(b, M.leave);
-      }
-    }
-  }
-  bite(snap) {
-    const d = snap.duration;
-    const caught = [], stingers = []; let escaped = 0;
+  // R8 (§1): the bite at the shut. A bug still in the trap is caught unless it has been fleeing longer than its
+  // reaction time: its exposure is the larger of the real one (since it startled in this close) and the modelled one.
+  bite(snap, armedAfter) {
+    const d = isFinite(snap.duration) ? Math.max(0, snap.duration) : 0;
+    const now = this.time;
+    const caught = [], stingers = []; let escaped = this.fled;
     for (const b of this.bugs) {
       if (!this.inTrap(b)) continue;
       const a = this.activityOf(b);
       const flying = a === A_ARR || a === A_HOP;
       if (a === A_ARR && b.height >= T.catchableHeight) continue;
       if (!(a === A_ARR || a === A_WALK || a === A_SIP || a === A_HOP)) continue;
+      if (!isProtected(b.species)) this.closeBugs.add(b.id);
+      let expo = modelExposure(b.info.nerve, d);
+      if (b.startledAt != null) expo = Math.max(expo, now - b.startledAt);
       const r = reaction(b.info, a === A_SIP, flying, onRimBody(this.g, b, b.info.radius), paceWave(this.wave, this.mode));
-      if (d <= r) {
+      if (expo <= r) {
         if (isProtected(b.species)) { stingers.push(b.species); this.takeOff(b, M.release); }
         else { caught.push(b.species); this.freeDrop(b); b.timer = b.height; b.mode = M.caught; b.el = 0; b.fx = b.x; b.fy = b.y; }
       } else {
         escaped += 1; this.takeOff(b, M.escape);
       }
     }
+    for (const b of this.bugs) b.startledAt = null;
+    const denom = this.closeBugs.size;
+    const ratio = denom > 0 ? Math.min(1, caught.length / denom) : 0;
+    this.stats.escapes = (this.stats.escapes || 0) + escaped;
+    if (denom > 0) { this.stats.ratioSum += ratio; this.stats.ratioN += 1; if (this.wave < T.duskWave) { this.stats.dayRatioSum += ratio; this.stats.dayRatioN += 1; } }
+    this.closing = false; this.fled = 0; this.closeBugs = new Set();
+    this.shut = !armedAfter;
     this.stats.snaps += 1;
     // R2/R4: a catch feeds the trap (the clock then waits for food again)
     if (caught.length >= 1) { this.hunger = 0; this.hungrySent = false; }
@@ -983,6 +1099,8 @@ class Session {
       if (n >= T.bigFeastCount) back += T.bigFeastRefund; else if (n >= T.feastCount) back += T.feastRefund;
       for (const s of caught) { if (s === 'goldenScarab') back += T.scarabRefund; if (s === 'ladybird') back += T.ladybirdRefund; }
     }
+    if (this.opts.refunds === false) back = 0;
+    for (const sp of caught) this.bySpecies[sp] = (this.bySpecies[sp] || 0) + 1;
     let lost = 0;
     if (this.opts.stingCosts) for (const s of stingers) lost += s === 'wasp' ? T.waspCost : T.beeCost;
     // R3 (REVIEW-2 #9): Sprout run 1's first stinger bite costs no extra snap ("Bees cost a snap!")
@@ -993,12 +1111,30 @@ class Session {
     if (n === 0 && stingers.length === 0) this.stats.dry += 1;
     this.stats.bestBite = Math.max(this.stats.bestBite, points); this.stats.biggest = Math.max(this.stats.biggest, n);
     // R2 chain rule: a clean bite of >= 2 adds a step, a clean 1-bug bite holds it, a dry snap or a stinger breaks it.
-    if (n >= T.chainMinBite && stingers.length === 0) { this.chain += 1; this.stats.longestChain = Math.max(this.stats.longestChain, this.chain); }
-    else if (!(n >= 1 && stingers.length === 0)) this.chain = 0;
+    // R8 (§2): a bite that let a bug escape breaks the chain too (missBreaksChain)
+    const missed = T.missBreaksChain && escaped > 0;
+    if (n >= T.chainMinBite && stingers.length === 0 && !missed) { this.chain += 1; this.stats.longestChain = Math.max(this.stats.longestChain, this.chain); }
+    else if (!(n >= 1 && stingers.length === 0) || missed) this.chain = 0;
+    // R8 (§2): a dry bite (nothing caught, no stinger) costs dryBiteCost more
+    const dryCost = (n === 0 && stingers.length === 0) ? T.dryBiteCost : 0;
     if (this.opts.snapsRunOut) {
-      this.snapsLeft = clamp(this.snapsLeft - T.snapCost - lost + back, 0, T.maxSnaps);
+      this.snapsLeft = clamp(this.snapsLeft - T.snapCost - lost - dryCost + back, 0, T.maxSnaps);
       if (this.snapsLeft === 0) this.becomeTired();
     }
+    if (this.debug) console.log(`  bite t=${now.toFixed(2)} d=${d.toFixed(2)} caught=${caught.join(',') || '-'} stung=${stingers.join(',') || '-'} escaped=${escaped} left=${this.snapsLeft}`);
+    if (this.level && this.phase === 'playing') this.checkLevel(0);
+  }
+  // R8 (ROUND-8 §4, LevelBook in TrapSession.swift): a level ends at once when its goal is met or a bee is bitten in a
+  // no-sting level; when its time is up; and when nothing is left to catch for levelIdleEnd s. Out of bites: tired.
+  goalMet() { return levelGoalMet(this.goal, { caught: this.stats.caught, bySpecies: this.bySpecies, biggest: this.stats.biggest, spared: this.stats.spared }); }
+  checkLevel(h) {
+    const L = this.level;
+    if (L.noSting && this.stats.stings > 0) { this.levelEnd = 'stung'; this.becomeTired(); return; }
+    if (this.goalMet()) { this.levelEnd = 'goal'; this.becomeTired(); return; }
+    if (L.time != null && this.time >= L.time) { this.levelEnd = 'time'; this.becomeTired(); return; }
+    let active = this.pending.length > 0;
+    for (const b of this.bugs) if (!(b.mode === M.leave || b.mode === M.escape || b.mode === M.release || b.mode === M.caught || b.mode === M.cross)) active = true;
+    if (active) this.idleFor = 0; else { this.idleFor += h; if (this.idleFor >= T.levelIdleEnd) { this.levelEnd = 'empty'; this.becomeTired(); } }
   }
   snapshot() {
     const bugs = this.bugs.map((b) => {
@@ -1006,31 +1142,39 @@ class Session {
       const inT = this.inTrap(b);
       return { id: b.id, species: b.species, x: b.x, y: b.y, activity: a, height: b.height, inTrap: inT, onRim: inT && onRimBody(this.g, b, b.info.radius), restless: b.restless };
     });
-    return { phase: this.phase, mode: this.mode, time: this.time, bugs, snapsLeft: this.snapsLeft, wave: this.wave, score: this.score, hunger: this.hunger, dayPhase: this.dayPhase };
+    return { phase: this.phase, mode: this.mode, time: this.time, bugs, snapsLeft: this.snapsLeft, wave: this.wave, score: this.score, hunger: this.hunger, dayPhase: this.dayPhase, shut: this.shut };
   }
 }
 
-// MARK: TrapPilot
+// MARK: TrapPilot (R8: mirror of Snap/Core/TrapPilot.swift)
+// R8 (ROUND-8 §1, §2): the pilot closes the whole phone. Its angle is pilotIdleAngle - closure; a close runs at a steady
+// rate so the closeStart -> shut stretch (the detector's SnapTrigger.duration) takes exactly the planned close time,
+// on to pilotShutAngle, holds shut, and reopens over the reopen time (re-armed at armAngle, idle at the top).
+// close times by skill (ROUND-8 §2): novice 0.6-1.1 s, casual 0.35-0.65 s, expert 0.2-0.35 s; perfect 0.18 s.
 const PROFILE = {
-  novice: { dmin: 0.22, dmax: 0.40, delayMin: 0.35, delayMax: 0.6, beeMiss: T.noviceBeeMiss },
-  casual: { dmin: 0.14, dmax: 0.24, delayMin: 0.25, delayMax: 0.45, beeMiss: T.casualBeeMiss },
-  expert: { dmin: 0.10, dmax: 0.15, delayMin: 0.15, delayMax: 0.3, beeMiss: T.expertBeeMiss },
-  perfect: { dmin: 0.08, dmax: 0.08, delayMin: 0.1, delayMax: 0.1, beeMiss: 0 },
+  novice: { closeMin: 0.6, closeMax: 1.1, delayMin: 0.35, delayMax: 0.6, holdMin: 0.3, holdMax: 0.6, reopenMin: 0.6, reopenMax: 0.8, beeMiss: T.noviceBeeMiss },
+  casual: { closeMin: 0.35, closeMax: 0.65, delayMin: 0.25, delayMax: 0.45, holdMin: 0.2, holdMax: 0.4, reopenMin: 0.5, reopenMax: 0.7, beeMiss: T.casualBeeMiss },
+  expert: { closeMin: 0.2, closeMax: 0.35, delayMin: 0.15, delayMax: 0.3, holdMin: 0.15, holdMax: 0.3, reopenMin: 0.4, reopenMax: 0.6, beeMiss: T.expertBeeMiss },
+  perfect: { closeMin: 0.18, closeMax: 0.18, delayMin: 0.1, delayMax: 0.1, holdMin: 0.15, holdMax: 0.15, reopenMin: 0.4, reopenMax: 0.4, beeMiss: 0 },
 };
+function pick2(rng, lo, hi) { return lo === hi ? lo : rng.range(lo, hi); }
+const P_IDLE = 0, P_DOWN = 1, P_HOLD = 2, P_UP = 3, P_SHOO = 4, P_SHOO_HOLD = 5;
 class Pilot {
   // R5 (REVIEW-4 P2): giveUp false switches off the pilotGiveUp rule (TrapPilot.givesUp), for the SNAP-BAL report only.
   constructor(skill, seed, giveUp) {
     this.skill = skill; this.p = PROFILE[skill]; this.rng = new SeededRandom(seed); this.giveUp = giveUp !== false;
-    this.stage = 0; // 0 idle, 1 down, 2 hold, 3 up
-    this.closure = 0; this.armed = true; this.el = 0; this.d = 0.2; this.creepy = false; this.peak = 0;
-    this.t4 = null; this.t6 = null; this.decideAt = null; this.beeSince = null; this.missed = new Map(); this.lastSnap = 0; this.plannedD = this.p.dmin;
+    this.stage = P_IDLE;
+    this.closure = 0; this.armed = true; this.el = 0; this.d = 0.3; this.hold = 0.2; this.reopen = 0.5; this.peak = 0;
+    this.tStart = null; this.closeSince = null; this.decideAt = null; this.beeSince = null; this.missed = new Map();
+    this.lastSnap = 0; this.plannedD = this.p.closeMin;
+    this.minBite = 0; // R8: a level goal of one bite of n (TrapPilot.minBite): wait for n, never bite fewer
+    this.targets = []; // R8: a level goal's species (TrapPilot.targets): one of them landed / catchable is worth a bite
     this.clock = 0; // R3 (REVIEW-2 #21): the pilot's own clock (the sum of its dt), never the caller's time
   }
-  planDuration() {
-    // R2: a casual hand sometimes fumbles a snap (slow), which is what breaks its chains besides the bees.
-    if (this.skill === 'casual' && this.rng.chance(T.casualFumbleChance)) return this.rng.range(T.casualFumbleMin, T.casualFumbleMax);
-    return this.p.dmin === this.p.dmax ? this.p.dmin : this.rng.range(this.p.dmin, this.p.dmax);
-  }
+  static shutClosure() { return T.pilotIdleAngle - T.shutAngle; }
+  static fullClosure() { return T.pilotIdleAngle - T.pilotShutAngle; }
+  static armClosure() { return T.pilotIdleAngle - T.armAngle; }
+  planDuration() { return pick2(this.rng, this.p.closeMin, this.p.closeMax); }
   // A protected bug sitting in the trap (landed): what a shoo can clear.
   beeSitting(snap) {
     for (const b of snap.bugs) {
@@ -1055,6 +1199,7 @@ class Pilot {
     }
     return false;
   }
+  // R8: a bug counts as catchable when the planned close's modelled exposure is within its reaction time.
   view(snap, d) {
     let landed = 0, maxPts = 0, n = 0, sum = 0, arriving = 0, restless = 0;
     for (const b of snap.bugs) {
@@ -1067,16 +1212,38 @@ class Pilot {
       if (!(a === A_ARR || a === A_WALK || a === A_SIP || a === A_HOP)) continue;
       if (a === A_ARR) arriving += 1;
       const r = reaction(inf, a === A_SIP, a === A_ARR || a === A_HOP, b.onRim, paceWave(snap.wave, snap.mode));
-      if (d <= r) { n += 1; sum += inf.points; }
+      if (modelExposure(inf.nerve, d) <= r) { n += 1; sum += inf.points; }
     }
-    return { landed, maxPts, n, value: sum * n, arriving, restless };
+    return { landed, maxPts, n, value: sum * n, arriving, restless, target: this.targetView(snap, d) };
+  }
+  // R8: how many target-species bugs are landed (novice, casual) or catchable at d (expert, perfect)
+  targetView(snap, d) {
+    if (this.targets.length === 0) return 0;
+    let k = 0;
+    for (const b of snap.bugs) {
+      if (!b.inTrap || !this.targets.includes(b.species)) continue;
+      const a = b.activity;
+      if (this.skill === 'novice' || this.skill === 'casual') { if (a === A_WALK || a === A_SIP) k += 1; continue; }
+      if (a === A_ARR && b.height >= T.catchableHeight) continue;
+      if (!(a === A_ARR || a === A_WALK || a === A_SIP || a === A_HOP)) continue;
+      const inf = info(b.species);
+      const r = reaction(inf, a === A_SIP, a === A_ARR || a === A_HOP, b.onRim, paceWave(snap.wave, snap.mode));
+      if (modelExposure(inf.nerve, d) <= r) k += 1;
+    }
+    return k;
   }
   wants(snap, time) {
     const v = this.view(snap, this.plannedD);
     const waited = time - this.lastSnap;
     let want = false;
+    if (this.minBite > 0) {
+      const count = (this.skill === 'novice' || this.skill === 'casual') ? v.landed : v.n;
+      if (count < this.minBite) return false;
+      return !this.beeBlocks(snap);
+    }
+    if (v.target >= 1) return !this.beeBlocks(snap);
     switch (this.skill) {
-      case 'novice': want = v.landed >= 1; break;
+      case 'novice': want = v.landed >= 2 || (v.landed >= 1 && waited >= T.novicePatience); break;
       case 'casual': want = v.landed >= 3 || (v.landed >= 2 && v.arriving === 0) || (v.landed >= 1 && v.maxPts >= 20) || (v.landed >= 1 && waited >= T.casualPatience); break;
       case 'expert': want = v.n >= 3 || (v.n >= 1 && v.value >= T.expertValue) || (v.n >= 2 && v.restless >= T.expertRestless) || (v.n >= 1 && waited >= T.expertPatience) || (this.giveUp && v.landed >= 1 && waited >= T.pilotGiveUp); break;
       default: want = v.n >= 5 || (v.n >= 3 && v.arriving === 0) || (v.n >= 3 && v.restless >= T.perfectRestless) || v.value >= T.perfectValue || (v.n >= 1 && waited >= T.perfectPatience) || (this.giveUp && v.landed >= 1 && waited >= T.pilotGiveUp); break;
@@ -1090,192 +1257,253 @@ class Pilot {
     this.clock += dt;
     let fired = null;
     const prev = this.closure;
-    if (this.stage === 0) {
+    if (this.stage === P_IDLE) {
       this.closure = 0;
       if (snap.phase === 'playing' && this.armed) {
-        // shoo: expert / perfect clear a bee that has sat in the trap too long with a slow creep (no snap)
+        // shoo: expert / perfect clear a bee that has sat in the trap too long with a partial close (no bite)
         const shooAfter = this.skill === 'perfect' ? T.perfectShooAfter : (this.skill === 'expert' ? T.expertShooAfter : 0);
         if (this.beeSitting(snap)) { if (this.beeSince === null) this.beeSince = time; } else this.beeSince = null;
         if (shooAfter > 0 && this.beeSince !== null && time - this.beeSince >= shooAfter) {
-          this.stage = 4; this.el = 0; this.peak = T.shooDepth; this.decideAt = null; this.beeSince = null;
+          this.stage = P_SHOO; this.el = 0; this.decideAt = null; this.beeSince = null;
         } else if (this.decideAt === null) {
-          if (this.wants(snap, time)) { this.decideAt = time + (this.p.delayMin === this.p.delayMax ? this.p.delayMin : this.rng.range(this.p.delayMin, this.p.delayMax)); }
+          if (this.wants(snap, time)) this.decideAt = time + pick2(this.rng, this.p.delayMin, this.p.delayMax);
         } else if (time >= this.decideAt) {
           this.decideAt = null;
           if (this.wants(snap, time)) {
-            this.stage = 1; this.el = 0; this.d = this.plannedD; this.t4 = null;
-            this.creepy = this.skill === 'novice' && this.rng.chance(T.noviceCreepChance);
-            this.peak = SNAP_DEPTH + T.pilotOvershoot;
+            this.stage = P_DOWN; this.el = 0; this.d = this.plannedD; this.tStart = null;
+            this.hold = pick2(this.rng, this.p.holdMin, this.p.holdMax);
+            this.reopen = pick2(this.rng, this.p.reopenMin, this.p.reopenMax);
             this.plannedD = this.planDuration();
           }
         }
       }
-    } else if (this.stage === 4) {
-      // shoo down: a slow close to shooDepth, held until the creep has shown for shooHold
+    } else if (this.stage === P_SHOO) {
       this.el += dt;
-      this.closure = Math.min(this.peak, this.peak * this.el / T.shooTime);
-      if (this.t6 !== null && time - this.t6 >= CREEP_DWELL + T.shooHold) { this.stage = 3; this.el = 0; }
-    } else if (this.stage === 1) {
+      this.closure = Math.min(T.shooDepth, T.shooDepth * this.el / T.shooTime);
+      if (this.el >= T.shooTime) { this.stage = P_SHOO_HOLD; this.el = 0; }
+    } else if (this.stage === P_SHOO_HOLD) {
       this.el += dt;
-      const rate = (SNAP_DEPTH - SNAP_START) / this.d;
-      if (this.creepy && this.closure < T.noviceCreepDepth && this.el <= T.noviceCreepTime) {
-        this.closure = Math.min(T.noviceCreepDepth, T.noviceCreepDepth * this.el / T.noviceCreepTime);
-      } else {
-        this.closure = Math.min(this.peak, this.closure + rate * dt);
+      if (!this.beeSitting(snap) || this.el >= T.shooHoldMax) {
+        this.stage = P_UP; this.el = 0; this.peak = this.closure; this.reopen = pick2(this.rng, this.p.reopenMin, this.p.reopenMax);
       }
-      if (this.t4 === null && this.closure >= SNAP_START) this.t4 = time - dt + dt * (SNAP_START - prev) / Math.max(1e-9, this.closure - prev);
-      if (this.armed && this.closure >= SNAP_DEPTH) {
-        const t22 = time - dt + dt * (SNAP_DEPTH - prev) / Math.max(1e-9, this.closure - prev);
-        fired = { duration: Math.max(0, t22 - (this.t4 === null ? t22 : this.t4)), time };
+    } else if (this.stage === P_DOWN) {
+      this.el += dt;
+      const rate = (Pilot.shutClosure() - T.closeStart) / Math.max(1e-6, this.d);
+      this.closure = Math.min(Pilot.fullClosure(), this.closure + rate * dt);
+      if (this.tStart === null && this.closure >= T.closeStart) this.tStart = crossing(time - dt, prev, time, this.closure, T.closeStart);
+      if (this.armed && this.closure >= Pilot.shutClosure()) {
+        const tShut = crossing(time - dt, prev, time, this.closure, Pilot.shutClosure());
+        fired = { duration: Math.max(0, tShut - (this.tStart === null ? tShut : this.tStart)), time };
         this.armed = false; this.lastSnap = time;
       }
-      if (this.closure >= this.peak) { this.stage = 2; this.el = 0; }
-    } else if (this.stage === 2) {
+      if (this.closure >= Pilot.fullClosure()) { this.stage = P_HOLD; this.el = 0; }
+    } else if (this.stage === P_HOLD) {
       this.el += dt;
-      if (this.el >= T.pilotHold) { this.stage = 3; this.el = 0; }
+      if (this.el >= this.hold) { this.stage = P_UP; this.el = 0; this.peak = this.closure; }
     } else {
       this.el += dt;
-      this.closure = Math.max(0, this.peak * (1 - this.el / T.pilotReopen));
-      if (!this.armed && this.closure <= this.peak - REARM_RISE) this.armed = true;
-      if (this.closure <= 0) { this.stage = 0; this.closure = 0; this.armed = true; }
+      this.closure = Math.max(0, this.peak * (1 - this.el / Math.max(1e-6, this.reopen)));
+      if (!this.armed && this.closure <= Pilot.armClosure()) this.armed = true;
+      if (this.closure <= 0) { this.stage = P_IDLE; this.closure = 0; this.armed = true; }
     }
-    if (this.closure > CREEP_DEPTH && this.armed) { if (this.t6 === null) this.t6 = time; } else this.t6 = null;
-    const creeping = this.t6 !== null && this.armed && time - this.t6 >= CREEP_DWELL;
+    if (this.armed && this.closure >= T.closeStart) { if (this.closeSince === null) this.closeSince = time; } else this.closeSince = null;
+    const creeping = this.closeSince !== null && time - this.closeSince > T.slowCloseAfter;
     return { closure: this.closure, armed: this.armed, creeping, snap: fired, angle: T.pilotIdleAngle - this.closure };
   }
 }
 
-// MARK: SnapDetector (mirror of Snap/Core/SnapDetector.swift; not used by the balance runs, checked by detector=1)
-const D = { snapDepth: 22, snapStartDepth: 4, snapCancelDepth: 2, creepDepth: 6, creepDwell: 0.45, rearmRise: 16,
-  rearmAngle: 150, rearmMinRise: 4, refWindow: 0.6, refFallRate: 25, creepWindow: 3.0, creepRefFallRate: 6,
-  tooFlatAngle: 174, settleWindow: 0.6, attemptWindow: 0.25 };
+// MARK: SnapDetector (R8: mirror of Snap/Core/SnapDetector.swift; not used by the balance runs, checked by detector=1)
+// The lid is the jaw (ROUND-8 §1 with the founder's binding rules): a shut phone is a closed trap and any opening is
+// open. Armed at theta >= armAngle (35); the shut zone is theta <= shutAngle (18), or the hinge status .closed at
+// theta <= statusShutAngle (25; hardware reads .closed from ~85). closure = reference - theta, the reference being the
+// max theta over refWindow, falling at most refFallRate, held while a close is under way. A close starts at closure
+// closeStart and is abandoned under closeCancel or when the phone opens reopenCancel above the close's lowest theta.
+// The bite fires once per arm at the shut; duration = shut - close start (untimedCloseDuration when no close start was
+// seen: a creep too slow to time is a slow close). requireShut (a round's start): not armed until the phone has been
+// shut once and opened again.
+const D = { armAngle: T.armAngle, shutAngle: T.shutAngle, closeStart: T.closeStart, closeCancel: T.closeCancel,
+  statusShutAngle: 25, refWindow: 0.6, refFallRate: 25, slowCloseAfter: T.slowCloseAfter,
+  reopenCancel: T.reopenCancel, untimedCloseDuration: T.untimedCloseDuration };
 class RollingMax {
   constructor(window, fall) { this.window = window; this.fall = fall; this.samples = []; this.value = 0; this.last = 0; }
   reset(t, a) { this.samples = [{ t, a }]; this.value = a; this.last = t; }
-  add(t, a) { this.samples.push({ t, a }); this.update(t); }
-  update(t) {
+  add(t, a, hold) { this.samples.push({ t, a }); this.update(t, hold); }
+  update(t, hold) {
     while (this.samples.length > 1 && this.samples[0].t < t - this.window) this.samples.shift();
     let w = -Infinity; for (const s of this.samples) w = Math.max(w, s.a);
     const dt = Math.max(0, t - this.last); this.last = Math.max(this.last, t);
-    if (w >= this.value) this.value = w; else this.value = Math.max(w, this.value - this.fall * dt);
+    if (w >= this.value) this.value = w; else if (!hold) this.value = Math.max(w, this.value - this.fall * dt);
   }
 }
 class SnapDetector {
-  constructor() {
-    this.fast = new RollingMax(D.refWindow, D.refFallRate); this.slow = new RollingMax(D.creepWindow, D.creepRefFallRate);
-    this.has = false; this.angle = 0; this.lastC = 0; this.prevTime = 0; this.armed = true; this.attempt = false; this.ts = 0;
-    this.lowest = 0; this.snapRef = 0; this.pending = null; this.creepSince = null;
-    this.recent = []; this.settling = false; this.settlePeak = 0; this.settleUntil = 0;
+  constructor(requireShut) {
+    this.ref = new RollingMax(D.refWindow, D.refFallRate);
+    this.has = false; this.angle = 0; this.lastC = 0; this.prevTime = 0; this.armed = false; this.closing = false;
+    this.closeStartAt = 0; this.lowest = 0; this.snapRef = 0; this.pending = null;
+    this.waiting = !!requireShut; // a round's start: not armed until shut once
   }
-  startSettle(t, a) { this.settling = true; this.settlePeak = a; this.settleUntil = t + D.settleWindow; }
-  recentRise(c) { return this.recent.length > 0 ? c - this.recent[0].c : c; }
-  static cross(t0, c0, t1, c1, thr) { if (c1 <= c0) return t1; return clamp(t0 + (t1 - t0) * (thr - c0) / (c1 - c0), t0, t1); }
-  ingest(angle, time) {
+  isShutAt(angle, status) { return angle <= D.shutAngle || (status === 'closed' && angle <= D.statusShutAngle); }
+  ingest(angle, time, status) {
     if (!isFinite(angle) || !isFinite(time)) return null;
     if (!this.has) {
-      this.has = true; this.fast.reset(time, angle); this.slow.reset(time, angle);
-      this.angle = angle; this.lastC = 0; this.prevTime = time; this.recent = [{ t: time, c: 0 }]; this.startSettle(time, angle); return null;
+      this.has = true; this.ref.reset(time, angle); this.angle = angle; this.lastC = 0; this.prevTime = time;
+      if (this.waiting && this.isShutAt(angle, status)) this.waiting = false;
+      this.armed = !this.waiting && angle >= D.armAngle && !this.isShutAt(angle, status);
+      return null;
     }
-    this.fast.add(time, angle); this.slow.add(time, angle);
-    let c = this.fast.value - angle;
+    const prevAngle = this.angle;
+    this.ref.add(time, angle, this.armed && this.closing);
+    let c = Math.max(0, this.ref.value - angle);
     let fired = null;
-    if (this.armed) {
-      this.recent.push({ t: time, c });
-      while (this.recent.length >= 2 && this.recent[1].t <= time - D.attemptWindow) this.recent.shift();
-      if (!this.attempt) {
-        if (c >= D.snapStartDepth) { this.attempt = true; this.ts = SnapDetector.cross(this.prevTime, this.lastC, time, c, D.snapStartDepth); }
-      } else if (c < D.snapCancelDepth) this.attempt = false;
-      else if (c < D.snapDepth && this.recentRise(c) < D.snapStartDepth) this.ts = time; // QA-1 #6: not snapping (a drift or a hold): restart the clock
-      if (this.attempt && c >= D.snapDepth) {
-        const tc = SnapDetector.cross(this.prevTime, this.lastC, time, c, D.snapDepth);
-        fired = { duration: Math.max(0, tc - this.ts), time };
-        this.pending = fired; this.armed = false; this.attempt = false; this.lowest = angle; this.snapRef = this.fast.value;
-        this.creepSince = null; this.recent = [];
-      }
+    if (!this.armed) {
+      if (this.waiting && this.isShutAt(angle, status)) this.waiting = false;
+      if (!this.waiting && angle >= D.armAngle) { this.armed = true; this.closing = false; this.ref.reset(time, angle); c = 0; }
     } else {
-      this.lowest = Math.min(this.lowest, angle);
-      const rise = angle - this.lowest;
-      if (rise >= D.rearmRise || (angle >= D.rearmAngle && rise >= D.rearmMinRise)) {
-        this.armed = true; this.attempt = false; this.fast.reset(time, angle); this.slow.reset(time, angle); c = 0;
-        this.creepSince = null; this.recent = [{ t: time, c: 0 }]; this.startSettle(time, angle);
+      if (!this.closing) {
+        if (c >= D.closeStart) { this.closing = true; this.lowest = angle; this.closeStartAt = crossing(this.prevTime, this.lastC, time, c, D.closeStart); }
+      } else {
+        this.lowest = Math.min(this.lowest, angle);
+        if (c < D.closeCancel || angle - this.lowest >= D.reopenCancel) {
+          // opened again: the close is over, and the reference starts again from here
+          this.closing = false; this.ref.reset(time, angle); c = 0;
+        }
       }
-    }
-    // QA-1 #5: after a re-arm (or the first sample, or while flat) the creep reference follows the hand while it opens
-    // and for settleWindow after its peak, so an overshoot that settles back never reads as a creep.
-    if (angle >= D.tooFlatAngle) { if (!this.settling) this.startSettle(time, angle); this.settleUntil = Math.max(this.settleUntil, time + D.settleWindow); }
-    if (this.settling) {
-      if (angle > this.settlePeak) { this.settlePeak = angle; this.settleUntil = time + D.settleWindow; }
-      if (time <= this.settleUntil) this.slow.reset(time, angle); else this.settling = false;
+      if (this.isShutAt(angle, status)) {
+        const byAngle = angle <= D.shutAngle;
+        const tShut = byAngle && prevAngle > D.shutAngle ? crossing(this.prevTime, -prevAngle, time, -angle, -D.shutAngle) : time;
+        const duration = this.closing ? Math.max(0, tShut - this.closeStartAt) : D.untimedCloseDuration;
+        fired = { duration, time };
+        this.pending = fired; this.armed = false; this.closing = false; this.snapRef = this.ref.value;
+      }
     }
     this.lastC = c; this.prevTime = time; this.angle = angle;
-    this.updateCreep(time);
     return fired;
   }
-  creepDepthNow() { return this.has ? Math.max(0, this.slow.value - this.angle) : 0; }
-  updateCreep(time) {
-    if (!this.has) return;
-    if (this.armed && this.creepDepthNow() > D.creepDepth) { if (this.creepSince === null) this.creepSince = time; }
-    else this.creepSince = null;
-  }
   input(time) {
-    if (this.has) { this.fast.update(time); this.slow.update(time); this.updateCreep(time); }
-    let closure = this.has ? Math.max(0, this.fast.value - this.angle) : 0;
-    if (this.has && !this.armed) closure = Math.max(closure, this.snapRef - this.angle);
-    const creeping = this.creepSince !== null && time - this.creepSince > D.creepDwell;
-    if (creeping) closure = Math.max(closure, this.creepDepthNow());
+    if (this.has && isFinite(time)) this.ref.update(time, this.armed && this.closing);
+    let closure = 0;
+    if (this.has) closure = this.armed ? Math.max(0, this.ref.value - this.angle) : Math.max(0, this.snapRef - this.angle);
+    if (this.has && !this.armed && this.snapRef === 0) closure = 0;
+    const creeping = this.has && this.armed && this.closing && time - this.closeStartAt > D.slowCloseAfter;
     const snap = this.pending; this.pending = null;
-    return { closure, armed: this.armed, creeping, snap, tooFlat: this.has && this.angle >= D.tooFlatAngle, angle: this.has ? this.angle : null };
+    return { closure, armed: this.has ? this.armed : true, creeping, snap, tooFlat: false, angle: this.has ? this.angle : null };
   }
 }
+// detPath(d, from, to, seconds, t0, status): feeds a straight move at 30 Hz
+function detPath(d, from, to, seconds, t0, status) {
+  const n = Math.max(1, Math.round(seconds * 30)); let fires = 0; const durs = []; let maxC = 0; let creep = false;
+  for (let i = 1; i <= n; i++) {
+    const t = t0 + i / 30; const a = from + (to - from) * i / n;
+    const r = d.ingest(a, t, status); if (r) { fires += 1; durs.push(r.duration); }
+    const inp = d.input(t + 0.001); maxC = Math.max(maxC, inp.closure); if (inp.creeping) creep = true;
+  }
+  return { fires, t: t0 + n / 30, durs, maxC, creep };
+}
+function detRest(d, a, seconds, t0) { const n = Math.round(seconds * 30); for (let i = 0; i <= n; i++) d.ingest(a, t0 + i / 30); return t0 + n / 30; }
 function detectorChecks() {
   const out = [];
-  { // 25 degrees in 0.12 s at 30 Hz fires once, on the crossing sample
-    const d = new SnapDetector(); let fires = 0, dur = 0, at = -1;
-    for (let i = 0; i <= 30; i++) { if (d.ingest(160, i / 30)) fires += 1; }
-    for (let i = 1; i <= 8; i++) { const t = 1 + i / 30; const a = 160 - Math.min(25, 25 * (i / 30) / 0.12); const r = d.ingest(a, t); if (r) { fires += 1; dur = r.duration; at = i; } }
-    out.push([`fast snap fires once (fires=${fires}, d=${dur.toFixed(3)}, sample=${at})`, fires === 1 && dur >= 0.08 && dur <= 0.16 && at === 4]);
+  { // BITE: 150 -> 5 in 0.3 s: one bite at the shut, duration ~0.25 s (closeStart -> 18 deg)
+    const d = new SnapDetector(); const t = detRest(d, 150, 1, 0);
+    const r = detPath(d, 150, 5, 0.3, t);
+    out.push([`a slam bites once at the shut (fires=${r.fires}, d=${(r.durs[0] || 0).toFixed(3)})`, r.fires === 1 && r.durs[0] >= 0.2 && r.durs[0] <= 0.3 && !d.armed]);
   }
-  { // 160 -> 128 over 3 s: creeps within ~1 s, closure >= 15 at the end, never snaps
-    const d = new SnapDetector(); let fires = 0, creepAt = -1, endClosure = 0;
-    for (let i = 0; i <= 30; i++) d.ingest(160, i / 30);
-    for (let i = 1; i <= 90; i++) {
-      const t = 1 + i / 30; if (d.ingest(160 - 32 * i / 90, t)) fires += 1;
-      const inp = d.input(t + 0.001); if (inp.snap) fires += 1; if (inp.creeping && creepAt < 0) creepAt = t - 1; endClosure = inp.closure;
-    }
-    out.push([`slow close creeps (at ${creepAt.toFixed(2)} s, end closure ${endClosure.toFixed(1)}, fires ${fires})`, fires === 0 && creepAt > 0 && creepAt <= 1.2 && endClosure >= 15]);
+  { // SLOW-CLOSE: 150 -> 5 over 2.5 s: one bite, a long duration, reported creeping on the way
+    const d = new SnapDetector(); const t = detRest(d, 150, 1, 0);
+    const r = detPath(d, 150, 5, 2.5, t);
+    out.push([`a slow close bites at the shut with a long duration (fires=${r.fires}, d=${(r.durs[0] || 0).toFixed(2)}, creep=${r.creep})`, r.fires === 1 && r.durs[0] >= 1.5 && r.creep]);
   }
-  { // resting jitter +-1.5 never snaps or creeps
+  { // a creep too slow to time (150 -> 5 over 20 s) still counts as a slow close
+    const d = new SnapDetector(); const t = detRest(d, 150, 1, 0);
+    const r = detPath(d, 150, 5, 20, t);
+    out.push([`a very slow creep is a slow bite (fires=${r.fires}, d=${(r.durs[0] || 0).toFixed(2)})`, r.fires === 1 && r.durs[0] >= 1.5]);
+  }
+  { // NO-BITE-DEEP: 150 -> 60 -> 150, and 150 -> 30 -> 150: never a bite, however deep; armed throughout
+    const d = new SnapDetector(); let t = detRest(d, 150, 1, 0);
+    const a = detPath(d, 150, 60, 0.4, t); t = detRest(d, 60, 1, a.t);
+    const b = detPath(d, 60, 150, 0.6, t); t = detRest(d, 150, 1, b.t);
+    const c = detPath(d, 150, 30, 0.4, t); const e = detPath(d, 30, 150, 0.6, c.t);
+    out.push([`a partial close never bites (fires=${a.fires + b.fires + c.fires + e.fires}, max closure ${a.maxC.toFixed(0)})`, a.fires + b.fires + c.fires + e.fires === 0 && a.maxC >= 60 && d.armed]);
+  }
+  { // a half reopen (150 -> 60 -> 120) ends the close: the reference starts again, so a later slam is timed afresh
+    const d = new SnapDetector(); let t = detRest(d, 150, 1, 0);
+    const a = detPath(d, 150, 60, 0.4, t); const b = detPath(d, 60, 120, 0.4, a.t); t = detRest(d, 120, 1, b.t);
+    const was = d.closing;
+    const c = detPath(d, 120, 5, 0.25, t);
+    out.push([`opening again ends the close (closing after: ${was}, next slam d=${(c.durs[0] || 0).toFixed(2)})`, !was && c.fires === 1 && c.durs[0] <= 0.3]);
+  }
+  { // REOPEN: after the bite, unarmed until theta >= 35, then armed; the next close bites again
+    const d = new SnapDetector(); let t = detRest(d, 150, 1, 0);
+    const a = detPath(d, 150, 5, 0.3, t); t = a.t;
+    const b = detPath(d, 5, 30, 0.2, t); t = b.t; const still = d.armed;
+    const c = detPath(d, 30, 150, 0.4, t); t = detRest(d, 150, 0.7, c.t); const re = d.armed;
+    const e = detPath(d, 150, 5, 0.3, t);
+    out.push([`re-arms at 35 and bites again (armed at 30: ${still}, at 150: ${re}, fires ${a.fires + b.fires + c.fires + e.fires})`, !still && re && a.fires + b.fires + c.fires === 1 && e.fires === 1]);
+  }
+  { // STATUS: .closed bites at theta <= 25 only (hardware reads .closed at ~85: 90 is open)
+    const d = new SnapDetector(); let t = detRest(d, 150, 1, 0);
+    const a = detPath(d, 150, 40, 0.3, t, 'closed'); t = a.t;
+    const b = detPath(d, 40, 24, 0.1, t, 'closed');
+    out.push([`status .closed bites only at <= 25 deg (at 40: ${a.fires}, at 24: ${b.fires})`, a.fires === 0 && b.fires === 1]);
+  }
+  { // jitter at rest (and flat) never closes or bites; nothing is ever too flat
     const d = new SnapDetector(); const r = new SeededRandom(5); let bad = 0;
-    for (let i = 0; i < 600; i++) { const t = i / 30; if (d.ingest(160 + r.range(-1.5, 1.5), t)) bad += 1; const inp = d.input(t); if (inp.creeping || inp.snap) bad += 1; }
-    out.push([`jitter never snaps or creeps (bad=${bad})`, bad === 0]);
+    for (let i = 0; i < 600; i++) { const t = i / 30; if (d.ingest(178 + r.range(-1.5, 1.5), t)) bad += 1; const inp = d.input(t); if (inp.creeping || inp.snap || inp.tooFlat || inp.closure >= D.closeStart) bad += 1; }
+    out.push([`jitter never closes or bites, flat is fine (bad=${bad})`, bad === 0]);
   }
-  { // re-arm after rising 16 from the lowest point
-    const d = new SnapDetector(); let fires = 0, rearmAt = null;
-    for (let i = 0; i <= 30; i++) d.ingest(160, i / 30);
-    const path = [154, 146, 138, 130, 126, 126, 130, 134, 138, 142, 146];
-    path.forEach((a, k) => { const t = 1 + (k + 1) / 30; if (d.ingest(a, t)) fires += 1; if (rearmAt === null && d.armed && fires === 1) rearmAt = a; });
-    out.push([`re-arms 16 above the lowest (fires=${fires}, at ${rearmAt})`, fires === 1 && rearmAt === 142]);
-  }
-  { // QA-1 #5: a reopen that overshoots (172) and settles (165) never creeps
-    const d = new SnapDetector(); let creeps = 0, fires = 0; let t = 0;
-    for (let i = 0; i <= 30; i++) { t = i / 30; d.ingest(165, t); }
-    const path = [155, 145, 138, 135, 140, 148, 156, 164, 170, 172, 171, 169, 167, 166, 165];
-    for (const a of path) { t += 1 / 30; if (d.ingest(a, t)) fires += 1; }
-    for (let i = 0; i < 150; i++) { t += 1 / 30; d.ingest(165 + (i % 2 ? 0.4 : -0.4), t); const inp = d.input(t); if (inp.creeping) creeps += 1; }
-    out.push([`overshoot then settle never creeps (creeping frames=${creeps}, fires=${fires})`, creeps === 0 && fires === 1 && d.armed]);
-  }
-  { // QA-1 #6: a steady 8 deg/s drift then a quick snap is timed from the snap, not the drift
-    const d = new SnapDetector(); let t = 0, dur = -1;
-    for (let i = 0; i <= 30; i++) { t = i / 30; d.ingest(165, t); }
-    let a = 165;
-    for (let i = 0; i < 60; i++) { t += 1 / 30; a -= 8 / 30; d.ingest(a, t); }
-    for (let i = 0; i < 4; i++) { t += 1 / 30; a -= 25 / 3; const r = d.ingest(a, t); if (r && dur < 0) dur = r.duration; }
-    out.push([`snap after a drift is timed from the snap (d=${dur.toFixed(3)})`, dur >= 0 && dur <= 0.15]);
+  { // a round's start (requireShut): open is not armed; shut then open arms; a 90 deg phone is open
+    const d = new SnapDetector(true); let t = detRest(d, 150, 0.5, 0);
+    const before = d.armed;
+    const a = detPath(d, 150, 5, 0.3, t); t = a.t;
+    const b = detPath(d, 5, 90, 0.4, t); t = detRest(d, 90, 0.5, b.t);
+    const open90 = d.armed;
+    const c = detPath(d, 90, 5, 0.2, t);
+    out.push([`a round starts closed (armed open: ${before}, shut-bite: ${a.fires}, armed at 90: ${open90}, then bites: ${c.fires})`, !before && a.fires === 0 && open90 && c.fires === 1]);
   }
   return out;
 }
 
 // MARK: Runs
+// R8 (ROUND-8 §4): one level played by a pilot (LevelBook.session in Swift): the result LevelBook.evaluate reads.
+function levelOptions(L) { return { snapsRunOut: L.bites != null, waves: false, stingCosts: false, hunger: false, refunds: false, level: L }; }
+function runLevel(L, skill, pilotSeed) {
+  const s = new Session(levelSeed(L.id), levelOptions(L), 'level');
+  if (args.debug) s.debug = true;
+  const pilot = new Pilot(skill, pilotSeed);
+  pilot.minBite = goalOf(L).biteOf; pilot.targets = goalOf(L).species;
+  const dt = 1 / 60; let t = 0; let frames = 0;
+  while (s.phase !== 'finished' && frames < 60 * 180) { s.step(dt, pilot.step(dt, t, s.snapshot())); t += dt; frames += 1; }
+  const r = { snaps: s.stats.snaps, caught: s.stats.caught, bySpecies: s.bySpecies, biggest: s.stats.biggest, spared: s.stats.spared, stings: s.stats.stings, escapes: s.stats.escapes || 0, seconds: s.phase === 'finished' ? s.tiredAt : s.time };
+  return Object.assign(levelEvaluate(L, r), { r, end: s.levelEnd || (s.phase === 'finished' ? 'bites' : 'cap') });
+}
+// Pilot seeds for the level table (the same in BalanceTests.swift): 1 + 7 * k
+function levelTable(n, ids) {
+  const rows = [];
+  for (const L of LEVELS) {
+    if (ids && !ids.includes(L.id)) continue;
+    const row = { id: L.id, title: L.title };
+    for (const sk of ['novice', 'casual', 'expert', 'perfect']) {
+      let wins = 0, three = 0, ends = {}; const bites = [], esc = [];
+      for (let k = 0; k < n; k++) { const o = runLevel(L, sk, u64(BigInt(1 + 7 * k))); if (o.passed) { wins += 1; bites.push(o.r.snaps); esc.push(o.r.escapes); } if (o.stars === 3) three += 1; ends[o.end] = (ends[o.end] || 0) + 1; }
+      row[sk] = { wins, three, ends, bites: bites.length ? Math.min(...bites) + '-' + Math.max(...bites) : '-', esc: esc.length ? Math.min(...esc) + '-' + Math.max(...esc) : '-' };
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+// R8 (ROUND-8 §4): every level is winnable by the expert, levels 1-5 by the novice, 3 stars reachable by perfect
+function levelChecks(rows, n) {
+  const out = [];
+  for (const r of rows) {
+    out.push([`level ${r.id} expert wins >= half (${r.expert.wins}/${n})`, r.expert.wins * 2 >= n]);
+    if (r.id <= 5) out.push([`level ${r.id} novice wins >= half (${r.novice.wins}/${n})`, r.novice.wins * 2 >= n]);
+    out.push([`level ${r.id} perfect 3 stars at least once (${r.perfect.three}/${n})`, r.perfect.three >= 1]);
+  }
+  // 3 stars is hard: in Dusk and Night the expert misses them on at least 3 levels (in 30 %+ of its tries)
+  let missed = 0; for (const r of rows) if (r.id > 10 && r.expert.three < 0.7 * n) missed += 1;
+  if (rows.length === 30) out.push([`3 stars is hard: the expert misses them on >= 3 Dusk/Night levels (${missed})`, missed >= 3]);
+  return out;
+}
+
 // R4: SPROUT1 is the App's options for a Sprout's first Feed run (SessionOptions.firstRun: 14 snaps, no wilting, the
 // first stinger bite free; startSnaps 12 is what the App passes for every Sprout Feed run and firstRun overrides it).
 const SPROUT1 = { startSnaps: 12, firstRun: true };
@@ -1293,7 +1521,11 @@ function runOne(skill, seed, extra, mode, giveUp) {
   }
   return { score: s.score, seconds: s.phase === 'finished' ? s.tiredAt : s.time, snaps: s.stats.snaps, caught: s.stats.caught,
     stings: s.stats.stings, feasts: s.stats.feasts, dry: s.stats.dry, waves: s.wave, chain: s.stats.longestChain,
-    biggest: s.stats.biggest, spared: s.stats.spared, wilts: s.stats.wilts, capped: s.phase !== 'finished' };
+    biggest: s.stats.biggest, spared: s.stats.spared, wilts: s.stats.wilts, capped: s.phase !== 'finished',
+    // R8: wall seconds (the session clock plus the frozen shut time) and the mean catch ratio of the bites
+    wall: (s.phase === 'finished' ? s.tiredAt : s.time) + s.stats.shutTime,
+    ratio: s.stats.ratioN > 0 ? s.stats.ratioSum / s.stats.ratioN : 0,
+    dayRatio: s.stats.dayRatioN > 0 ? s.stats.dayRatioSum / s.stats.dayRatioN : 0 };
 }
 // R6: a Zen Bog run (SessionOptions.for(.zen)) for `seconds`: it must never tire, never change its snaps, and keep
 // catching (the day loops, so the night never outruns the hand).
@@ -1343,7 +1575,7 @@ function nightShare(seeds, base, stride) {
 }
 function zenLine(sk, m) { return `SNAP-BAL zen ${sk} 600 s: caught=${m.caught} minLate120s=${m.minLate} stings=${m.stings} chain=${m.chain} waves=${m.waves} tired=${m.tired} snapsChanged=${m.snapsChanged} maxWilts=${m.wilts}`; }
 function pct(a, p) { if (a.length === 0) return 0; const s = a.slice().sort((x, y) => x - y); const pos = (s.length - 1) * p; const lo = Math.floor(pos); const hi = Math.min(s.length - 1, lo + 1); return s[lo] + (s[hi] - s[lo]) * (pos - lo); }
-const KEYS = ['score', 'seconds', 'snaps', 'caught', 'stings', 'feasts', 'dry', 'waves', 'chain', 'biggest', 'spared', 'wilts'];
+const KEYS = ['score', 'seconds', 'snaps', 'caught', 'stings', 'feasts', 'dry', 'waves', 'chain', 'biggest', 'spared', 'wilts', 'wall', 'ratio', 'dayRatio'];
 function medians(runs) {
   const m = {};
   for (const k of KEYS) m[k] = pct(runs.map((r) => r[k]), 0.5);
@@ -1359,12 +1591,19 @@ const WELL_FED = 10000;
 function checks(med) {
   const out = [];
   const c = med.casual, n = med.novice, e = med.expert, p = med.perfect;
+  // R8 (ROUND-8 §2): run lengths (session seconds, the frozen shut time excluded): novice 60-100 s, casual 2-3 min,
+  // expert 4-6 min; the best players' daytime catch ratio is 90 %+.
+  if (n) out.push([`novice seconds 60-100 (${n.seconds.toFixed(1)})`, n.seconds >= 60 && n.seconds <= 100]);
   if (c) {
-    out.push([`casual seconds 100-240 (${c.seconds.toFixed(1)})`, c.seconds >= 100 && c.seconds <= 240]);
-    out.push([`casual snaps 18-45 (${c.snaps})`, c.snaps >= 18 && c.snaps <= 45]);
-    out.push([`casual longest chain 3-6 (${c.chain})`, c.chain >= 3 && c.chain <= 6]);
+    out.push([`casual seconds 120-180 (${c.seconds.toFixed(1)})`, c.seconds >= 120 && c.seconds <= 180]);
+    out.push([`casual snaps 15-45 (${c.snaps})`, c.snaps >= 15 && c.snaps <= 45]);
     out.push([`casual wilts <= 2 (${c.wilts})`, c.wilts <= 2]);
   }
+  if (e) out.push([`expert seconds 240-360 (${e.seconds.toFixed(1)})`, e.seconds >= 240 && e.seconds <= 360]);
+  if (e) out.push([`expert daytime catch ratio >= 0.9 (${e.dayRatio.toFixed(2)})`, e.dayRatio >= 0.9]);
+  if (p) out.push([`perfect daytime catch ratio >= 0.9 (${p.dayRatio.toFixed(2)})`, p.dayRatio >= 0.9]);
+  if (n && e) out.push([`novice catch ratio < expert (${n.ratio.toFixed(2)} < ${e.ratio.toFixed(2)})`, n.ratio < e.ratio]);
+  if (c && e) out.push([`casual longest chain <= expert (${c.chain} <= ${e.chain})`, c.chain <= e.chain]);
   if (med.sprout) out.push([`casual Sprout run 1 seconds >= 90 (${med.sprout.seconds.toFixed(1)})`, med.sprout.seconds >= 90]);
   if (med.sproutNovice) out.push([`novice Sprout run 1 seconds >= 90 (${med.sproutNovice.seconds.toFixed(1)})`, med.sproutNovice.seconds >= 90]);
   if (med.sproutNovice) out.push([`novice Sprout run 1 never wilts (${med.sproutNovice.maxWilts})`, med.sproutNovice.maxWilts === 0]);
@@ -1406,6 +1645,14 @@ function main() {
   const seeds = Number(args.seeds || 16);
   const base = Number(args.base || 1000), stride = Number(args.stride || 7919);
   const skills = (args.skills || 'novice,casual,expert,perfect').split(',');
+  if (args.levels) {
+    const n = Number(args.levelSeeds || 8);
+    const ids = args.ids ? args.ids.split(',').map(Number) : null;
+    const rows = levelTable(n, ids);
+    for (const r of rows) console.log(`SNAP-LVL ${String(r.id).padStart(2)} ${r.title.padEnd(18)} ` + ['novice', 'casual', 'expert', 'perfect'].map((sk) => `${sk[0]} ${r[sk].wins}/${n} 3*${r[sk].three} b${r[sk].bites} x${r[sk].esc}`).join(' | '));
+    for (const [name, ok] of levelChecks(rows, n)) if (!ok || args.all) console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`);
+    return;
+  }
   if (args.detector) {
     for (const [name, ok] of detectorChecks()) console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`);
     return;
@@ -1524,7 +1771,7 @@ function main() {
     }
     med[sk] = medians(runs);
     const m = med[sk];
-    console.log(`SNAP-BAL skill=${sk} score=${m.score} p10=${pct(runs.map((r) => r.score), 0.1).toFixed(0)} p90=${pct(runs.map((r) => r.score), 0.9).toFixed(0)} seconds=${m.seconds.toFixed(1)} snaps=${m.snaps} caught=${m.caught} stings=${m.stings} maxStings=${m.maxStings} feasts=${m.feasts} dry=${m.dry} waves=${m.waves} chain=${m.chain} biggest=${m.biggest} spared=${m.spared} wilts=${m.wilts} capped=${m.capped} n=${runs.length}`);
+    console.log(`SNAP-BAL skill=${sk} score=${m.score} p10=${pct(runs.map((r) => r.score), 0.1).toFixed(0)} p90=${pct(runs.map((r) => r.score), 0.9).toFixed(0)} seconds=${m.seconds.toFixed(1)} p10s=${pct(runs.map((r) => r.seconds), 0.1).toFixed(1)} p90s=${pct(runs.map((r) => r.seconds), 0.9).toFixed(1)} wall=${m.wall.toFixed(1)} ratio=${m.ratio.toFixed(2)} dayRatio=${m.dayRatio.toFixed(2)} snaps=${m.snaps} caught=${m.caught} stings=${m.stings} maxStings=${m.maxStings} feasts=${m.feasts} dry=${m.dry} waves=${m.waves} chain=${m.chain} biggest=${m.biggest} spared=${m.spared} wilts=${m.wilts} capped=${m.capped} n=${runs.length}`);
   }
   for (const sk of ['novice', 'casual']) {
     // R3/R4 (REVIEW-2 #9, REVIEW-3 #11): the pilot's Sprout run 1 (SPROUT1 options)

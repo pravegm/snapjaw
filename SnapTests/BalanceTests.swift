@@ -3,47 +3,32 @@ import Foundation
 import Testing
 @testable import Snap
 
-// MARK: - Headless balance playtest (Round 7)
+// MARK: - Headless balance playtest (Round 8)
 //
-// R7 (design/notes/core-R7.md): the ×2 FEAST (a clean bite of 5+ scores × Tuning.feastMultiplier), the night pool
-// (fireflies and crickets lead) and the late decays 0.955 / 0.91. tools/balance-sim.js predicts on these 16 seeds:
-//   novice  286 score     /  48 s / 10.5 snaps / 1 sting / 0 wilts
-//   casual  7,834         / 122 s / 22 snaps   / 3 stings / longest chain 5 / 0 wilts
-//   expert  40,069        / 302 s (p90 332 s) / 39.5 snaps / 0 stings / 2 wilts
-//   perfect 67,073        / 341 s / 37.5 snaps / never stung / 3 wilts
-//   without pilotGiveUp: expert 387 s, perfect 423 s, none capped; Sprout run 1: novice 101 s, casual 156 s;
-//   taper: novice run 2 100 s, run 3 90 s; Zen 600 s: casual 333 bugs, perfect 485, ≥ 52 in the last 2 minutes.
-//   (8 seeds: casual 124 s, chain 5; expert 315 s, p90 330 s; perfect 341 s; novice Sprout 1 / 2 / 3 98 / 95 / 85 s.)
-// R7 targets added: expert p90 ≤ 360 s; casual median < Tuning.wellFedScore (10,000) ≤ expert median.
-// The R6 numbers below are history.
+// R8 (design/notes/core-R8.md, ROUND-8 §1–§2, §4): the lid is the jaw. The pilot closes the whole phone (close times
+// by skill: novice 0.6–1.1 s, casual 0.35–0.65 s, expert 0.2–0.35 s, perfect 0.18 s; reopen 0.4–0.8 s, the clock
+// frozen while shut), bugs startle at their nerve and flee after their reaction, and the bite at the shut catches what
+// is still there. Tuning: 12 start snaps, hunger 18/14/12/12, any miss breaks the chain, the sleepy morning × 1.3.
+// tools/balance-sim.js predicts on these 16 seeds (session seconds, the frozen shut time excluded; wall in brackets):
+//   novice     486 score /  71 s (81 s) / 14 snaps / 2 stings / catch ratio 0.28 (day 0.36)
+//   casual   6,154       / 145 s (156 s) / 27 snaps / 3.5 stings / chain 2 / 0 wilts / day ratio 0.79
+//   expert  18,063       / 283 s (298 s), p90 320 s / 38 snaps / 0 stings / chain 6.5 / 2 wilts / day ratio 0.97
+//   perfect 32,676       / 326 s (335 s) / 36 snaps / never stung / day ratio 0.98
+//   Sprout runs 1 / 2 / 3 (novice): 115 / 112 / 99 s; casual Sprout 1: 188 s. Without pilotGiveUp: expert 379 s,
+//   perfect 393 s, none capped. Zen 600 s: casual 305 bugs, perfect 467, ≥ 59 in the last 2 minutes.
+//   (8 seeds: novice 71 s, casual 147 s, expert 306 s, p90 322 s, perfect 327 s; day ratios 0.31 / 0.75 / 0.96 / 0.99.)
+// R8 targets (medians): novice 60–100 s, casual 120–180 s (2–3 min) with 15–45 snaps and ≤ 2 wilts, expert 240–360 s
+// (4–6 min) and p90 ≤ 360 s with ≤ 6 wilts, perfect 240–480 s with ≤ 5 wilts; the expert's and perfect's daytime
+// catch ratio (bites before dusk) ≥ 0.9 and the novice's below the expert's; casual's longest chain ≤ the expert's;
+// plus the R4–R7 ones: Sprout runs 1/2/3 ≥ 90/75/60 s, never capped, Well Fed between casual and expert, novice <
+// casual < expert ≤ perfect, perfect never stung, the novice stung.
+// R8 levels (LevelBook, 8 pilot seeds 1 + 7k each, as `node tools/balance-sim.js levels=1`): every level is won by
+// the expert at least once (the sim: ≥ 4 of 8 everywhere), levels 1–5 by the novice, and 3 stars reached by perfect.
 //
 // Every PilotSkill plays real TrapSessions (mode .feed, SNAP_BAL_SEEDS seeds, default 16; CI sets 8) at 60 Hz, the
-// pilot fed the previous frame's snapshot the way GameController feeds it. Each run is capped at 10 min. R4: every
-// run (the four skills plus the novice and casual pilots' Sprout run 1) is simulated once, in parallel, the first time
-// any balance test asks, and the whole table is printed then as ONE block between "SNAP-BAL ==== table" and
-// "SNAP-BAL ==== end", so it sits at the start of the balance section of the CI log:
-//   SNAP-BAL skill=casual score=5206 p10=… p90=… seconds=147.4 snaps=24.5 caught=70.5 stings=2.5 maxStings=6 …
-// tools/balance-sim.js (a line-by-line port) predicts on these 16 seeds (design/notes/core-R6.md):
-//   novice  230 score      /  48 s / 10.5 snaps / 1 sting (median) / 0 wilts
-//   casual  4,875          / 141 s / 24 snaps   / 3 stings / longest chain 5 / 0 wilts
-//   expert  25,210         / 327 s / 42.5 snaps / 0 stings / 3 wilts
-//   perfect 42,133         / 354 s / 41.5 snaps / never stung / 4 wilts
-//   R6 (#19): the last light (Feed, wave 85 on: the hunger clock ticks whatever is in the trap) ends every run, so the
-//   expert / perfect without pilotGiveUp end too: 427 / 432 s, none capped (R5: 14 of 16 capped at 600 s).
-//   R6 Zen Bog (SessionOptions.for(.zen), 600 s): never tires or wilts, snaps never change; casual catches ~325 bugs,
-//   perfect ~500, and both still catch ≥ 50 in the last 2 minutes (the day loops, so the night never outruns them).
-//   Sprout run 1 (SessionOptions.sprout(feedRun: 1): 14 snaps, no wilting, the first sting free, a calm morning):
-//   novice 101 s, casual 166 s. R5 taper: novice Sprout run 2 (13 snaps, free sting, calm) 100 s; run 3 (12, calm) 90 s.
-//   R5 (REVIEW-4 P2): expert / perfect without Tuning.pilotGiveUp (TrapPilot.givesUp false). SNAP_BAL_NOGIVEUP=0
-//   skips those runs. R6: asserted never capped (64-seed sim max < 550 s).
-// (8 seeds: casual 128 s, chain 5, 0 wilts; expert 327 s, 3 wilts; perfect 350 s, 4 wilts; novice Sprout runs
-// 1 / 2 / 3 98 / 95 / 85 s; without pilotGiveUp expert 425 s, perfect 446 s, none capped.)
-// R4 targets (asserted on medians): perfect runs 4–8 min (240–480 s) with ≤ 5 wilts; expert ≤ 6 wilts; casual runs
-// 100–240 s and 18–45 snaps, with a longest chain of 3–6 and ≤ 2 wilts; the novice and casual pilots' Sprout run 1
-// lasts ≥ 90 s and never wilts; R5: the novice's Sprout run 2 lasts ≥ 75 s and run 3 ≥ 60 s; R6: expert ≤ 360 s and
-// no run without pilotGiveUp capped; plus R1's: novice < casual < expert ≤ perfect, perfect never stung, novice stung (R3:
-// median ≥ 0.5). The late night (reactions × 0.96 per wave to 0.2, lingers × 0.92 to 0.2) ends every run, so no skill
-// may hit the 10-minute cap.
+// pilot fed the previous frame's snapshot the way GameController feeds it. Each run is capped at 10 min. Every run is
+// simulated once, in parallel, the first time any balance test asks, and the whole table is printed then as ONE block
+// between "SNAP-BAL ==== table" and "SNAP-BAL ==== end".
 
 struct SnapBalanceRun {
     var score: Int
@@ -58,6 +43,9 @@ struct SnapBalanceRun {
     /// R3: `wilted` events (RunResult has no wilt count).
     var wilts: Int
     var capped: Bool
+    /// R8: the mean catch ratio of the bites before dusk (bites with bugs in the trap), and of all of them.
+    var dayRatio: Double = 0
+    var ratio: Double = 0
 }
 
 /// The parallel runs' results (one lock; written from DispatchQueue.concurrentPerform's workers).
@@ -296,11 +284,26 @@ enum SnapBalanceHarness {
         var t: Double = 0
         var frames: Int = 0
         var wilts: Int = 0
+        var daySum: Double = 0
+        var dayN: Int = 0
+        var allSum: Double = 0
+        var allN: Int = 0
         let maxFrames: Int = Int(capSeconds / frameDt)
         while !session.isFinished && frames < maxFrames {
-            let out: PilotOutput = pilot.step(dt: frameDt, time: t, snapshot: session.snapshot)
+            let shot: TrapSnapshot = session.snapshot
+            let out: PilotOutput = pilot.step(dt: frameDt, time: t, snapshot: shot)
+            let wave: Int = shot.wave
             for e in session.step(dt: frameDt, input: out.input) {
                 if case .wilted = e { wilts += 1 }
+                // R8: a bite with bugs in the trap (caught or escaped) counts for the catch ratio, as in the sim.
+                if case .snapped(let b) = e, b.catchRatio > 0 || b.escaped > 0 {
+                    allSum += b.catchRatio
+                    allN += 1
+                    if wave < Tuning.duskWave {
+                        daySum += b.catchRatio
+                        dayN += 1
+                    }
+                }
             }
             t += frameDt
             frames += 1
@@ -309,7 +312,46 @@ enum SnapBalanceHarness {
         let r: RunResult = session.partialResult()
         return SnapBalanceRun(score: r.score, seconds: r.seconds, snaps: r.snaps, caught: r.bugsCaught,
                               stings: r.stings, feasts: r.feasts, waves: r.waves, longestChain: r.longestChain,
-                              beesSpared: r.beesSpared, wilts: wilts, capped: capped)
+                              beesSpared: r.beesSpared, wilts: wilts, capped: capped,
+                              dayRatio: dayN > 0 ? daySum / Double(dayN) : 0,
+                              ratio: allN > 0 ? allSum / Double(allN) : 0)
+    }
+
+    /// R8 (ROUND-8 §4): level `id` played by `skill` with pilot seed `pilotSeed` (the sim's levelTable: 1 + 7k), the
+    /// pilot reading the goal (a one-bite goal's size, the goal's species). Nil for an unknown id.
+    static func runLevel(_ id: Int, _ skill: PilotSkill, pilotSeed: UInt64) -> (LevelOutcome, RunResult)? {
+        let geometry = TrapGeometry(sceneSize: CGSize(width: ScreenLayout.canvasWidth, height: ScreenLayout.canvasHeight))
+        guard let level = LevelBook.level(id), let session = LevelBook.session(id: id, geometry: geometry) else {
+            return nil
+        }
+        var pilot = TrapPilot(skill: skill, seed: pilotSeed)
+        pilot.minBite = level.goal.biteOf
+        pilot.targets = level.goal.species
+        var t: Double = 0
+        var frames: Int = 0
+        while !session.isFinished && frames < 60 * 180 {
+            let out: PilotOutput = pilot.step(dt: frameDt, time: t, snapshot: session.snapshot)
+            _ = session.step(dt: frameDt, input: out.input)
+            t += frameDt
+            frames += 1
+        }
+        let r: RunResult = session.partialResult()
+        return (LevelBook.evaluate(r, level), r)
+    }
+
+    /// R8: (wins, three-star runs) of `skill` on level `id` over `tries` pilot seeds.
+    static func levelRecord(_ id: Int, _ skill: PilotSkill, tries: Int = 8) -> (wins: Int, three: Int) {
+        var wins: Int = 0
+        var three: Int = 0
+        var k: Int = 0
+        while k < tries {
+            if let o = runLevel(id, skill, pilotSeed: UInt64(1 + 7 * k)) {
+                if o.0.passed { wins += 1 }
+                if o.0.stars == 3 { three += 1 }
+            }
+            k += 1
+        }
+        return (wins, three)
     }
 
     /// R6: what a Zen Bog run did in `seconds` (SessionOptions.for(.zen), 60 Hz).
@@ -398,14 +440,17 @@ enum SnapBalanceHarness {
         let wilts: [Double] = runs.map { (r: SnapBalanceRun) -> Double in Double(r.wilts) }
         let maxStings: Int = runs.map { (r: SnapBalanceRun) -> Int in r.stings }.max() ?? 0
         let capped: Int = runs.filter { (r: SnapBalanceRun) -> Bool in r.capped }.count
+        let day: [Double] = runs.map { (r: SnapBalanceRun) -> Double in r.dayRatio }
+        let all: [Double] = runs.map { (r: SnapBalanceRun) -> Double in r.ratio }
         let head: String = String(format: "skill=%@ score=%.0f p10=%.0f p90=%.0f seconds=%.1f p10s=%.1f snaps=%.1f",
                                   skill.rawValue, percentile(score, 0.5), percentile(score, 0.1),
                                   percentile(score, 0.9), percentile(secs, 0.5), percentile(secs, 0.1),
                                   percentile(snaps, 0.5))
-        let tail: String = String(format: " caught=%.1f stings=%.1f maxStings=%d feasts=%.1f waves=%.1f chain=%.1f spared=%.1f wilts=%.1f capped=%d n=%d",
+        let tail: String = String(format: " caught=%.1f stings=%.1f maxStings=%d feasts=%.1f waves=%.1f chain=%.1f spared=%.1f wilts=%.1f capped=%d ratio=%.2f dayRatio=%.2f n=%d",
                                   percentile(caught, 0.5), percentile(stings, 0.5), maxStings,
                                   percentile(feasts, 0.5), percentile(waves, 0.5), percentile(chains, 0.5),
-                                  percentile(spared, 0.5), percentile(wilts, 0.5), capped, runs.count)
+                                  percentile(spared, 0.5), percentile(wilts, 0.5), capped, percentile(all, 0.5),
+                                  percentile(day, 0.5), runs.count)
         return prefix + head + tail
     }
 }
@@ -427,16 +472,48 @@ struct BalanceTests {
         let line: String = SnapBalanceHarness.report(.casual, runs)
         let seconds: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in r.seconds }
         let snaps: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in Double(r.snaps) }
-        #expect(seconds >= 100 && seconds <= 240, "casual seconds \(seconds): \(line)")
-        #expect(snaps >= 18 && snaps <= 45, "casual snaps \(snaps): \(line)")
+        // R8 (ROUND-8 §2): 2–3 minutes.
+        #expect(seconds >= 120 && seconds <= 180, "casual seconds \(seconds): \(line)")
+        #expect(snaps >= 15 && snaps <= 45, "casual snaps \(snaps): \(line)")
     }
 
-    @Test func casualLongestChain() {
-        // R2 chain rule: only bites of ≥ 2 add a step, so a casual run's longest chain is 3–6.
-        let runs: [SnapBalanceRun] = SnapBalanceMemo.shared.runs(.casual)
-        let line: String = SnapBalanceHarness.report(.casual, runs)
-        let chain: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in Double(r.longestChain) }
-        #expect(chain >= 3 && chain <= 6, "casual longest chain \(chain): \(line)")
+    @Test func casualChainsAreShorterThanTheExperts() {
+        // R8 (ROUND-8 §2): any miss breaks the chain, so a slow hand's chains stay short.
+        let casual: Double = SnapBalanceHarness.median(SnapBalanceMemo.shared.runs(.casual)) { (r: SnapBalanceRun) -> Double in
+            Double(r.longestChain)
+        }
+        let expert: Double = SnapBalanceHarness.median(SnapBalanceMemo.shared.runs(.expert)) { (r: SnapBalanceRun) -> Double in
+            Double(r.longestChain)
+        }
+        #expect(casual <= expert, "casual \(casual) expert \(expert)")
+    }
+
+    /// R8 (ROUND-8 §2): the novice's run ends at 60–100 s, through mistakes (empty bites, stings, starving).
+    @Test func noviceRunLength() {
+        let runs: [SnapBalanceRun] = SnapBalanceMemo.shared.runs(.novice)
+        let line: String = SnapBalanceHarness.report(.novice, runs)
+        let seconds: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in r.seconds }
+        #expect(seconds >= 60 && seconds <= 100, "novice seconds \(seconds): \(line)")
+    }
+
+    /// R8 (ROUND-8 §2, the skill readout): the best players see a 90 %+ catch ratio (by day: the late night's fast
+    /// bugs are what end their runs); the novice sees much less.
+    @Test func theCatchRatioReadsTheSkill() {
+        let expert: Double = SnapBalanceHarness.median(SnapBalanceMemo.shared.runs(.expert)) { (r: SnapBalanceRun) -> Double in
+            r.dayRatio
+        }
+        let perfect: Double = SnapBalanceHarness.median(SnapBalanceMemo.shared.runs(.perfect)) { (r: SnapBalanceRun) -> Double in
+            r.dayRatio
+        }
+        let novice: Double = SnapBalanceHarness.median(SnapBalanceMemo.shared.runs(.novice)) { (r: SnapBalanceRun) -> Double in
+            r.ratio
+        }
+        let expertAll: Double = SnapBalanceHarness.median(SnapBalanceMemo.shared.runs(.expert)) { (r: SnapBalanceRun) -> Double in
+            r.ratio
+        }
+        #expect(expert >= 0.9, "expert day ratio \(expert)")
+        #expect(perfect >= 0.9, "perfect day ratio \(perfect)")
+        #expect(novice < expertAll, "novice \(novice) expert \(expertAll)")
     }
 
     @Test func casualRarelyWilts() {
@@ -485,16 +562,15 @@ struct BalanceTests {
         #expect(capped == 0, "\(line)")
     }
 
-    /// R6 (#19, REVIEW-5 P2-5): an expert run lasts at most about 6 minutes (median). R7 (SCORE-R6 #14): with the
-    /// night pool led by fireflies and crickets and the late decays 0.955 / 0.91, nine expert runs in ten do too
-    /// (p90; the sim: 332 s on 16 seeds, 330 s on 8).
+    /// R8 (ROUND-8 §2): an expert run lasts 4–6 minutes (median), and nine in ten end by 6 (p90; the sim: 320 s on 16
+    /// seeds, 322 s on 8).
     @Test func expertRunLength() {
         let runs: [SnapBalanceRun] = SnapBalanceMemo.shared.runs(.expert)
         let line: String = SnapBalanceHarness.report(.expert, runs)
         let seconds: Double = SnapBalanceHarness.median(runs) { (r: SnapBalanceRun) -> Double in r.seconds }
         let secs: [Double] = runs.map { (r: SnapBalanceRun) -> Double in r.seconds }
         let p90: Double = SnapBalanceHarness.percentile(secs, 0.9)
-        #expect(seconds <= 360, "expert seconds \(seconds): \(line)")
+        #expect(seconds >= 240 && seconds <= 360, "expert seconds \(seconds): \(line)")
         #expect(p90 <= 360, "expert p90 seconds \(p90): \(line)")
     }
 
@@ -569,5 +645,25 @@ struct BalanceTests {
         #expect(novice < casual, "\(line)")
         #expect(casual < expert, "\(line)")
         #expect(expert <= perfect, "\(line)")
+    }
+
+    // MARK: R8 (ROUND-8 §4): the levels
+
+    /// Every level is winnable by the expert (at least once in 8 pilot seeds; the sim: at least 4 of 8), and 3 stars
+    /// is reachable by perfect.
+    @Test(arguments: Array(1...30))
+    func levelIsWinnable(id: Int) {
+        let expert = SnapBalanceHarness.levelRecord(id, .expert)
+        let perfect = SnapBalanceHarness.levelRecord(id, .perfect)
+        print("SNAP-LVL \(id) expert wins=\(expert.wins)/8 three=\(expert.three) perfect wins=\(perfect.wins)/8 three=\(perfect.three)")
+        #expect(expert.wins >= 1, "level \(id): expert won \(expert.wins) of 8")
+        #expect(perfect.three >= 1, "level \(id): perfect 3 stars \(perfect.three) of 8")
+    }
+
+    /// Levels 1–5 teach: the novice wins them.
+    @Test(arguments: Array(1...5))
+    func teachingLevelsAreWinnableByTheNovice(id: Int) {
+        let novice = SnapBalanceHarness.levelRecord(id, .novice)
+        #expect(novice.wins >= 1, "level \(id): novice won \(novice.wins) of 8")
     }
 }

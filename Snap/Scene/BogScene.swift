@@ -19,8 +19,16 @@ import UIKit
 ///     - haze (z 21, add) · dew twinkles and night fireflies (z 21.5)
 ///     - bug shadows (z 22) · landing ripples (z 23) · bugs (z 30) · nectar night glow (z 41)
 ///     - FX (z 50: spray, sparkles, whiffs, startles) · score pops (z 60)
+/// - R8: the closing dim (z 55, never shaken: hinge input only, the edges darken as the phone closes; under the pops)
 /// - the economy's glyph flights (z 62, never shaken: they land on the HUD's snaps row)
 /// - vignette (z 70, never shaken)
+///
+/// **R8: the phone IS the trap.** With hinge input (`usesHinge`, set by the App) the lobes are always drawn open: the
+/// closure (0 … about 150° at the shut) drives only the closing cues (the cilia lean in, the rim shadow deepens, the
+/// edges dim, the bugs in the trap panic). The bite comes as the phone shuts, when nobody can see the inner screen, so
+/// its moment (the pops, the FEAST, the juice) is held back and played as the digest when the trap reopens
+/// (`snapshot.shut` goes false): the caught bugs gone, a gold juice stain and remains where they were, the "+N" pop.
+/// Touch input keeps the R3 slam (a tap is an instant bite).
 ///
 /// **Clocks.** Moments (the slam, FX, pops, the punch) run on the session's clock (snapshot time), so a pause or a
 /// CI freeze holds them at that instant; ambient life (flaps, bobs, twinkles, fireflies) runs on the wall clock, so a
@@ -59,10 +67,17 @@ final class BogScene: SKScene {
 
     // MARK: App inputs (R2)
 
-    /// The closure to draw, in degrees (0 open … `Tuning.snapDepth` at the bite), when the App has a better one than
+    /// The closure to draw, in degrees from the open reference, when the App has a better one than
     /// `snapshot.closure`: set it from `HingeTrapSource.predictedAngle(at:)` each frame (before or inside
-    /// `advance`) so the teeth glide instead of stepping at the hinge's 25–30 Hz. nil = draw `snapshot.closure`.
+    /// `advance`) so the cues glide instead of stepping at the hinge's 25–30 Hz. nil = draw `snapshot.closure`.
+    /// R8: with the hinge it runs 0 … about 150 at the shut and drives only the closing cues (`TrapArt.closingCue`);
+    /// with touch it is the tap's sweep (0 … `Tuning.snapDepth`) and drives the lobes as before.
     var drawnClosure: Double?
+
+    /// R8: the input is the hinge (the App sets it with its input kind, `AppInputKind.hinge`; default false = touch).
+    /// Hinge: the lobes never animate shut on the inner screen, the closure drives the closing cues, the caught bugs
+    /// are never drawn and the bite's moment plays as the digest on the reopen. Touch: today's slam.
+    var usesHinge = false
 
     /// Where the HUD's snaps row is, in scene space (the glyph a Feast wins flies there; a sting cracks one there; a
     /// wilt droops one there). The App sets it from `HUDLayout` (QA-2 #6: the glyph that changes,
@@ -276,6 +291,22 @@ final class BogScene: SKScene {
     var vignetteColor: RGBA { light.vignetteRGBA }
     /// The light tint's z (tests: below the trap, so it multiplies the bog only).
     var tintZ: CGFloat { light.tint.zPosition }
+    /// R8 (tests, the App): the closing cue drawn now (0 open … 1 at `TrapArt.cueFull`; 0 with touch), the rim shadow
+    /// on the lobes, the edge dim's alpha (the edges' darkness: its texture is opaque there) and the bugs' panic.
+    var closingCue: CGFloat { jaws.cueLevel }
+    var rimShadow: CGFloat { jaws.rimShadow }
+    var edgeDim: CGFloat { closingDim.isHidden ? 0 : closingDim.alpha }
+    private(set) var bugPanic: CGFloat = 0
+    /// R8 (tests): bug `id`'s panic and its visual-only jitter now, and whether it is drawn at all.
+    func panic(ofBug id: Int) -> CGFloat? { bugs.panicOf(id) }
+    func panicJitter(ofBug id: Int) -> CGPoint? { bugs.jitterOf(id) }
+    func isDrawn(bug id: Int) -> Bool { bugs.isDrawn(id) }
+    /// R8 (tests, the App): a hinge bite's moment is waiting for the reopen; the digests played so far; the digest's
+    /// juice stains and remains showing now.
+    var digestPending: Bool { !heldBite.isEmpty }
+    private(set) var digestsShown = 0
+    var juiceStains: Int { effects.activeStains }
+    var remainsShowing: Int { effects.activeRemains }
     /// Where bug `id` is drawn (nil when it is not on screen).
     func drawnPoint(ofBug id: Int) -> CGPoint? { bugs.drawnPoint(id) }
     /// Every node under the scene.
@@ -394,6 +425,20 @@ final class BogScene: SKScene {
     private let pops: BogPops
     private let economy: BogEconomy
     private let light: BogLight
+    /// R8: the closing dim (hinge input only).
+    private let closingDim: SKSpriteNode
+
+    /// R8: the hinge bite held for the reopen (its events), the snaps left before it, where its stingers were drawn,
+    /// whether the snapshot has shown the phone shut since, and the wall seconds waited unshut (`digestFallback`).
+    private var heldBite: [TrapEvent] = []
+    private var heldBefore = 0
+    private var heldPoints: [Int: CGPoint] = [:]
+    private var heldSawShut = false
+    private var heldWait: Double = 0
+
+    /// R8: if a hinge bite's snapshot never shows the phone shut (a pilot, a Core without `shut`), its digest plays
+    /// after this many wall seconds anyway.
+    static let digestFallback: Double = 0.35
 
     private var hasSnapshot = false
     private var lastUpdate: TimeInterval?
@@ -421,7 +466,9 @@ final class BogScene: SKScene {
         let popsV = BogPops()
         let ecoV = BogEconomy()
         let lightV = BogLight()
+        let dimV = SKSpriteNode(texture: BogTextures.closingDim, size: layout.size)
         self.layout = layout
+        closingDim = dimV
         world = worldN
         shaker = shakerN
         backdrop = back
@@ -465,6 +512,13 @@ final class BogScene: SKScene {
         shaker.addChild(surface.glowRoot)
         shaker.addChild(effects.fxRoot)
         shaker.addChild(pops.root)
+        // R8: the closing dim, never shaken, over the bugs and FX (z 50), under the pops (60) and the glyphs (62).
+        closingDim.zPosition = 55
+        closingDim.color = .black
+        closingDim.colorBlendFactor = 1
+        closingDim.alpha = 0
+        closingDim.isHidden = true
+        addChild(closingDim)
         addChild(economy.root)
         addChild(light.vignette)
         riders = [surface.root, surface.glowRoot, effects.decalRoot]
@@ -490,6 +544,8 @@ final class BogScene: SKScene {
         jaws.layout(g, sceneHeight: layout.size.height, hasFold: layout.hasFold)
         surface.layout(g)
         light.layout(size: layout.size, geometry: g)
+        bogResize(closingDim, layout.size)
+        closingDim.position = CGPoint(x: layout.size.width / 2, y: layout.size.height / 2)
         bugs.canvas = layout.size
         keepOutChanged()
         placeCamera()
@@ -521,6 +577,14 @@ final class BogScene: SKScene {
         placeCamera()
         hasSnapshot = false
         lastSnapsLeft = nil
+        // R8: a held bite belongs to the old session.
+        heldBite = []
+        heldPoints = [:]
+        heldSawShut = false
+        heldWait = 0
+        bugPanic = 0
+        closingDim.alpha = 0
+        closingDim.isHidden = true
         // R7 (#4): a new session takes the keep-out too.
         publishKeepOut()
     }
@@ -566,7 +630,10 @@ final class BogScene: SKScene {
         let s = snapshot
         let g = layout.geometry
         light.update(clock: s.dayClock, time: wallTime, fxDt: fxDt)
-        handle(events, s, g, before: lastSnapsLeft ?? s.snapsLeft)
+        let before = lastSnapsLeft ?? s.snapsLeft
+        // R8: with the hinge a bite's moment waits for the reopen (the digest).
+        let now = holdBite(events, s, before: before, wallDt: wallDt)
+        handle(now, s, g, before: before)
         lastSnapsLeft = s.snapsLeft
         // The hit-stop: the bugs, FX and pops hold for 50 ms of session time; the jaws slam through it.
         let holding = hitStop > 0
@@ -577,10 +644,18 @@ final class BogScene: SKScene {
         }
         var closure = s.closure
         if let c = drawnClosure, c.isFinite { closure = c }
-        jaws.update(fxDt: fxDt, closure01: TrapArt.closure01(closure), tired: BogScene.tiredness(s.phase),
+        // R8: the hinge never closes the drawn lobes (the phone is the trap); its closure drives the closing cues.
+        let hinge = usesHinge
+        let cue: CGFloat = hinge ? TrapArt.closingCue(closure) : 0
+        let drawn01: CGFloat = hinge ? 0 : TrapArt.closure01(closure)
+        jaws.update(fxDt: fxDt, closure01: drawn01, tired: BogScene.tiredness(s.phase),
                     hunger: CGFloat(s.hunger), time: wallTime, night: light.night, dusk: light.dusk,
                     tint: light.lobeTint, tintAlpha: light.lobeTintAlpha, rim: light.rimTint,
-                    rimAlpha: light.rimAlpha)
+                    rimAlpha: light.rimAlpha, cue: cue)
+        let dim = TrapArt.edgeDim(cue)
+        closingDim.alpha = dim
+        closingDim.isHidden = dim < 0.005
+        bugPanic = TrapArt.panicLevel(cue)
         // R3 (#1): the nectar, the hairs and the glistens ride the bite's squeeze (about the midrib) and sink under the
         // closed trap, so nothing is left lying on the bog outside it.
         let k = jaws.slamScale
@@ -592,7 +667,7 @@ final class BogScene: SKScene {
         surface.update(nectar: s.nectar, bugs: s.bugs, time: wallTime, dt: holding ? 0 : wallDt, night: light.night)
         bugs.update(s.bugs, time: wallTime, dt: wallDt, geometry: g, night: light.night, tint: light.bugTint,
                     tintAmount: light.bugTintAmount, reduceMotion: reduceMotion, squeeze: jaws.lobeScale,
-                    hold: holding)
+                    hold: holding, panic: bugPanic, hideCaught: hinge)
         for p in bugs.gulps { effects.gulp(at: p) }
         effects.update(momentDt)
         pops.update(momentDt)
@@ -654,7 +729,80 @@ final class BogScene: SKScene {
         min(max(costs, 0), max(before - after, 0))
     }
 
-    private func handle(_ events: [TrapEvent], _ s: TrapSnapshot, _ g: TrapGeometry, before: Int) {
+    // MARK: R8 the digest (hinge input)
+
+    /// R8: whether `e` is the bite itself.
+    nonisolated static func isSnap(_ e: TrapEvent) -> Bool {
+        if case .snapped = e { return true }
+        return false
+    }
+
+    /// R8: whether `e` belongs to a bite's moment (held with it for the reopen when it comes in the bite's frame).
+    nonisolated static func isBitePart(_ e: TrapEvent) -> Bool {
+        switch e {
+        case .snapped, .bugCaught, .bugEscaped, .stung, .drySnap, .feast, .luckySnap, .chainUp, .chainBroken,
+             .newBest:
+            return true
+        case .waveStarted, .dayPhaseChanged, .bugArrived, .bugLanded, .bugSipping, .bugHopped, .bugLeft,
+             .bugSpooked, .snapStarted, .rearmed, .beeSpared, .lastSnap, .hungry, .wilted, .tired, .finished:
+            return false
+        }
+    }
+
+    /// R8: with hinge input, a frame with a bite hands its moment (`isBitePart`) to the held bite and returns the rest
+    /// to handle now; on a later frame, the held bite plays as the digest once the trap reopens (`snapshot.shut` was
+    /// true and is false again), or after `digestFallback` wall seconds if the snapshot never showed it shut. A second
+    /// bite before the reopen plays the first at once. With touch, nothing is held (a held bite plays at once).
+    private func holdBite(_ events: [TrapEvent], _ s: TrapSnapshot, before: Int, wallDt: Double) -> [TrapEvent] {
+        if usesHinge && events.contains(where: { BogScene.isSnap($0) }) {
+            if !heldBite.isEmpty { playDigest(s) }
+            var now: [TrapEvent] = []
+            var held: [TrapEvent] = []
+            for e in events {
+                if BogScene.isBitePart(e) { held.append(e) } else { now.append(e) }
+            }
+            heldBite = held
+            heldBefore = before
+            heldSawShut = s.shut
+            heldWait = 0
+            heldPoints = [:]
+            for e in held {
+                if case .stung(let id, _, _) = e {
+                    heldPoints[id] = bugs.drawnPoint(id) ?? s.bugs.first(where: { $0.id == id })?.position
+                }
+            }
+            return now
+        }
+        if !heldBite.isEmpty {
+            if s.shut {
+                heldSawShut = true
+            } else {
+                heldWait += max(wallDt, 0)
+            }
+            let reopened = !s.shut && (heldSawShut || heldWait >= BogScene.digestFallback)
+            if !usesHinge || reopened { playDigest(s) }
+        }
+        return events
+    }
+
+    /// R8: plays the held bite as the digest now (`handle(…, digest: true)`) and lets it go.
+    private func playDigest(_ s: TrapSnapshot) {
+        let held = heldBite
+        let before = heldBefore
+        heldBite = []
+        heldSawShut = false
+        heldWait = 0
+        guard !held.isEmpty else { return }
+        digestsShown += 1
+        handle(held, s, layout.geometry, before: before, digest: true)
+        heldPoints = [:]
+    }
+
+    /// One frame's events. R8: `digest` replays a held hinge bite as the trap reopens: no slam (the phone did that), no
+    /// hit-stop or white flash, no bug sinking or gulping (they were eaten out of sight); the juice stain and remains
+    /// where each was caught; the pops, the FEAST banner and burst, the glyph flights and the camera punch as usual.
+    private func handle(_ events: [TrapEvent], _ s: TrapSnapshot, _ g: TrapGeometry, before: Int,
+                        digest: Bool = false) {
         guard !events.isEmpty else { return }
         let pal = TrapArt.palette
         byId.removeAll(keepingCapacity: true)
@@ -707,12 +855,19 @@ final class BogScene: SKScene {
                 break
             case .snapped(let report):
                 bite = report
-                jaws.slam()
-                light.pulse()
                 let n = report.caught.count
                 // R6: a FEAST event (5+ bugs, or a ×4+ chain) hits harder: an 80 ms hit-stop, a bigger punch.
                 big = BogScene.isBigFeast(report)
                 lastBiteWasFeastEvent = big
+                if digest {
+                    // R8: the reopen. The FEAST still lands with its punch and a softer shake; a plain bite with a
+                    // small punch.
+                    punch = big ? BogScene.bigPunch : (n > 0 ? 0.6 : 0)
+                    if big { shakeAmp = BogScene.bigShake * 0.5 }
+                    continue
+                }
+                jaws.slam()
+                light.pulse()
                 punch = big ? BogScene.bigPunch : (n > 0 ? 1 : 0.5)
                 var amp: CGFloat = n > 0 ? min(4 + 2 * CGFloat(n), 12) : 3
                 if !report.stingers.isEmpty { amp = max(amp, 6) }
@@ -727,15 +882,23 @@ final class BogScene: SKScene {
                 caughtPoints.append(position)
                 caughtIds.append((id, position))
                 caughtRadius = max(caughtRadius, bugs.radius(species))
-                bugs.markCaught(id, at: position)
-                effects.squish(at: position, radius: bugs.radius(species), tint: tint)
+                if digest {
+                    // R8: the bug is gone; a gold juice stain and its remains are where it was.
+                    effects.digest(at: position, radius: bugs.radius(species), tint: tint)
+                } else {
+                    bugs.markCaught(id, at: position)
+                    effects.squish(at: position, radius: bugs.radius(species), tint: tint)
+                }
             case .bugEscaped(let id, let species):
-                if let b = byId[id] {
+                // R8: on the reopen the escapers are long gone (they fled during the close, on screen).
+                if !digest, let b = byId[id] {
                     let p = bugs.drawnPoint(id) ?? b.position
                     effects.whiff(at: p, heading: CGFloat(b.heading), radius: bugs.radius(species))
                 }
             case .stung(let id, let species, let cost):
-                let p = bugs.drawnPoint(id) ?? byId[id]?.position ?? g.center
+                // R8: on the reopen, where the stinger was drawn at the shut.
+                let heldAt: CGPoint? = digest ? heldPoints[id] : nil
+                let p = heldAt ?? bugs.drawnPoint(id) ?? byId[id]?.position ?? g.center
                 stings.append((p, species, cost))
             case .drySnap:
                 dry = true
@@ -857,11 +1020,14 @@ final class BogScene: SKScene {
                         ? BogEconomy.flightTime + Double(r.snapsBack - 1) * BogEconomy.flightGap : 0.1
                     economy.flourish(row: hudSnapsRowRect, anchor: snapsAnchor, delay: wait)
                 }
-                // R6: the caught bugs are gulped into the midrib one after another, nearest it first.
-                let cx = g.center.x
-                let order = caughtIds.sorted { abs($0.1.x - cx) < abs($1.1.x - cx) }
-                let delays = BogScene.gulpDelays(count: order.count)
-                for (k, c) in order.enumerated() { bugs.queueGulp(c.0, delay: delays[k]) }
+                // R6: the caught bugs are gulped into the midrib one after another, nearest it first. R8: not on the
+                // reopen (they were eaten as the phone shut).
+                if !digest {
+                    let cx = g.center.x
+                    let order = caughtIds.sorted { abs($0.1.x - cx) < abs($1.1.x - cx) }
+                    let delays = BogScene.gulpDelays(count: order.count)
+                    for (k, c) in order.enumerated() { bugs.queueGulp(c.0, delay: delays[k]) }
+                }
             }
         }
         // "Bzzt!" above the bee's ring (R3 #14: never over the bee; under the ring when there's no room above), on

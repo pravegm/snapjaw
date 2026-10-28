@@ -13,37 +13,37 @@ enum BugCatalog {
 
     static let all: [BugInfo] = [
         BugInfo(species: .housefly, name: "Housefly", joke: "Has never once wiped its feet.",
-                points: 10, reaction: 0.24, nerve: 7, radius: BugCatalog.scaled(14), firstPhase: .morning),
+                points: 10, reaction: 0.50, nerve: 12, radius: BugCatalog.scaled(14), firstPhase: .morning),
         BugInfo(species: .gnat, name: "Gnat", joke: "Travels in a cloud of five. Thinks for none.",
-                points: 3, reaction: 0.32, nerve: 10, radius: BugCatalog.scaled(7), firstPhase: .morning),
+                points: 3, reaction: 0.65, nerve: 16, radius: BugCatalog.scaled(7), firstPhase: .morning),
         BugInfo(species: .fruitFly, name: "Fruit Fly", joke: "Came for the banana. Stayed for the nectar.",
-                points: 6, reaction: 0.28, nerve: 9, radius: BugCatalog.scaled(9), firstPhase: .morning),
+                points: 6, reaction: 0.55, nerve: 12, radius: BugCatalog.scaled(9), firstPhase: .morning),
         BugInfo(species: .bluebottle, name: "Bluebottle", joke: "Shiny, loud, and in a terrible hurry.",
-                points: 25, reaction: 0.16, nerve: 5, radius: BugCatalog.scaled(16), firstPhase: .noon),
+                points: 25, reaction: 0.32, nerve: 10, radius: BugCatalog.scaled(16), firstPhase: .noon),
         BugInfo(species: .ant, name: "Ant", joke: "Walks in single file. Will not be taking questions.",
-                points: 8, reaction: 0.60, nerve: 15, radius: BugCatalog.scaled(10), firstPhase: .noon),
+                points: 8, reaction: 0.90, nerve: 45, radius: BugCatalog.scaled(10), firstPhase: .noon),
         BugInfo(species: .ladybird, name: "Ladybird", joke: "Lucky for you. Less so for her.",
-                points: 15, reaction: 0.30, nerve: 10, radius: BugCatalog.scaled(14), firstPhase: .noon),
+                points: 15, reaction: 0.55, nerve: 40, radius: BugCatalog.scaled(14), firstPhase: .noon),
         BugInfo(species: .grasshopper, name: "Grasshopper", joke: "Treats the midrib like a long jump pit.",
-                points: 20, reaction: 0.22, nerve: 7, radius: BugCatalog.scaled(18), firstPhase: .noon),
+                points: 20, reaction: 0.40, nerve: 22, radius: BugCatalog.scaled(18), firstPhase: .noon),
         BugInfo(species: .moth, name: "Moth", joke: "Mistook your trap for a very romantic lamp.",
-                points: 20, reaction: 0.30, nerve: 9, radius: BugCatalog.scaled(18), firstPhase: .dusk),
+                points: 20, reaction: 0.50, nerve: 25, radius: BugCatalog.scaled(18), firstPhase: .dusk),
         BugInfo(species: .mosquito, name: "Mosquito", joke: "Nobody will miss this one. Nobody.",
-                points: 12, reaction: 0.14, nerve: 4, radius: BugCatalog.scaled(9), firstPhase: .dusk),
+                points: 12, reaction: 0.25, nerve: 8, radius: BugCatalog.scaled(9), firstPhase: .dusk),
         BugInfo(species: .dragonfly, name: "Dragonfly", joke: "Four wings, zero patience, one sharp snap.",
-                points: 50, reaction: 0.12, nerve: 4, radius: BugCatalog.scaled(24), firstPhase: .dusk),
+                points: 50, reaction: 0.22, nerve: 8, radius: BugCatalog.scaled(24), firstPhase: .dusk),
         BugInfo(species: .firefly, name: "Firefly", joke: "Brought its own night light. Brave.",
-                points: 35, reaction: 0.26, nerve: 8, radius: BugCatalog.scaled(13), firstPhase: .night),
+                points: 35, reaction: 0.45, nerve: 30, radius: BugCatalog.scaled(13), firstPhase: .night),
         BugInfo(species: .cricket, name: "Cricket", joke: "Chirps loudest right before dinner.",
-                points: 25, reaction: 0.34, nerve: 11, radius: BugCatalog.scaled(17), firstPhase: .night),
+                points: 25, reaction: 0.55, nerve: 30, radius: BugCatalog.scaled(17), firstPhase: .night),
         BugInfo(species: .goldenScarab, name: "Golden Scarab", joke: "Rare, regal, and surprisingly crunchy.",
-                points: 150, reaction: 0.40, nerve: 12, radius: BugCatalog.scaled(20), firstPhase: .noon),
+                points: 150, reaction: 0.70, nerve: 50, radius: BugCatalog.scaled(20), firstPhase: .noon),
         BugInfo(species: .bee, name: "Bee", joke: "Busy. Important. Absolutely not on the menu.",
-                points: 0, reaction: 1.0, nerve: 8, radius: BugCatalog.scaled(16), firstPhase: .morning),
+                points: 0, reaction: 1.0, nerve: 20, radius: BugCatalog.scaled(16), firstPhase: .morning),
         BugInfo(species: .bumblebee, name: "Bumblebee", joke: "A fuzzy tank with a flight plan. Spare it.",
-                points: 0, reaction: 1.0, nerve: 10, radius: BugCatalog.scaled(22), firstPhase: .noon),
+                points: 0, reaction: 1.0, nerve: 28, radius: BugCatalog.scaled(22), firstPhase: .noon),
         BugInfo(species: .wasp, name: "Wasp", joke: "Bites back. Literally. Leave it be.",
-                points: 0, reaction: 1.0, nerve: 6, radius: BugCatalog.scaled(16), firstPhase: .dusk),
+                points: 0, reaction: 1.0, nerve: 14, radius: BugCatalog.scaled(16), firstPhase: .dusk),
     ]
 
     static func info(_ s: BugSpecies) -> BugInfo {
@@ -140,10 +140,23 @@ struct BugMotion: Equatable {
 
 enum TrapRules {
 
-    /// Reactions × this after Tuning.lateWaveStart (GAME-DESIGN §6).
+    /// Reactions × this after Tuning.lateWaveStart (GAME-DESIGN §6). R8: × Tuning.morningReactionFactor before
+    /// Tuning.noonWave (the morning's sleepy bugs).
     static func lateFactor(wave: Int) -> Double {
+        if wave < Tuning.noonWave { return Tuning.morningReactionFactor }
         if wave <= Tuning.lateWaveStart { return 1 }
         return max(Tuning.lateReactionFloor, pow(Tuning.lateReactionDecay, Double(wave - Tuning.lateWaveStart)))
+    }
+
+    /// R8 (ROUND-8 §1): how long a bug that startles at `nerve` degrees of closure has been fleeing at the shut of a
+    /// close that took `duration` s from Tuning.closeStart to the shut, for a straight close over
+    /// Tuning.modelCloseSpan degrees: duration × (1 − (nerve − closeStart) / modelCloseSpan), the fraction clamped to
+    /// 0…1. A bite catches a bug when its exposure (the larger of this and the real time since it startled in the
+    /// close) is within its reaction time. Pure; tested.
+    static func modelExposure(nerve: Double, duration: Double) -> Double {
+        let d: Double = duration.isFinite ? max(0, duration) : 0
+        let f: Double = min(max((nerve - Tuning.closeStart) / Tuning.modelCloseSpan, 0), 1)
+        return d * (1 - f)
     }
 
     /// GAME-DESIGN §4: species.reaction × (sipping 1.35) × (flying 0.55) × (on the rim 0.6), × the late factor.

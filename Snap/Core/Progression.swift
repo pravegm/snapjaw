@@ -31,7 +31,8 @@ enum PlantRanks {
     static func growth(from run: RunResult) -> Int {
         let bugs: Int = max(run.bugsCaught, 0)
         switch run.mode {
-        case .feed, .daily: return bugs
+        // R8: a level's bugs count in full, as in Feed.
+        case .feed, .daily, .level: return bugs
         case .zen: return Int((Double(bugs) * Tuning.zenRankShare + 1e-9).rounded(.down))
         case .attract, .lesson: return 0
         }
@@ -106,7 +107,8 @@ enum Achievements {
         case .attract, .lesson: return []
         case .feed: break
         case .daily(day: _, scored: let scored): scoredDaily = scored
-        case .zen: zen = true
+        // R8: a level is short and scripted, so it earns what a Zen run earns (never the run-length feats).
+        case .zen, .level: zen = true
         }
         var out: [AchievementDef] = []
         func check(_ a: AchievementDef, _ met: Bool) {

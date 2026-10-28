@@ -37,11 +37,11 @@ D06-goals|screen=home;progress=late|8|Three *goals* every run / And a Daily Bog 
 D07-bug-book|screen=book;progress=late|6|Fill the *Bug Book* / 16 species, each with a joke.|SNAP-T screen book
 D08-zen|screen=play;mode=zen;pilot=casual;progress=late;freezeOn=crowd;freezeAfter=25|60|Or just *relax* / Zen Bog: no rush, no end.|SNAP-T freeze crowd
 D09-results|screen=results;pilot=casual;progress=late|240|One more *go*? / Goals, growth and a best to beat.|SNAP-T results goals [1-3] growth=
-# D10: the lesson's Duo wording. Duo run 40603497021 logged step 2 as "tap to snap!" on the Duo: eyeball D10's hint.
-D10-first-bite|screen=lesson;lessonStep=6|8|Learn it in one *First Bite* / A short lesson on your first go.|SNAP-T lesson step 6
+# D10 (R8): the First Bite is retired; Levels 1–5 teach. On the Duo the intro card says "Close the phone to start".
+D10-first-bite|screen=levelIntro;level=3|8|30 *levels* to master / Then the endless bog.|SNAP-T level intro 3
 
 # reserves (Duo): not captured by default; run them with a filter like '^(D[0-9]|DR)'.
-DR1-closing|screen=play;mode=attract;seed=7;wave=6;closure=14;freezeAfter=12|20|The teeth follow your *hands* / Snap it a little shut. Open again.|SNAP-T trap closure 1[34]
+DR1-closing|screen=play;mode=attract;seed=7;wave=6;closure=60;freezeAfter=12|20|The bugs feel you *close* / Shut it fast or they fly.|SNAP-T trap closure 60
 DR2-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=sting|90|A wasp? *Bzzt!* / Wasps sting: two extra snaps.|SNAP-T event stung .*species=wasp
 
 # R5 reserves (REVIEW-4 #1, #11, #15): the R4 phone frames the panel asked to see at Duo aspect (same args as
@@ -49,14 +49,14 @@ DR2-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=sting|90|A wasp? *Bzz
 # and FLAGGED by design: DR10 (hudLeft=1) and DR12 (the cover display is 1398 x 2034, not a Duo slot size; under a
 # '^(D[0-9]|DR)' filter store-capture.sh will also retry it as wrong-size).
 DR3-home|screen=home;progress=mid|6|Feed the *flytrap* / Spare the bees.|SNAP-T canvas|flat
-DR4-pose|screen=pose|5|Hold it like a *book* / Both halves are the trap.|SNAP-T canvas|flat
-DR5-lesson-2|screen=lesson;lessonStep=2;fold=1|7|Your first *bite* / Wait for it to sip, then snap.|SNAP-T lesson step 2|flat
-DR6-lesson-3|screen=lesson;lessonStep=3;fold=1|7|Then open *again* / Opening resets the trap.|SNAP-T lesson step 3|flat
+DR4-pose|screen=pose|5|The phone is the *trap* / Both halves are its jaws.|SNAP-T canvas|flat
+DR5-lesson-2|screen=play;mode=level;level=1;pilot=casual;fold=1;freezeOn=landed|40|Your first *bite* / Wait for it to sip, then close.|SNAP-T freeze landed|flat
+DR6-lesson-3|screen=chomp;fold=1|60|Shut is a *CHOMP* / The outer screen shows the catch.|SNAP-T chomp card|flat
 DR7-landed|screen=play;seed=7;pilot=expert;freezeOn=landed|30|A fly stops to *sip* / Let it settle in the lobes.|SNAP-T freeze landed|flat
-DR8-snap|screen=play;seed=7;pilot=casual;freezeOn=snap|45|One bite, one *CHOMP* / Snap it a little shut.|SNAP-T event snapped|flat
+DR8-snap|screen=play;seed=7;pilot=casual;freezeOn=snap|45|One bite, one *CHOMP* / Close the phone to bite.|SNAP-T event snapped|flat
 DR9-play|screen=play;seed=7;pilot=casual;freezeAfter=8|16|Bugs land on *both* pages / The fold is the midrib.|SNAP-T input pilot|flat
 DR10-hud-left|screen=play;seed=7;pilot=casual;fold=1;hudLeft=1;freezeAfter=8|16|The score on the *left* / For left-handed holds.|hudLeft=1|flat
 DR11-daily|screen=play;mode=daily;seed=7;progress=mid;pilot=expert;freezeAfter=10|18|Today's *Daily Bog* / Same bugs for everyone.|SNAP-T input pilot|flat
-DR12-cover|screen=cover;ciHinge=0|8|Closed? It *waits* / Open it up to carry on.|SNAP-T|flat
+DR12-cover|screen=chomp;ciHinge=0|60|Closed? It's *eating* / Open to keep feeding.|SNAP-T chomp card|flat
 DR13-results|screen=results;seed=7;progress=mid;pilot=casual|8|How did you *do*? / Best bite, longest chain, bees spared.|SNAP-T run score=|flat
 DR14-chain5|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=chain5;freezeAfter=50|300|Chain bites to *x5* / Clean bites keep the chain going.|SNAP-T event chainUp count=[0-9]+ multiplier=5|flat

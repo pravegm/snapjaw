@@ -1,13 +1,13 @@
 import Foundation
 
-/// The drawn jaws of a touch snap (pure, so it is testable). GAME-DESIGN §9: the teeth sweep in over
-/// `Tuning.touchSnapTime` (0.09 s) and reopen over `reopen` (0.35 s).
+/// The drawn jaws of a touch bite (pure, so it is testable). GAME-DESIGN §9: the teeth sweep in over `close` s and
+/// reopen over `reopen` (0.3 s).
 ///
 /// The close is an ease-in (`depth · u²`): it starts at once and accelerates into the bite, like a real flytrap's
 /// snap-buckling lobes. The reopen is a smoothstep (a slow, soft relaxation). Continuous everywhere.
 enum FeelTouchJaw {
     /// Seconds the lobes take to reopen after the bite.
-    static let reopen = 0.35
+    static let reopen = 0.3
 
     /// Closure in degrees `elapsed` s after the tap: 0 → `depth` over `close` s, then back to 0 over `reopen` s.
     static func closure(elapsed: Double, close: Double, reopen: Double, depth: Double) -> Double {
@@ -24,22 +24,22 @@ enum FeelTouchJaw {
     }
 }
 
-/// The no-hinge fallback (GAME-DESIGN §9): tap anywhere to snap.
+/// The no-hinge fallback (GAME-DESIGN §9; R8, ROUND-8 §1 and founder rule 5: first-class): tap anywhere to bite.
 ///
-/// - A tap while armed starts a bite: the drawn closure sweeps 0 → `Tuning.snapDepth` in `Tuning.touchSnapTime`
-///   (0.09 s) and the snap fires **when the jaws meet** (on the first frame at or after tap + 0.09 s), with
-///   `duration = Tuning.touchSnapTime`. The CHOMP then lands exactly as the teeth close on screen.
-/// - The lobes reopen over 0.35 s, and the trap re-arms by itself `Tuning.touchRearmDelay` (0.45 s) after the tap.
-///   Taps before then are ignored (one bite per arm, like the hinge).
-/// - Never creeping, never too flat, no angle.
-/// - A stale bite (QA-1 #7): if no frame asks until more than `staleSnap` after the jaws met (a tap just before a pause,
+/// - R8: a tap while armed is an INSTANT bite: the snap fires on the first frame at or after the tap, with
+///   `duration = Tuning.touchSnapTime` (0.12 s). Only on touch does the Scene play its own shut animation: the drawn
+///   closure sweeps 0 → `Tuning.snapDepth` over 0.12 s and reopens over `FeelTouchJaw.reopen` (0.3 s).
+/// - The trap re-arms by itself `Tuning.touchRearmDelay` (0.45 s) after the tap (the session's shut: the clock is
+///   frozen until then). Taps before then are ignored (one bite per arm, like the hinge).
+/// - A touch round starts open at once (armed), never waiting for a close. Never creeping, never too flat, no angle.
+/// - A stale bite (QA-1 #7): if no frame asks until more than `staleSnap` after the tap (a tap just before a pause,
 ///   Control Centre or the menu), the bite is dropped and the trap is open and armed again. It never lands later on bugs
-///   that have moved.
+///   that have moved, and no state is ever stuck.
 ///
 /// Everything is computed from the tap's time, so the answer never depends on how often frames ask.
 @MainActor
 final class TouchTrapSource: TrapSource {
-    /// A bite whose contact is older than this (s) when a frame finally asks is dropped.
+    /// A bite whose tap is older than this (s) when a frame finally asks is dropped.
     static let staleSnap = 0.25
 
     /// When the current bite's tap happened (nil: none yet).
@@ -53,14 +53,14 @@ final class TouchTrapSource: TrapSource {
 
     init() {}
 
-    /// True when a tap at `time` would snap.
+    /// True when a tap at `time` would bite.
     func isArmed(at time: TimeInterval) -> Bool {
         guard let tap = tapTime else { return true }
         guard time.isFinite else { return false }
         return time - tap >= Tuning.touchRearmDelay
     }
 
-    /// A tap anywhere on the scene (`CACurrentMediaTime()` clock, like the frames). Snaps if armed.
+    /// A tap anywhere on the scene (`CACurrentMediaTime()` clock, like the frames). Bites if armed.
     func tap(at time: TimeInterval) {
         guard time.isFinite, isArmed(at: time) else { return }
         tapTime = time
@@ -70,21 +70,19 @@ final class TouchTrapSource: TrapSource {
 
     func input(at time: TimeInterval) -> TrapInput {
         guard time.isFinite, let tap = tapTime else { return TrapInput() }
-        let contact = tap + Tuning.touchSnapTime
-        if !delivered && time - contact > Self.staleSnap {
-            // Nobody was playing when the jaws met: forget the bite.
+        if !delivered && time - tap > Self.staleSnap {
+            // Nobody was playing when the tap came: forget the bite.
             staleBites += 1
             reset()
             return TrapInput()
         }
         var snap: SnapTrigger?
-        if !delivered && time >= contact {
+        if !delivered && time >= tap {
             delivered = true
-            snap = SnapTrigger(duration: Tuning.touchSnapTime, time: contact)
+            snap = SnapTrigger(duration: Tuning.touchSnapTime, time: tap)
         }
-        var closure = FeelTouchJaw.closure(elapsed: time - tap, close: Tuning.touchSnapTime,
+        let closure = FeelTouchJaw.closure(elapsed: time - tap, close: Tuning.touchSnapTime,
                                            reopen: FeelTouchJaw.reopen, depth: Tuning.snapDepth)
-        if snap != nil { closure = max(closure, Tuning.snapDepth) }
         return TrapInput(closure: closure, armed: isArmed(at: time), creeping: false, snap: snap, tooFlat: false,
                          angle: nil)
     }

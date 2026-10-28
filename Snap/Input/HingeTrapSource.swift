@@ -1,40 +1,45 @@
 import Foundation
 import QuartzCore
 
-/// The trap on the iPhone Duo (GAME-DESIGN §3): hinge reports in (from `HingeReader`), `TrapInput` out once per frame.
+/// The trap on the iPhone Duo (R8, ROUND-8 §1 with the founder's hinge rules: the lid is the jaw): hinge reports in
+/// (from `HingeReader`, with the hinge status), `TrapInput` out once per frame.
 ///
 /// Pipeline (ARCHITECTURE "Input API"):
-///   raw reports (25–30 Hz while moving, none while still, about ±5° absolute accuracy)
-///   → the snap filter: a One-Euro (minCutoff 1.2 Hz, β 0.5, dCutoff 4 Hz) with a 2° `escape`, so any report more than
-///     2° from the filtered value (every report of a real snap moves 5–8°) passes straight through: **zero added lag**
-///     where it matters, light smoothing for slow creeps and report jitter
-///   → Core's `SnapDetector.ingest(angle:at:)` **per report, with the report's own time** (snap timing uses sample
-///     times, never frame times).
+///   raw reports (25–30 Hz while moving, none while still, about ±5° absolute accuracy, and `DeviceHinge.status`)
+///   → the filter: a One-Euro (minCutoff 1.2 Hz, β 0.5, dCutoff 4 Hz) with a 2° `escape`, so any report more than 2°
+///     from the filtered value (every report of a real close moves 5–20°) passes straight through: **zero added lag**
+///     where it matters, light smoothing for report jitter
+///   → Core's `SnapDetector.ingest(angle:at:status:)` **per report, with the report's own time** (close timing uses
+///     sample times, never frame times).
 ///
-/// The still hinge: the Duo sends nothing while the hand holds still. So that the detector's rest reference (the
+/// The rule (Core's SnapDetector): open = armed at θ ≥ `Tuning.armAngle` (35°); the bite fires once per arm at the SHUT
+/// (θ ≤ `Tuning.shutAngle`, 18°, or the status `.closed` at θ ≤ `Tuning.statusShutAngle`, 25°), its duration the close
+/// time; a partial close never bites; re-armed at ≥ 35°. `startRound(at:)` makes the trap closed until the phone has
+/// been shut once and opened (founder rule 3: every round starts closed).
+///
+/// The still hinge: the Duo sends nothing while the hand holds still. So that the detector's open reference (the
 /// highest θ over the last 0.6 s) never ages out during a still hold, every frame that comes `settleAfter` (50 ms) or
 /// more after the last report feeds the detector the still angle again, at most every `keepAlive` (1/30 s), stamped
 /// with the frame's time. The first of these also *settles* the filter onto the last raw reading (the hand really is
-/// there), so a hand that stops just past 22° still bites, ≤ ~42 ms later, instead of never.
+/// there), so a hand that stops just inside the shut zone still bites.
 ///
-/// Between reports `input(at:)` reports the detector's latest state. The drawn closure is the detector's (truthful:
-/// Core's creep rule reads `closure` too). A display-rate prediction is available for drawing only
-/// (`predictedAngle(at:)`, Swoop's `HingePredictor`); it never feeds the snap rule.
+/// Between reports `input(at:)` reports the detector's latest state. A display-rate prediction is available for drawing
+/// only (`predictedAngle(at:)`, Swoop's `HingePredictor`); it never feeds the rule.
 ///
-/// Creep (QA-1 #5): the detector's creep is reported only when `FeelCreepGuard` agrees (no creep while θ is rising,
-/// within 0.6 s of a re-arm or the first sample, or just after the hinge was too flat). When the guard vetoes it, the
-/// closure is the plain rest-reference closure.
+/// Stale bites (QA-1 #2, #7): a trigger that no frame consumed within `staleSnap` is dropped, so a clap made on Results,
+/// in a menu or while paused never fires on the first frame of the next run. R8: 1.5 s (was 0.25 s), because the shut
+/// is also the moment iOS moves the app to the cover display and frames can stall; `reset`/`startRound` clear it anyway.
 ///
-/// Stale snaps (QA-1 #2, #7): a trigger that no frame consumed within `staleSnap` (0.25 s) is dropped, so a clap made
-/// on Results, in a menu or while paused never fires on the first frame of the next run.
+/// R8: the closing pause is gone (closed is the bite, not a pause), and so is the creep guard (the creep rule is gone).
+/// No pose demands: `tooFlat` is always false.
 ///
-/// The closing pause: `isClosing` is the filtered angle under `Tuning.closingAngle` (50°) for `Tuning.closingDwell`
-/// (0.6 s), clearing above 58°. Never near 90° (a hard snap often reaches 90–100°).
-///
-/// Never use the hinge's `status` (it reads `.closed` at ~85° on hardware); everything here is the angle.
+/// Log lines (`-snapDemo`): `SNAP-T hinge closure <c> armed <0|1> creep <0|1> angle <θ> ref <θ>` (2 Hz),
+/// `SNAP-T hinge snap d=<s> angle <θ>` and `SNAP-T shut d=<s> angle <θ> status <s>` at the bite,
+/// `SNAP-T reopened angle <θ>` at each re-arm after a bite, `SNAP-T round open angle <θ>` when a round's first opening
+/// arms the trap, `SNAP-T hinge stale snap dropped age <s>`.
 @MainActor
 final class HingeTrapSource: TrapSource {
-    /// The snap filter (see the type comment).
+    /// The filter (see the type comment).
     static let snapMinCutoff = 1.2
     static let snapBeta = 0.5
     static let snapDCutoff = 4.0
@@ -46,18 +51,15 @@ final class HingeTrapSource: TrapSource {
     static let keepAlive = 1.0 / 30
     /// `SNAP-T hinge` diagnostic lines: at most one per this many seconds.
     static let logInterval = 0.5
-    /// A snap trigger older than this (s) when a frame finally asks is dropped (nobody was playing).
-    static let staleSnap = 0.25
-    /// No measured snap is shorter than one Duo report interval (it reports every 33–40 ms while moving). A ≥ 22° jump
-    /// inside one report (the simulator's hinge CLI, or a dropped report) interpolates both crossings into one gap and
-    /// would read as a ~10 ms snap that catches everything; it is clamped to this instead (Duo sim run 40603497021).
+    /// A bite older than this (s) when a frame finally asks is dropped (nobody was playing).
+    static let staleSnap = 1.5
+    /// No measured close is shorter than one Duo report interval (it reports every 33–40 ms while moving). A whole close
+    /// inside one report (the simulator's hinge CLI, or a dropped report) is clamped to this instead.
     static let minSnapDuration = 1.0 / 30
 
     private var detector = SnapDetector()
     private var snapFilter = OneEuroSmoother(minCutoff: 1.2, beta: 0.5, dCutoff: 4.0, escape: 2.0)
     private var predictor = HingePredictor()
-    private var gate = FeelClosingGate()
-    private var creepGuard = FeelCreepGuard()
     /// A trigger `ingest` returned that no frame has consumed yet (two reports inside one frame can't lose it).
     private var pendingSnap: SnapTrigger?
     /// The time of the detector's newest sample (real or still).
@@ -67,32 +69,31 @@ final class HingeTrapSource: TrapSource {
     private var lastQuery: TimeInterval?
     private var lastInput = TrapInput()
     private var lastLog: TimeInterval = -Double.infinity
+    /// The detector's arm state after its previous sample (the shut / reopened log lines).
+    private var wasArmed = false
+    private var biteSinceArm = false
+    /// A round was started and its first opening has not armed the trap yet (the `SNAP-T round open` line).
+    private var roundOpenPending = false
 
     /// True once any real hinge sample has arrived (never goes back to false).
     private(set) var hasHinge = false
-    /// The filtered hinge angle (180 = flat), as the snap rule sees it; nil before any sample.
+    /// The filtered hinge angle (180 = flat), as the rule sees it; nil before any sample.
     private(set) var angle: Double?
-    /// The last raw reading and when it arrived (diagnostics).
+    /// The last raw reading, its status, and when it arrived (diagnostics).
     private(set) var lastRawAngle: Double?
+    private(set) var lastStatus: TrapHingeStatus = .unknown
     private(set) var lastSampleTime: TimeInterval?
-    /// Snaps the detector has fired (diagnostics and tests).
+    /// Bites the detector has fired (diagnostics and tests).
     private(set) var snapsFired = 0
-    /// Snaps dropped as stale (diagnostics and tests).
+    /// Bites dropped as stale (diagnostics and tests).
     private(set) var staleSnapsDropped = 0
-    /// Frames where the detector said "creeping" and the creep guard vetoed it (diagnostics and tests).
-    private(set) var creepsVetoed = 0
 
-    /// The clock `isClosing` judges its dwell against (the hinge samples' clock). Tests set their own.
+    /// The clock `reset(at:)` defaults to (the hinge samples' clock). Tests set their own.
     var clock: () -> TimeInterval = { CACurrentMediaTime() }
 
     init() {}
 
-    /// The latest time anything has told us about: the clock, the last frame, the last report.
-    private var now: TimeInterval {
-        max(clock(), lastQuery ?? -Double.infinity, lastSampleTime ?? -Double.infinity)
-    }
-
-    /// The detector's rest reference θ (the highest filtered θ over the last 0.6 s), once there is a hinge.
+    /// The detector's open reference θ (the highest filtered θ over the last 0.6 s), once there is a hinge.
     var reference: Double? {
         guard hasHinge else { return nil }
         let ref = detector.reference
@@ -104,20 +105,21 @@ final class HingeTrapSource: TrapSource {
         hasHinge ? detector.armed : true
     }
 
-    /// True while the phone is closing: the filtered angle stayed under 50° for 0.6 s (it clears above 58°). While
-    /// frames run it is judged on the frames; while they don't (the game paused) on the reports. The dwell matures
-    /// with the clock even when no frame or report arrives.
-    var isClosing: Bool {
-        closing(at: now)
+    /// R8: the shut zone right now (θ ≤ 18°, or `.closed` at θ ≤ 25°). False without a hinge.
+    var isShut: Bool {
+        guard hasHinge, let a = angle else { return false }
+        return SnapDetector.isShut(angle: a, status: lastStatus)
     }
 
-    /// `isClosing` judged at `time`.
-    func closing(at time: TimeInterval) -> Bool {
-        hasHinge && gate.isClosing(at: time)
+    /// R8 (founder rule 3): the round is waiting for its first close (`startRound` and no shut since). False without a
+    /// hinge.
+    var waitingForShut: Bool {
+        hasHinge && detector.waitingForShut
     }
 
-    /// One hinge report: degrees (180 = flat), stamped on receipt with `CACurrentMediaTime()`.
-    func ingest(angleDegrees: Double, at time: TimeInterval) {
+    /// One hinge report: degrees (180 = flat), stamped on receipt with `CACurrentMediaTime()`, and the hinge status
+    /// (R8; `.unknown` when the caller has none).
+    func ingest(angleDegrees: Double, at time: TimeInterval, status: TrapHingeStatus = .unknown) {
         guard angleDegrees.isFinite, time.isFinite else { return }
         let raw = FeelMath.clamp(angleDegrees, 0, 180)
         // Never let a sample go back in time (the filters' dt and the detector's windows need order).
@@ -126,20 +128,18 @@ final class HingeTrapSource: TrapSource {
         if let last = lastDetectorTime { stamp = max(stamp, last) }
         hasHinge = true
         lastRawAngle = raw
+        lastStatus = status
         lastSampleTime = stamp
         settled = false
         predictor.sample(raw, at: stamp)
         let filtered = snapFilter.filter(raw, at: stamp)
         feedDetector(filtered, at: stamp)
-        // Keep the closing gate fresh while no frame asks (the pause card, menus). Frames take over at once.
-        let framesLive = stamp - (lastQuery ?? -Double.infinity) <= 0.1
-        if !framesLive { gate.update(angle: filtered, at: stamp) }
     }
 
     /// The trap for the frame at `time` (`CACurrentMediaTime()` clock). No hinge yet: an open, armed trap.
     func input(at time: TimeInterval) -> TrapInput {
         guard hasHinge, time.isFinite else { return TrapInput() }
-        // Asked twice for the same frame (or an older one): the same answer, and a snap is never delivered twice.
+        // Asked twice for the same frame (or an older one): the same answer, and a bite is never delivered twice.
         if let previous = lastQuery, time <= previous {
             var again = lastInput
             again.snap = nil
@@ -158,44 +158,53 @@ final class HingeTrapSource: TrapSource {
                 FeelDemoLog.line(String(format: "SNAP-T hinge stale snap dropped age %.2f", time - snap.time))
             }
         }
-        creepGuard.update(at: time)
-        if input.creeping {
-            if creepGuard.isCreeping(at: time) {
-                // Both agree: the deeper of the rest closure and the guard's (re-seeded) creep depth.
-                input.closure = max(max(0, detector.reference - (angle ?? 0)), creepGuard.depth)
-            } else {
-                input.creeping = false
-                input.closure = max(0, detector.reference - (angle ?? 0))
-                creepsVetoed += 1
-            }
-        }
         if !input.closure.isFinite { input.closure = 0 }
         input.angle = angle
-        if let a = angle { gate.update(angle: a, at: time) }
+        input.tooFlat = false
         lastInput = input
         log(input, at: time)
         return input
     }
 
-    /// The hinge angle predicted at display rate (Swoop's `HingePredictor`): for drawing only (never the snap rule).
+    /// The hinge angle predicted at display rate (Swoop's `HingePredictor`): for drawing only (never the rule).
     func predictedAngle(at time: TimeInterval) -> Double? {
         guard hasHinge, time.isFinite else { return nil }
         return predictor.angle(at: time)
     }
 
-    /// Forget the motion history and start a fresh snap detector from the last reading (keeps `hasHinge` and the
-    /// closing latch). Call it when a paused run resumes and when the app becomes active again, so a stale reference
-    /// can't make the first frames snap or creep. `time` defaults to the clock.
+    /// Forget the motion history and start a fresh detector from the last reading (keeps `hasHinge`). Call it when a
+    /// paused run resumes and when the app becomes active again, so a stale reference can't make the first frames
+    /// bite. The fresh detector is armed at once if the phone is open (≥ 35°). `time` defaults to the clock.
     func reset(at time: TimeInterval? = nil) {
-        detector = SnapDetector()
+        restart(requireShut: false, at: time)
+    }
+
+    /// R8 (founder rule 3): a round's start. Like `reset`, but the trap is closed until the phone has been shut once and
+    /// opened again (`TrapSnapshot.waitingForClose` stays true until then). Without a hinge it changes nothing (a touch
+    /// round starts open at once).
+    func startRound(at time: TimeInterval? = nil) {
+        restart(requireShut: true, at: time)
+    }
+
+    // MARK: Private
+
+    private func restart(requireShut: Bool, at time: TimeInterval?) {
+        // R8: a bite still waiting for its frame survives a `reset` (shutting the Duo moves the app to the cover
+        // display, which can re-activate the scene right after the bite); the stale rule still drops an old one. A new
+        // round never inherits one.
+        let keep: SnapTrigger? = requireShut ? nil : pendingSnap
+        detector = SnapDetector(requireShut: requireShut)
         snapFilter.reset()
         predictor.reset()
-        creepGuard.reset()
         pendingSnap = nil
         lastQuery = nil
         lastDetectorTime = nil
         settled = true
         lastInput = TrapInput()
+        wasArmed = false
+        biteSinceArm = false
+        roundOpenPending = requireShut
+        defer { pendingSnap = keep }
         guard let raw = lastRawAngle else { return }
         var stamp = time ?? clock()
         if !stamp.isFinite { stamp = lastSampleTime ?? 0 }
@@ -203,12 +212,9 @@ final class HingeTrapSource: TrapSource {
         lastSampleTime = stamp
         predictor.sample(raw, at: stamp)
         let filtered = snapFilter.filter(raw, at: stamp)
+        // A fresh detector never fires on its first sample (and `keep` replaces anything pending).
         feedDetector(filtered, at: stamp)
-        // A fresh detector never fires on its first sample; make sure nothing stale leaks out regardless.
-        pendingSnap = nil
     }
-
-    // MARK: Private
 
     /// A trigger with a finite duration of at least `minSnapDuration`.
     static func sane(_ trigger: SnapTrigger) -> SnapTrigger {
@@ -222,15 +228,39 @@ final class HingeTrapSource: TrapSource {
     private func feedDetector(_ value: Double, at time: Double) {
         angle = value
         lastDetectorTime = time
-        let fired = detector.ingest(angle: value, at: time)
-        creepGuard.sample(value, at: time, armed: detector.armed)
+        let fired = detector.ingest(angle: value, at: time, status: lastStatus)
         if let found = fired {
             let trigger = Self.sane(found)
             pendingSnap = trigger
             snapsFired += 1
+            biteSinceArm = true
             if FeelDemoLog.isEnabled {
                 FeelDemoLog.line(String(format: "SNAP-T hinge snap d=%.3f angle %.1f", trigger.duration, value))
+                FeelDemoLog.line(String(format: "SNAP-T shut d=%.3f angle %.1f status ", trigger.duration, value)
+                                 + Self.name(lastStatus))
             }
+        }
+        let nowArmed = detector.armed
+        if nowArmed && !wasArmed && FeelDemoLog.isEnabled {
+            if biteSinceArm {
+                FeelDemoLog.line(String(format: "SNAP-T reopened angle %.1f", value))
+            } else if roundOpenPending {
+                FeelDemoLog.line(String(format: "SNAP-T round open angle %.1f", value))
+            }
+        }
+        if nowArmed && !wasArmed {
+            biteSinceArm = false
+            roundOpenPending = false
+        }
+        wasArmed = nowArmed
+    }
+
+    private static func name(_ s: TrapHingeStatus) -> String {
+        switch s {
+        case .closed: return "closed"
+        case .partiallyOpen: return "partiallyOpen"
+        case .fullyOpen: return "fullyOpen"
+        case .unknown: return "unknown"
         }
     }
 
