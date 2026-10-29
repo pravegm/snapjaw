@@ -88,7 +88,9 @@ enum LevelWords {
     /// phone; "shut" reads as a demand for a full slam, "close" is the founder's word). Longest first. An empty phone
     /// form drops the phrase (speed is the Duo's skill: a tap is always quick).
     static let controlPhrases: [(core: String, duo: String, phone: String)] = [
-        ("Shut the phone on the fly", "Close the phone on the fly", "Tap when the fly lands"),
+        // R9: Core's Level 1 goal is input-neutral ("Catch the fly"); the first level names the control.
+        ("Catch the fly", "Close the phone on the fly", "Tap when the fly lands"),
+        ("Shut the phone on the fly","Close the phone on the fly", "Tap when the fly lands"),
         ("Close the phone on the fly", "Close the phone on the fly", "Tap when the fly lands"),
         (". Shut it faster", ". Close it faster", ". Snap sooner"),
         (". Shut it fast", ". Close it fast", ""),

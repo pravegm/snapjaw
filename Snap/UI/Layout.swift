@@ -358,7 +358,8 @@ struct HUDLayout: Equatable {
     var numeralLabeled = false
     /// R7 (#13, SCORE-R6: no SNAPS label on the 6.3" or the Duo): where R5's numeral sits on the row, "SNAPS" goes here
     /// (over the numeral at the upper row's height when that clears the cilia, else over the rows at the outer edge,
-    /// the chain chip moved up for it). Nil with the labelled block (its caption is under the digits).
+    /// the chain chip moved up for it). Nil with the labelled block (its caption is under the digits). R9: or, where
+    /// neither clears the cilia, the numeral over the rows' outer end with "SNAPS" beside or over it (`rowNumeral`).
     var snapsLabel: CGRect?
     /// The glyph's width (its height is `glyphAspect` of that).
     var glyph: CGFloat
@@ -383,6 +384,8 @@ struct HUDLayout: Equatable {
     static let snapColumns = 7
     static let snapGap: CGFloat = 3
     static let snapRowGap: CGFloat = 5
+    /// R9: the row gaps tried, in order, when the rows still touch the cilia at `glyphMin`.
+    static let snapRowGapTight: [CGFloat] = [3, 2]
     /// Height over width: the Scene's snap glyph is drawn 30 × 22 (`TrapArt.snapGlyph`).
     static let glyphAspect: CGFloat = 22.0 / 30.0
     /// R4 (Scene R4 #15): 24 pt on the Duo draws the full mini closed trap (smaller ones are the simple pod). R7 (#13,
@@ -504,25 +507,32 @@ struct HUDLayout: Equatable {
         // shrink (rarely) until every row clears the cilia.
         let rows = max((slotCount + snapColumns - 1) / snapColumns, 1)
         let bottomY = c.size.height - max(c.insets.bottom, 0) - (fold ? 10 : 4)
-        /// `numeralOnRow`: R5's lower row also holds the numeral, on its inner side.
-        func rowRects(_ g: CGFloat, numeralOnRow: Bool) -> [CGRect] {
+        /// `numeralOnRow`: R5's lower row also holds the numeral, on its inner side. `rowGap`: between the rows.
+        func rowRects(_ g: CGFloat, numeralOnRow: Bool, rowGap: CGFloat = HUDLayout.snapRowGap) -> [CGRect] {
             let gh = g * glyphAspect
             var out: [CGRect] = []
             for r in 0..<rows {
                 let fromBottom = CGFloat(rows - 1 - r)
-                let y = bottomY - gh - fromBottom * (gh + snapRowGap)
+                let y = bottomY - gh - fromBottom * (gh + rowGap)
                 let w = rowsWidth(glyph: g) + (numeralOnRow && r == rows - 1 ? snapNumeralWRow + 4 : 0)
                 out.append(box(textOuter, y, w, gh))
             }
             return out
         }
-        /// The glyph size (shrunk only if a row would touch the cilia) and its rows.
+        /// The glyph size (shrunk only if a row would touch the cilia) and its rows. R9: still touching at `glyphMin`
+        /// (the Duo with a home-bar inset), the rows close up (`snapRowGapTight`), the upper one dropping off the cilia.
         func fitRows(numeralOnRow: Bool) -> (glyph: CGFloat, rects: [CGRect]) {
+            func misfit(_ rs: [CGRect]) -> Bool {
+                rs.contains(where: { room(textOuter, $0.minY, $0.height) < $0.width })
+            }
             var g: CGFloat = glyphCap
             var rs = rowRects(g, numeralOnRow: numeralOnRow)
-            while g > glyphMin && rs.contains(where: { room(textOuter, $0.minY, $0.height) < $0.width }) {
+            while g > glyphMin && misfit(rs) {
                 g -= 1
                 rs = rowRects(g, numeralOnRow: numeralOnRow)
+            }
+            for gap in snapRowGapTight where misfit(rs) {
+                rs = rowRects(g, numeralOnRow: numeralOnRow, rowGap: gap)
             }
             return (g, rs)
         }
@@ -570,53 +580,16 @@ struct HUDLayout: Equatable {
             numeralSize = compact ? numeralPhone : numeralDuo
             labeled = true
         } else {
-            let five = fitRows(numeralOnRow: true)
-            glyph = five.glyph
-            rects = five.rects
-            let row = five.rects.last ?? box(textOuter, bottomY - 14, 200, 14)
             numeralSize = compact ? numeralRowPhone : numeralRowDuo
-            // R9: the box is as tall as the digits draw (never shorter than R5's row-high box), so with small glyphs
-            // the numeral stands up beside both rows instead of spilling out of a box one row high.
-            let nh = max(numeralHeight(glyph: five.glyph), numeralInkHeight(size: numeralSize))
-            numeral = CGRect(x: right ? row.minX : row.maxX - snapNumeralWRow, y: min(row.midY - nh / 2, bottomY - nh),
-                             width: snapNumeralWRow, height: nh)
-            let topRow = five.rects.first ?? row
-            var chainY = topRow.minY - 8 - chainH
-            // R7 (#13): "SNAPS" over the numeral, at the upper row's height (the upper row is shorter: the numeral
-            // has no glyphs above it), where that clears the cilia; else over the rows at the outer edge, with the
-            // chain chip moved up for it, if the chip still has room there; else whichever of the two has more room.
-            // R9: never lower than the numeral's own top (a tall numeral pushes it up).
-            let lh = rowLabelHeight
-            let overNumeral = CGRect(x: right ? numeral.maxX - rowLabelWidth : numeral.minX,
-                                     y: min(topRow.maxY, numeral.minY - rowLabelGap) - lh, width: rowLabelWidth,
-                                     height: lh)
-            let reachNeeded = right ? textOuter - overNumeral.minX : overNumeral.maxX - textOuter
-            let overRows = box(textOuter, topRow.minY - 3 - lh, rowLabelWidth, lh)
-            let movedChainY = overRows.minY - rowLabelChainGap - chainH
-            let numeralRoom = room(textOuter, overNumeral.minY, overNumeral.height) - reachNeeded
-            let rowsRoom = room(textOuter, overRows.minY, overRows.height) - rowLabelWidth
-            if numeralRoom >= 0 {
-                rowLabel = overNumeral
-            } else if rowsRoom >= 0
-                        && room(textOuter, movedChainY, chainH) >= min(room(textOuter, chainY, chainH), fullW)
-                        && room(textOuter, movedChainY, chainH) >= shortW {
-                rowLabel = overRows
-                chainY = movedChainY
-            } else if rowsRoom > numeralRoom && room(textOuter, movedChainY, chainH) >= shortW {
-                rowLabel = overRows
-                chainY = movedChainY
-            } else {
-                rowLabel = overNumeral
-            }
-            // R9: the chip stays above the label wherever the label went (a tall numeral lifts "SNAPS" up to it).
-            if let r = rowLabel {
-                let chip = box(textOuter, chainY, fullW, chainH)
-                if chip.maxX > r.minX && chip.minX < r.maxX && chip.maxY + rowLabelChainGap > r.minY {
-                    chainY = r.minY - rowLabelChainGap - chainH
-                }
-            }
-            chainCompact = room(textOuter, chainY, chainH) < fullW
-            chain = box(textOuter, chainY, chainCompact ? shortW : fullW, chainH)
+            let pick = rowNumeral(six: six, five: fitRows(numeralOnRow: true), numeralSize: numeralSize,
+                                  outline: outline, right: right, textOuter: textOuter, bottomY: bottomY,
+                                  chainH: chainH, fullW: fullW, shortW: shortW, box: box, room: room)
+            glyph = pick.glyph
+            rects = pick.rects
+            numeral = pick.numeral
+            rowLabel = pick.label
+            chain = pick.chain
+            chainCompact = pick.chainCompact
             labeled = false
         }
         let lower = rects.last ?? box(textOuter, bottomY - 14, 200, 14)
@@ -647,6 +620,98 @@ struct HUDLayout: Equatable {
                          snapsLabel: rowLabel, glyph: glyph, hint: hint, lessonHint: lessonHint,
                          lesson: lesson, card: card, tired: tired, snapRows: rows, trailing: right,
                          snapsTrailing: right, chainTrailing: right, columns: snapColumns)
+    }
+
+    /// R9: one way to set R5's numeral (no room for the labelled block) with its "SNAPS" caption, and the chain chip.
+    private struct RowNumeral {
+        var glyph: CGFloat
+        var rects: [CGRect]
+        var numeral: CGRect
+        var label: CGRect
+        var chain: CGRect
+        var chainCompact: Bool
+    }
+
+    /// R9 (Duo frame duo-h2-reopened-150: "SNAPS" sat on the numeral, the numeral ran into the rows): the numeral's box
+    /// is as tall as its digits draw (`numeralInkHeight`), and "SNAPS" and the numeral go in the first of these that
+    /// keeps both ≥ `AppCanvas.ciliaClear` off the cilia (the chip's clearing too, if any does):
+    /// - A (R5/R7): the numeral on the lower row's inner side, "SNAPS" over it or over the rows' outer end (R7's
+    ///   order: the 6.3" iPhone keeps its look);
+    /// - B: the numeral over the rows' outer end, "SNAPS" on its inner side (the Duo with a home-bar inset);
+    /// - C: the numeral over the rows' outer end, "SNAPS" over it;
+    /// else the one keeping both furthest off. The chip goes over them, lifted clear of "SNAPS". Pure; tested.
+    private static func rowNumeral(six: (glyph: CGFloat, rects: [CGRect]), five: (glyph: CGFloat, rects: [CGRect]),
+                                   numeralSize: CGFloat, outline: [CGPoint], right: Bool, textOuter: CGFloat,
+                                   bottomY: CGFloat, chainH: CGFloat, fullW: CGFloat, shortW: CGFloat,
+                                   box: (CGFloat, CGFloat, CGFloat, CGFloat) -> CGRect,
+                                   room: (CGFloat, CGFloat, CGFloat) -> CGFloat) -> RowNumeral {
+        let ink = numeralInkHeight(size: numeralSize)
+        let lh = rowLabelHeight
+        let lw = rowLabelWidth
+        func clearOf(_ r: CGRect) -> CGFloat { AppCanvas.clearance(r, from: outline) }
+        func clears(_ r: CGRect) -> Bool { clearOf(r) >= AppCanvas.ciliaClear }
+        /// The chip at `y` ("Chain ×2" where it has room, else "×2"), lifted over `label` if it would crowd it.
+        func chip(_ y: CGFloat, over label: CGRect) -> (rect: CGRect, compact: Bool) {
+            func at(_ top: CGFloat) -> (rect: CGRect, compact: Bool) {
+                let short = room(textOuter, top, chainH) < fullW
+                return (box(textOuter, top, short ? shortW : fullW, chainH), short)
+            }
+            let first = at(y)
+            let r = first.rect
+            if r.maxX > label.minX && r.minX < label.maxX && r.maxY + rowLabelChainGap > label.minY {
+                return at(label.minY - rowLabelChainGap - chainH)
+            }
+            return first
+        }
+        func option(_ g: CGFloat, _ rs: [CGRect], _ numeral: CGRect, _ label: CGRect,
+                    _ chipY: CGFloat) -> RowNumeral {
+            let c = chip(chipY, over: label)
+            return RowNumeral(glyph: g, rects: rs, numeral: numeral, label: label, chain: c.rect,
+                              chainCompact: c.compact)
+        }
+        var options: [RowNumeral] = []
+
+        // A: on the lower row's inner side, centred where R5's row-high box was (never lower than the rows' foot).
+        let row = five.rects.last ?? box(textOuter, bottomY - 14, 200, 14)
+        let topRow = five.rects.first ?? row
+        let rowBoxH = numeralHeight(glyph: five.glyph)
+        let onRowH = max(rowBoxH, ink)
+        let onRowMid = min(row.midY, bottomY - rowBoxH / 2)
+        let onRow = CGRect(x: right ? row.minX : row.maxX - snapNumeralWRow, y: onRowMid - onRowH / 2,
+                           width: snapNumeralWRow, height: onRowH)
+        let chainY = topRow.minY - 8 - chainH
+        // R7 (#13): "SNAPS" over the numeral at the upper row's height (R9: never lower than the numeral's top), where
+        // that has room; else over the rows at the outer edge, with the chain chip moved up for it.
+        let overNumeral = CGRect(x: right ? onRow.maxX - lw : onRow.minX,
+                                 y: min(topRow.maxY, onRow.minY - rowLabelGap) - lh, width: lw, height: lh)
+        let reachNeeded = right ? textOuter - overNumeral.minX : overNumeral.maxX - textOuter
+        let overRows = box(textOuter, topRow.minY - 3 - lh, lw, lh)
+        let movedChainY = overRows.minY - rowLabelChainGap - chainH
+        let roomOverNumeral = room(textOuter, overNumeral.minY, lh) >= reachNeeded
+        let movedRoom = room(textOuter, movedChainY, chainH)
+        let roomOverRows = movedRoom >= min(room(textOuter, chainY, chainH), fullW) && movedRoom >= shortW
+        let a1 = option(five.glyph, five.rects, onRow, overNumeral, chainY)
+        let a2 = option(five.glyph, five.rects, onRow, overRows, movedChainY)
+        let rowsFirst = !roomOverNumeral && (roomOverRows || clears(overRows))
+        options += rowsFirst ? [a2, a1] : [a1, a2]
+
+        // B and C: over the rows' outer end, "SNAPS" beside it (inner side, feet level) or over it.
+        let overEndH = max(numeralHeight(glyph: six.glyph), ink)
+        let rowsTop = six.rects.first?.minY ?? bottomY
+        let overEnd = box(textOuter, rowsTop - 3 - overEndH, snapNumeralWRow, overEndH)
+        let besideLabel = CGRect(x: right ? overEnd.minX - 4 - lw : overEnd.maxX + 4, y: overEnd.maxY - lh,
+                                 width: lw, height: lh)
+        let aboveLabel = box(textOuter, overEnd.minY - rowLabelGap - lh, lw, lh)
+        options.append(option(six.glyph, six.rects, overEnd, besideLabel, overEnd.minY - 8 - chainH))
+        options.append(option(six.glyph, six.rects, overEnd, aboveLabel, aboveLabel.minY - 8 - chainH))
+
+        func fits(_ o: RowNumeral) -> Bool { clears(o.numeral) && clears(o.label) }
+        func worst(_ o: RowNumeral) -> CGFloat { min(clearOf(o.numeral), clearOf(o.label)) }
+        if let o = options.first(where: { fits($0) && clears($0.chain) }) { return o }
+        if let o = options.first(where: { fits($0) }) { return o }
+        var best = options[0]
+        for o in options.dropFirst() where worst(o) > worst(best) { best = o }
+        return best
     }
 
     /// R8 portrait (the Duo held like a laptop; the scene turned a quarter, so its four corners are the screen's, each
