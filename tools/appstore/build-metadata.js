@@ -35,10 +35,10 @@ const site = 'https://pravegm.github.io/snapjaw/';
 for (const u of [site, site + 'support.html', site + 'privacy.html']) need(md, '`' + u + '`', 'metadata.md §9');
 need(md, '**United Kingdom, £1.99**', 'metadata.md §9');
 need(md, '**except China mainland and Vietnam**', 'metadata.md §9');
-need(md, '**Manually release this version**', 'metadata.md §9');
+need(md, '**Automatically release this version after approval**', 'metadata.md §9');
 const copyrightLine = (md.match(/^\| Copyright \| `([^`]+)` \|$/m) || [])[1];
 if (!copyrightLine) problems.push('Copyright row not found');
-const RELEASE = { type: 'MANUAL', earliestReleaseDate: null };
+const RELEASE = { type: 'AFTER_APPROVAL', earliestReleaseDate: null };
 const LAUNCH = '2026-12-08T08:00:00Z';
 
 const rn = rd('docs/appstore/review-notes.md');
@@ -151,7 +151,7 @@ const meta = {
     ageRatingOverrideV2: 'NONE', koreaAgeRatingOverride: 'NONE'
   },
   review: { notes, demoAccountRequired: false, contact: { firstName: null, lastName: null, phone: null, email: null } },
-  release: { _comment: 'metadata.md §9 and §12: manual release; the founder presses Release This Version on Tue 8 Dec 2026 at about 08:00 UK (runbook §7). The tool never releases or submits.', ...RELEASE },
+  release: { _comment: 'metadata.md §9 and §12: release on approval (the founder chose this on 29 Oct, after submitting 1.0 with build 3; it was manual for Tue 8 Dec). The tool never releases or submits.', ...RELEASE },
   price: { baseTerritory: 'GBR', customerPrice: '1.99' },
   availability: { _comment: 'metadata.md §9: every territory except China mainland and Vietnam (both need a local game licence; Brim, Swoop and Hush exclude both). Mac and Vision Pro availability has no public API: the tool prints the clicks.', excludedTerritories: ['CHN', 'VNM'], availableInNewTerritories: true },
   achievements,

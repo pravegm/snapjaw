@@ -239,7 +239,7 @@ Why each risky item is None:
 | Price | Base country **United Kingdom, £1.99**; Apple equalises every other storefront (check the US shows **$1.99**). No launch discount |
 | Availability | Every country or region **except China mainland and Vietnam** (paid games there need a government game licence) |
 | Pre-order | **No** |
-| Release | **Manually release this version**, pressed by the founder on **Tue 8 Dec 2026 at about 08:00 UK** (§12). If the founder would rather release on approval, change `release` in `build-metadata.js` to `AFTER_APPROVAL` and say so in the runbook |
+| Release | **Automatically release this version after approval** (the founder's choice on 29 Oct, after submitting 1.0 with build 3; §12). It was manual for Tue 8 Dec 2026 |
 | Family Sharing | **On** (permanent once on) |
 | Small Business Program | Account-level; already enrolled for Squish (just confirm it shows Active) |
 | Copyright | `© 2026 pravegm` |
@@ -296,6 +296,8 @@ Why each risky item is None:
 | 4 | App / Core | The R8 CI run's `screen=levelResults;level=1;pilot=perfect` ended `stars=0 passed=0` (and level 4 too); app-R9 says the demo pilot was at fault and is fixed: confirm on the next CI run. Not a store frame tonight, but App Review will play Level 1 first (`design/notes/store-R9.md`) | Level 1 must be passable on a phone by a tap |
 
 ## 12. Launch date
+
+**29 Oct update: on approval.** 1.0 (build 3) was submitted on 29 Oct with release on approval, by the founder's choice, so Snapjaw goes live when App Review approves it (expected about 30 Oct – 1 Nov, clear of Brim's and Hush's weeks). If a rejection pushes a re-submit's approval into 17–23 Nov or 1–7 Dec, set Version Release to manual before re-submitting. The featuring nomination still says Tue 8 Dec: update its date in App Store Connect once the real launch day is known. The original plan follows.
 
 **Tue 8 Dec 2026, about 08:00 UK, released by the founder (manual release).** Swoop is live, Brim launches Tue 17 Nov and Hush Tue 1 Dec, so Snapjaw takes the next free week. Submitting now (late Oct) leaves time for review and a re-submit before 8 Dec; with manual release, an approved 1.0 simply waits. **Fallback: Tue 12 Jan 2027.** If the founder would rather release on approval, the only rule is that it must not go live in Brim's (17–23 Nov) or Hush's (1–7 Dec) week.
 
