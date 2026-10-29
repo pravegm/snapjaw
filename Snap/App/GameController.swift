@@ -276,7 +276,10 @@ final class GameController: ObservableObject, SceneDriver {
             return (session.snapshot, [])
         }
         refreshIntro(session.snapshot)
-        let blocked = headless ? (isMenuOpen || pauseReasons.contains(.intro))
+        // R9: a frame on the outer display steps like a hinge report, so the bite at the shut is never dropped.
+        let hingeRules = headless || AppRules.stepsLikeHinge(coverPose: pose == .cover,
+                                                             liveHingeRun: input == .hinge && isLiveRun)
+        let blocked = hingeRules ? (isMenuOpen || pauseReasons.contains(.intro))
                                : (isPaused && !stepsThroughPause(session.snapshot.phase))
         if blocked {
             // No stepping. The hinge keeps its own state; a snap made while paused is dropped, never played later.

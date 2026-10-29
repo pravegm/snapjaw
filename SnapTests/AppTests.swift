@@ -333,6 +333,14 @@ struct PoseRuleTests {
         #expect(!AppRules.stepsFromHinge(sinceSceneFrame: .nan, liveHingeRun: true, menuOpen: false))
     }
 
+    /// R9 (Duo verify, 29 Oct): a scene frame on the outer display of a live hinge round steps like a hinge report (the
+    /// bite at the shut is never dropped as paused); on the inner display, or off a hinge run, the pauses hold.
+    @Test func aFrameOnTheOuterDisplayStepsLikeTheHinge() {
+        #expect(AppRules.stepsLikeHinge(coverPose: true, liveHingeRun: true))
+        #expect(!AppRules.stepsLikeHinge(coverPose: false, liveHingeRun: true))
+        #expect(!AppRules.stepsLikeHinge(coverPose: true, liveHingeRun: false))
+    }
+
     @Test func stepClamp() {
         #expect(AppRules.clampStep(1.0) == AppRules.maxStep)
         #expect(AppRules.clampStep(-1) == 0)

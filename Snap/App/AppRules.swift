@@ -112,6 +112,14 @@ enum AppRules {
         return sinceSceneFrame >= sceneFrameGap
     }
 
+    /// R9 (Duo verify, 29 Oct): a scene frame drawn while the outer display shows a live hinge round steps by the
+    /// hinge's rules (it ignores the pose and background pauses, never the menu or the intro). iOS moves the app to the
+    /// outer display before the shut report arrives, and a scene that still draws there (CI's demos always render)
+    /// dropped the bite as "made while paused": a close that never bit. Pure; tested.
+    static func stepsLikeHinge(coverPose: Bool, liveHingeRun: Bool) -> Bool {
+        coverPose && liveHingeRun
+    }
+
     // MARK: Words
 
     /// One short line, ≤ 4 words (UI owns the words; Core picks the hint). `touch`: no hinge, so the bend/creep/open
