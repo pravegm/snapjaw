@@ -32,14 +32,14 @@
 # ---- iPhone Duo inner display (2853 x 2007): ten frames -------------------------------------------------------------
 D01-book-hero|screen=play;seed=7;wave=6;pilot=perfect;freezeOn=crowd;ciHinge=140|60|Your Duo is a *flytrap* / Open phone, open trap. Close it to bite.|SNAP-T freeze crowd|book
 D02-chomp|screen=chomp;chomp=catch|60|Close the phone. *CHOMP!* / The outer screen shows your catch.|SNAP-T chomp card catchBite caught=
-D03-feast|screen=play;mode=feed;pilot=expert;progress=late;freezeOn=bigFeast|240|Wait for a crowd. *FEAST!* / A slow close? The flies escape.|SNAP-T event feast count=[5-9] snapsBack=2
+D03-feast|screen=play;seed=7;wave=6;pilot=perfect;progress=late;freezeOn=bigFeast|300|Wait for a crowd. *FEAST!* / A slow close? The flies escape.|SNAP-T event feast count=[5-9] snapsBack=2
 D04-bee|screen=play;seed=7;wave=15;pilot=perfect;freezeOn=bee|60|Never eat a *bee* / Bees cost snaps. Wait them out.|SNAP-T freeze bee
 D05-levels|screen=levels;progress=late|8|30 *levels* to master / Morning Bog, Dusk and Night. Three stars each.|SNAP-T screen levels
 D06-night|screen=play;seed=7;wave=24;pilot=expert;freezeOn=landed|60|Fireflies light the *night* / Endless runs from morning to night.|SNAP-T freeze landed
 D07-garden|screen=garden;progress=late|8|Grow *8 flytraps* / From Red Dragon to B52, and one of gold.|SNAP-T screen garden
 D08-bug-book|screen=book;progress=late|6|Fill the *Bug Book* / 16 species, each with a joke.|SNAP-T screen book
-D09-zen|screen=play;mode=zen;pilot=casual;progress=late;freezeOn=crowd;freezeAfter=25|60|Or just *relax* / Zen Bog: no rush, no end.|SNAP-T freeze crowd
-D10-goals|screen=home;progress=late|8|Three *goals* at a time / Plus Endless, a Daily Bog and Zen.|SNAP-T canvas
+D09-zen|screen=play;mode=zen;seed=7;pilot=casual;progress=late;freezeOn=landed;freezeAfter=8|60|Or just *relax* / Zen Bog: no rush, no end.|SNAP-T freeze landed
+D10-goals|screen=home;progress=late|16|Three *goals* at a time / Plus Endless, a Daily Bog and Zen.|SNAP-T canvas
 
 # reserves (Duo): not captured by default; run them with a filter like '^(D[0-9]|DR)'.
 DR2-sting|screen=play;seed=7;wave=15;pilot=novice;freezeOn=sting|90|A wasp? *Bzzt!* / Wasps sting: two extra snaps.|SNAP-T event stung .*species=wasp

@@ -45,7 +45,7 @@ P05-night|screen=play;seed=7;wave=24;pilot=expert;freezeOn=landed|60|Fireflies l
 P06-garden|screen=garden;progress=late|8|Grow *8 flytraps* / From Red Dragon to B52, and one of gold.|SNAP-T screen garden
 P07-bug-book|screen=book;progress=late|6|Fill the *Bug Book* / 16 species, each with a joke.|SNAP-T screen book
 P08-zen|screen=play;mode=zen;pilot=casual;progress=late;freezeOn=crowd;freezeAfter=25|60|Or just *relax* / Zen Bog: no rush, no end.|SNAP-T freeze crowd
-P09-goals|screen=home;progress=late|8|Three *goals* at a time / Plus Endless, a Daily Bog and Zen.|SNAP-T canvas
+P09-goals|screen=home;progress=late|16|Three *goals* at a time / Plus Endless, a Daily Bog and Zen.|SNAP-T canvas
 P10-results|screen=results;seed=7;pilot=expert;progress=late|240|One more *go*? / Goals, growth and a best to beat.|SNAP-T results goals [1-3] growth=
 
 # reserves (phone): not captured by default; run them with a filter like '^(P[0-9]|R[0-9])'.
