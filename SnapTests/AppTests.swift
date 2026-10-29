@@ -694,6 +694,30 @@ struct LayoutTests {
         }
     }
 
+    /// R9: the Duo in book pose with insets (a home bar as on the simulator; a cut-out and a home bar): the score
+    /// (narrowed, from the inset's edge) and the snaps (rows, numeral, "SNAPS") are ≥ 8 pt clear of the cilia too.
+    @Test func hudClearsTheCiliaOnTheDuoWithInsets() {
+        let size = CGSize(width: 951, height: 669)
+        let bookInsets = [EdgeInsets(top: 0, leading: 0, bottom: 34, trailing: 0),
+                          EdgeInsets(top: 24, leading: 0, bottom: 20, trailing: 0)]
+        for insets in bookInsets {
+            for left in [false, true] {
+                let c = AppCanvas(size: size, insets: insets,
+                                  layout: ScreenLayout.make(viewSize: size, hasFold: true, hudOnLeft: left))
+                let outline = c.trapOutline()
+                let l = HUDLayout.make(c)
+                for rect in [l.score, l.numeral] + l.snapRowRects + (l.snapsLabel.map { [$0] } ?? []) {
+                    let clear = AppCanvas.clearance(rect, from: outline)
+                    #expect(clear >= AppCanvas.ciliaClear)
+                }
+                // The score stays legible and inside the safe area, the pause button under it.
+                #expect(l.score.width >= HUDLayout.portraitScoreMin - tolerance)
+                #expect(l.score.minY >= insets.top - tolerance)
+                #expect(l.pause.minY >= l.score.maxY)
+            }
+        }
+    }
+
     /// R9 (Duo frame duo-h2-reopened-150: "SNAPS" sat on a 24 pt "12" that ran into the rows): the snaps numeral,
     /// its "SNAPS" label and the glyph rows never overlap one another, and each clears the cilia and the fold, on the
     /// Duo in book pose (with and without insets), the portrait Duo, a 6.3" and a 6.9" iPhone and an iPhone SE.

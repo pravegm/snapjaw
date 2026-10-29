@@ -495,10 +495,17 @@ struct HUDLayout: Equatable {
 
         let back = CGRect(x: right ? outer - pauseSide : outer, y: c.top - 6, width: pauseSide, height: pauseSide)
         // The score: the top outer corner, the widest spot off the cilia. The pause button goes under it.
-        let topY = max(c.insets.top, 0) + (fold ? 6 : 4)
+        // R9: under a top inset the box starts at the inset itself (the number's line keeps ~9 pt clear over its
+        // digits, so they stay inside the safe area) and narrows (the number scales to fit) until it clears the cilia,
+        // to `portraitScoreMin` at most: the Duo's tight top corner.
+        let topY = c.insets.top > 0 ? c.insets.top : (fold ? 6 : 4)
         let scoreH: CGFloat = compact ? 51 : 62
         let scoreMax: CGFloat = compact ? 160 : 190
-        let scoreW = max(min(room(textOuter, topY, scoreH), scoreMax), 90)
+        var scoreW = max(min(room(textOuter, topY, scoreH), scoreMax), 90)
+        while scoreW > portraitScoreMin
+                && AppCanvas.clearance(box(textOuter, topY, scoreW, scoreH), from: outline) < AppCanvas.ciliaClear {
+            scoreW -= 1
+        }
         let score = box(textOuter, topY, scoreW, scoreH)
         let pause = CGRect(x: right ? outer - pauseSide : outer, y: score.maxY + 4, width: pauseSide,
                            height: pauseSide)
